@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../shared/widgets/main_drawer.dart';
@@ -23,29 +25,20 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       true; // Start with a loading state for the permission check itself
 
   // In the FileExplorerScreen class build method...
-  @override
-  Widget build(BuildContext context) {
+@override
+Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('File Explorer'),
-        backgroundColor: Colors.black.withOpacity(
-          0.5,
-        ), // Make appbar translucent
-        elevation: 0,
-      ),
-      drawer: const MainDrawer(),
-      // THIS IS THE NEW PART
-      body: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/images/background.jpg'), // Your image
-            fit: BoxFit.cover,
-          ),
+        appBar: AppBar(
+            title: const Text('Files'),
+            // Make the AppBar flat and match the background for a modern look
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            elevation: 0,
         ),
-        child: _buildBody(),
-      ),
+        drawer: const MainDrawer(),
+        // REMOVED the background image Container. Just call _buildBody() directly.
+        body: _buildBody(),
     );
-  }
+}
 
   @override
   void initState() {
@@ -55,15 +48,19 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
 
   Widget _buildBody() {
     if (_isCheckingPermission) {
-      // Show a loader while we check for permission initially
       return const Center(child: CircularProgressIndicator());
     }
 
     if (_isPermissionGranted) {
-      // If permission is granted, show the actual file explorer view
-      return const _FileExplorerView();
+
+      return BlocProvider(
+        create: (context) => FileExplorerBloc()
+          ..add(LoadDirectory('/storage/emulated/0')), 
+        child: const _FileExplorerView(), 
+      );
+      // -----------------------
     } else {
-      // If permission is denied, show the UI to request it
+      // The permission denied UI doesn't need the BLoC, so it's separate.
       return _buildPermissionDeniedUI();
     }
   }
@@ -118,50 +115,64 @@ class _FileExplorerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (context) =>
-          FileExplorerBloc()..add(LoadDirectory('/storage/emulated/0')),
-      child: BlocBuilder<FileExplorerBloc, FileExplorerState>(
-        builder: (context, state) {
-          if (state is FileExplorerLoading || state is FileExplorerInitial) {
-            return const Center(child: CircularProgressIndicator());
-          }
+    // We need the size of the screen for the liquid background
+    final screenSize = MediaQuery.of(context).size;
 
-          if (state is FileExplorerError) {
-            return Center(child: Text('Error: ${state.message}'));
-          }
+    return BlocBuilder<FileExplorerBloc, FileExplorerState>(
+      builder: (context, state) {
+        if (state is FileExplorerLoading || state is FileExplorerInitial) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-          if (state is FileExplorerLoaded) {
-            if (state.entities.isEmpty) {
-              return const Center(child: Text('This folder is empty.'));
-            }
-            return ListView.builder(
-              itemCount: state.entities.length,
-              // In the _FileExplorerView class build method...
-              // ... inside the ListView.builder
-              itemBuilder: (context, index) {
-                final entity = state.entities[index];
-                // Replace the old ListTile with our new custom widget
-                // In the _FileExplorerView's ListView.builder...
-                return FileListItem(
-                  entity: entity,
-                  onTap: () {
-                    // This onTap is now for both files and folders
-                    if (entity is Directory) {
-                      context.read<FileExplorerBloc>().add(
-                        LoadDirectory(entity.path),
-                      );
-                    } else {
-                      FileOpener.open(context, entity as File);
-                    }
+        if (state is FileExplorerError) {
+          return Center(child: Text('Error: ${state.message}'));
+        }
+
+        if (state is FileExplorerLoaded) {
+          if (state.entities.isEmpty) {
+            return const Center(child: Text('This folder is empty.'));
+          }
+          
+          // Use a Stack to layer the background and the list
+          return 
+              // Layer 2: The scrollable list of frosted glass cards
+              Animate(
+
+                child: ListView.separated(
+                  itemCount: state.entities.length,
+                  itemBuilder: (context, index) {
+                    final entity = state.entities[index];
+
+                    return FileListItem(
+                      entity: entity,
+                      onTap: () {
+                        if (entity is Directory) {
+                          context.read<FileExplorerBloc>().add(LoadDirectory(entity.path));
+                        } else {
+                          FileOpener.open(context, entity as File);
+                        }
+                      },
+                    ).animate().slide(
+      delay: (10 * index).ms, // Staggered delay for each item
+      duration: 400.ms,
+      begin: const Offset(0, 0.5),
+      curve: Curves.easeOutCubic,
+    ).fade(duration: 400.ms, curve: Curves.easeOutCubic); 
                   },
-                );
-              },
-            );
-          }
-          return const Center(child: Text('Something went wrong.'));
-        },
-      ),
+                  // This adds the clean separator line between items
+                  separatorBuilder: (context, index) {
+                    return const Divider(
+                      height: 1,
+
+                      indent: 74, // Indent to align with the text
+                    );
+                  },
+                ),
+              );
+            
+        }
+        return const Center(child: Text('Something went wrong.'));
+      },
     );
   }
 }

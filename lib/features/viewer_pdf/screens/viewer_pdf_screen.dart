@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 
@@ -37,7 +38,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       body: Stack(
         children: <Widget>[
           PDFView(
-            nightMode :true,
+            nightMode: true,
             filePath: widget.pdfFile.path,
             enableSwipe: true,
             swipeHorizontal: false, // For vertical scrolling
@@ -71,8 +72,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           _errorMessage.isNotEmpty
               ? Center(child: Text(_errorMessage))
               : !_isReady
-                  ? const Center(child: CircularProgressIndicator())
-                  : const SizedBox.shrink(),
+              ? const Center(child: CircularProgressIndicator())
+              : const SizedBox.shrink(),
         ],
       ),
     );

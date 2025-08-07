@@ -73,34 +73,55 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
           ),
         ],
       ),
-      body: _controller == null
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                // Simplified toolbar - no sharedConfigurations
-                QuillSimpleToolbar(
-                  controller: _controller!,
-                  config: const QuillSimpleToolbarConfig(),
-                ),
-                const Divider(height: 1, thickness: 1),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    // Simplified editor - no sharedConfigurations
-                    child: QuillEditor(
-                      controller: _controller!,
-                      focusNode: _focusNode,
-                      scrollController: ScrollController(),
-                      config: const QuillEditorConfig(
-                        autoFocus: true,
-                        //readOnly: false,
-                        padding: EdgeInsets.zero,
-                      ),
-                    ),
-                  ),
-                )
-              ],
+      // Inside the TextEditorScreen build method...
+body: _controller == null
+    ? const Center(child: CircularProgressIndicator())
+    : Column(
+        children: [
+          // This makes the toolbar scroll horizontally instead of wrapping
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: QuillSimpleToolbar(
+              controller: _controller!,
+              // We provide a custom config to control the buttons
+              config: const QuillSimpleToolbarConfig(
+                // Show only the buttons we want
+                showBoldButton: true,
+                showItalicButton: true,
+                showUnderLineButton: true,
+                showStrikeThrough: false,
+                showColorButton: false,
+                showBackgroundColorButton: false,
+                showClearFormat: true,
+                showHeaderStyle: true,
+                showListNumbers: true,
+                showListBullets: true,
+                showCodeBlock: false,
+                showQuote: false,
+                showIndent: false,
+                showLink: false,
+                showSearchButton: false,
+              ),
             ),
+          ),
+          const Divider(height: 1, thickness: 1),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: QuillEditor(
+                controller: _controller!,
+                focusNode: _focusNode,
+                scrollController: ScrollController(),
+                config: const QuillEditorConfig(
+                  autoFocus: true,
+                 // readOnly: false,
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+          )
+        ],
+      ),
     );
   }
 }

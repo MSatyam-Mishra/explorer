@@ -7,12 +7,14 @@ import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_quill/flutter_quill.dart'; 
+
+import 'package:flutter_quill/flutter_quill.dart';
 
 
 
 void main() {
 Bloc.observer=const AppBlocObserver();
+ 
 runApp(
   App()
 );

@@ -1,15 +1,19 @@
 import 'dart:io';
+
+import 'package:explorer/features/viewer_epub/screens/epub_viewer_screen.dart';
+import 'package:explorer/features/viewer_rive/screens/rive_viewer_screen.dart';
 import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:open_filex/open_filex.dart';
+
 
 // Import all our viewer screens (we will create the missing ones)
 import '../../features/viewer_3d/screens/viewer_3d_screen.dart';
 import '../../features/viewer_obj/screens/viewer_obj_screen.dart';
 import '../../features/viewer_image/screens/viewer_image_screen.dart';
 import '../../features/viewer_pdf/screens/viewer_pdf_screen.dart';
-// TODO: Add imports for text, epub, and rive viewers when we create them.
+
 
 class FileOpener {
   static void open(BuildContext context, File file) {
@@ -54,6 +58,18 @@ class FileOpener {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => TextEditorScreen(textFile: file)),
+    );
+    break;
+    case '.epub':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => EpubViewerScreen(epubFile: file)),
+        );
+        break;
+     case '.riv':
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => RiveViewerScreen(riveFile: file)),
     );
     break;
       // TODO: Add cases for .txt, .epub, .riv

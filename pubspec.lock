@@ -41,6 +41,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
+  bootstrap_icons:
+    dependency: "direct main"
+    description:
+      name: bootstrap_icons
+      sha256: c3f19c363ceadf5493532108c6db7e3112eef62a371a1b1eb5c67968d95a1aef
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.11.3"
   characters:
     dependency: transitive
     description:
@@ -121,6 +129,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.4.1"
+  equatable:
+    dependency: transitive
+    description:
+      name: equatable
+      sha256: "567c64b3cb4cf82397aac55f4f0cbd3ca20d77c6c03bedbc4ceaddc08904aef7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.7"
   external_path:
     dependency: "direct main"
     description:
@@ -190,6 +206,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  flutter_animate:
+    dependency: "direct main"
+    description:
+      name: flutter_animate
+      sha256: "7befe2d3252728afb77aecaaea1dec88a89d35b9b1d2eea6d04479e8af9117b5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.5.2"
   flutter_bloc:
     dependency: "direct main"
     description:
@@ -206,6 +230,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.0"
+  flutter_epub_viewer:
+    dependency: "direct main"
+    description:
+      name: flutter_epub_viewer
+      sha256: "6aac8f685997629db291f36fa0cc9a98d8a022e4244e8e397530a1319421ecf6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.2"
   flutter_inappwebview:
     dependency: transitive
     description:
@@ -347,6 +379,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.3"
+  flutter_shaders:
+    dependency: transitive
+    description:
+      name: flutter_shaders
+      sha256: "34794acadd8275d971e02df03afee3dee0f98dbfb8c4837082ad0034f612a3e2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.3"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -373,6 +413,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.3.0"
+  graphs:
+    dependency: transitive
+    description:
+      name: graphs
+      sha256: "741bbf84165310a68ff28fe9e727332eef1407342fca52759cb21ad8177bb8d0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.3.2"
   html:
     dependency: transitive
     description:
@@ -405,6 +453,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.20.2"
+  json_annotation:
+    dependency: transitive
+    description:
+      name: json_annotation
+      sha256: "1ce844379ca14835a50d2f019a3099f419082cfdd231cd86a142af94dd5c6bb1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.9.0"
   leak_tracker:
     dependency: transitive
     description:
@@ -437,6 +493,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.1.1"
+  liquid_glass_renderer:
+    dependency: "direct main"
+    description:
+      name: liquid_glass_renderer
+      sha256: "4a4203d720bc565108bd8c0df7d9b4694bfd5d4444654171d36998093e23584c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.1-dev.10"
   markdown:
     dependency: transitive
     description:
@@ -701,6 +765,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.2.2"
+  rive:
+    dependency: "direct main"
+    description:
+      name: rive
+      sha256: "2551a44fa766a7ed3f52aa2b94feda6d18d00edc25dee5f66e72e9b365bb6d6c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.13.20"
+  rive_common:
+    dependency: transitive
+    description:
+      name: rive_common
+      sha256: "2ba42f80d37a4efd0696fb715787c4785f8a13361e8aea9227c50f1e78cf763a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.15"
   shared_preferences:
     dependency: "direct main"
     description:
@@ -996,4 +1076,4 @@ packages:
     version: "1.1.0"
 sdks:
   dart: ">=3.8.1 <4.0.0"
-  flutter: ">=3.29.0"
+  flutter: ">=3.32.4"

@@ -33,6 +33,11 @@ dependencies:
   flutter_quill: ^11.4.2
   flutter_bloc: ^9.1.1
   flutter_3d_controller: ^2.2.0
+  bootstrap_icons: ^1.11.3
+  liquid_glass_renderer: ^0.1.1-dev.10
+  rive: ^0.13.20
+  flutter_animate: ^4.5.2
+  flutter_epub_viewer: ^1.2.2
 
 dev_dependencies:
   flutter_test:

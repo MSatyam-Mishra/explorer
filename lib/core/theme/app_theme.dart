@@ -2,63 +2,72 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Define our custom color palette
-  static const Color _darkPrimary = Color(
-    0xFFE0E0E0,
-  ); // Very light grey for subtle accents
-  static const Color _darkBackground = Color(0xFF121212); // A deep, rich black
-  static const Color _darkSurface = Color(
-    0xFF1E1E1E,
-  ); // A slightly lighter black for cards/surfaces
-  static const Color _darkOnSurface = Color(
-    0xFFE0E0E0,
-  ); // An off-white for text
-
-  static final ThemeData lightTheme = ThemeData(
-    // We'll build this out later
-    useMaterial3: true,
-    brightness: Brightness.light,
+  // Our app's signature gradient. This will be used for both themes.
+  static const Gradient primaryGradient = LinearGradient(
+    colors: [Color(0xFF64B5F6), Color(0xFF2196F3)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
   );
 
+  // --- DARK THEME ---
   static final ThemeData darkTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-
-    // 1. Color Scheme
-    scaffoldBackgroundColor: _darkBackground,
+    scaffoldBackgroundColor: Colors.black, // PURE BLACK background
+    
+    // A solid blue as a fallback primary color
     colorScheme: const ColorScheme.dark(
-      primary: _darkPrimary,
-      surface: _darkSurface,
-      onPrimary: Colors.black,
-      onSurface: _darkOnSurface,
+      primary: Color(0xFF2196F3),
+      background: Colors.black,
+      surface: Color(0xFF1A1A1A), // A very dark grey for subtle surfaces
+      onSurface: Colors.white,
     ),
-    // 2. Text Theme (using Google Fonts)
+
     textTheme: GoogleFonts.poppinsTextTheme(
-      ThemeData.dark().textTheme.apply(bodyColor: _darkOnSurface),
-    ),
-
-    // 3. AppBar Theme
-    appBarTheme: const AppBarTheme(
-      backgroundColor:
-          _darkSurface, // Appbar will be slightly lighter than the background
-      elevation: 0, // No shadow for a flat, modern look
-      foregroundColor: _darkOnSurface,
-    ),
-
-    // 4. Button Themes
-    filledButtonTheme: FilledButtonThemeData(
-      style: ButtonStyle(
-        backgroundColor: WidgetStateProperty.all(
-          _darkSurface.withOpacity(0.8),
-        ), // Slightly transparent dark surface
-        foregroundColor: WidgetStateProperty.all(_darkOnSurface),
-        shape: WidgetStateProperty.all(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        padding: WidgetStateProperty.all(
-          const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-        ),
+      ThemeData.dark().textTheme.apply(
+        bodyColor: Colors.white,
+        displayColor: Colors.white,
       ),
+    ),
+
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.black,
+      elevation: 0,
+    ),
+
+    dividerTheme: DividerThemeData(
+      color: Colors.grey.shade800,
+      thickness: 0.5,
+    ),
+  );
+
+  // --- LIGHT THEME ---
+  static final ThemeData lightTheme = ThemeData(
+    useMaterial3: true,
+    brightness: Brightness.light,
+    scaffoldBackgroundColor: Colors.white, // PURE WHITE background
+
+    colorScheme: const ColorScheme.light(
+      primary: Color(0xFF2196F3),
+      background: Colors.white,
+      surface: Color(0xFFF5F5F5), // A very light grey for subtle surfaces
+      onSurface: Colors.black,
+    ),
+    
+    textTheme: GoogleFonts.poppinsTextTheme(
+      ThemeData.light().textTheme,
+    ),
+
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      iconTheme: IconThemeData(color: Colors.black),
+      titleTextStyle: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.w500),
+    ),
+
+    dividerTheme: DividerThemeData(
+      color: Colors.grey.shade200,
+      thickness: 1,
     ),
   );
 }
