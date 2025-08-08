@@ -113,27 +113,33 @@ Future<void> _loadChapter(int chapterIndex) async {
 </head>
 <body>
   $htmlContent
-  <script>
-    let currentPage = 0;
-    let totalPages = Math.ceil(document.body.scrollWidth / window.innerWidth);
+ <script>
+  let currentPage = 0;
+  let totalPages = Math.ceil(document.body.scrollWidth / window.innerWidth);
 
-    function showPage(page) {
-      if (page < 0) page = 0;
-      if (page >= totalPages) page = totalPages - 1;
-      currentPage = page;
-      window.scrollTo({ left: window.innerWidth * currentPage, behavior: 'smooth' });
+  function showPage(page) {
+    if (page < 0) {
+      window.flutter_inappwebview.callHandler('previousChapter');
+      return;
     }
+    if (page >= totalPages) {
+      window.flutter_inappwebview.callHandler('nextChapter');
+      return;
+    }
+    currentPage = page;
+    window.scrollTo({ left: window.innerWidth * currentPage, behavior: 'smooth' });
+  }
 
-    let startX = 0;
-    document.addEventListener('touchstart', e => startX = e.touches[0].clientX);
-    document.addEventListener('touchend', e => {
-      let deltaX = e.changedTouches[0].clientX - startX;
-      if (Math.abs(deltaX) > 50) {
-        if (deltaX < 0) showPage(currentPage + 1);
-        else showPage(currentPage - 1);
-      }
-    });
-  </script>
+  let startX = 0;
+  document.addEventListener('touchstart', e => startX = e.touches[0].clientX);
+  document.addEventListener('touchend', e => {
+    let deltaX = e.changedTouches[0].clientX - startX;
+    if (Math.abs(deltaX) > 50) {
+      if (deltaX < 0) showPage(currentPage + 1);
+      else showPage(currentPage - 1);
+    }
+  });
+</script>
 </body>
 </html>
 ''';
@@ -345,8 +351,24 @@ Future<void> _loadChapter(int chapterIndex) async {
         ),
       ),
       onWebViewCreated: (controller) {
-        _webViewController = controller;
-      },
+  _webViewController = controller;
+
+  // ✅ Add handlers so HTML can call Flutter
+  _webViewController?.addJavaScriptHandler(
+    handlerName: 'nextChapter',
+    callback: (args) {
+      _nextChapter();
+      return null;
+    },
+  );
+  _webViewController?.addJavaScriptHandler(
+    handlerName: 'previousChapter',
+    callback: (args) {
+      _previousChapter();
+      return null;
+    },
+  );
+},
       onLoadStop: (controller, url) async {
         // ✅ Add swipe gestures for chapter navigation
         await controller.evaluateJavascript(source: '''

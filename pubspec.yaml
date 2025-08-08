@@ -37,6 +37,7 @@ dependencies:
   flutter_animate: ^4.5.2
   epubx: ^4.0.0
   flutter_inappwebview: ^6.1.5
+  archive: ^3.6.1
   
 
 dev_dependencies:

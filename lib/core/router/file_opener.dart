@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:explorer/features/viewer_archive/screens/archive_viewer_screen.dart';
+import 'package:explorer/features/viewer_comic/screens/comic_viewer.dart';
 import 'package:explorer/features/viewer_epub/screens/epub_viewer_screen.dart';
 import 'package:explorer/features/viewer_rive/screens/rive_viewer_screen.dart';
 import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
@@ -72,8 +74,22 @@ class FileOpener {
       MaterialPageRoute(builder: (_) => RiveViewerScreen(riveFile: file)),
     );
     break;
-      // TODO: Add cases for .txt, .epub, .riv
 
+    case '.cbz':
+      case '.cbr':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ComicViewerScreen(comicFile: file)),
+        );
+        break;
+        
+      // TODO: Add cases for .txt, .epub, .riv
+case '.zip':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ArchiveViewerScreen(archiveFile: file)),
+        );
+        break;
       // Hand-off cases for complex/project files
       case '.doc':
       case '.docx':
