@@ -153,11 +153,11 @@ class _FileExplorerView extends StatelessWidget {
                         }
                       },
                     ).animate().slide(
-      delay: (10 * index).ms, // Staggered delay for each item
+      delay: (5 * index).ms, // Staggered delay for each item
       duration: 400.ms,
       begin: const Offset(0, 0.5),
       curve: Curves.easeOutCubic,
-    ).fade(duration: 400.ms, curve: Curves.easeOutCubic); 
+    ).fade(duration: 10.ms, curve: Curves.easeOutCubic); 
                   },
                   // This adds the clean separator line between items
                   separatorBuilder: (context, index) {
