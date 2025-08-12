@@ -4,6 +4,7 @@
 import 'package:explorer/core/app/app_bloc_observer.dart';
 import 'package:explorer/core/theme/app_theme.dart';
 import 'package:explorer/core/theme/theme_cubit.dart';
+import 'package:explorer/features/dashboard/screens/dashboard_screen.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -48,7 +49,7 @@ class App extends StatelessWidget {
             ],
             // -------------------------
 
-            home: const FileExplorerScreen(),
+            home: const DashboardScreen(),
           );
         },
       ),

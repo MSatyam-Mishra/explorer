@@ -8,11 +8,13 @@ import 'gradient_folder_icon.dart';
 class FileListItem extends StatelessWidget {
   final FileSystemEntity entity;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   const FileListItem({
     super.key,
     required this.entity,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -23,6 +25,7 @@ class FileListItem extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         child: Row(

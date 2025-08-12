@@ -38,6 +38,11 @@ dependencies:
   epubx: ^4.0.0
   flutter_inappwebview: ^6.1.5
   archive: ^3.6.1
+  share_plus: ^11.0.0
+  filesize: ^2.0.1
+  intl: ^0.20.2
+  percent_indicator: ^4.2.5
+  disk_space_plus: ^0.2.6
   
 
 dev_dependencies:

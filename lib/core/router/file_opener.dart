@@ -18,9 +18,9 @@ import '../../features/viewer_pdf/screens/viewer_pdf_screen.dart';
 
 
 class FileOpener {
-  static void open(BuildContext context, File file) {
+   static Future<bool?> open(BuildContext context, File file) async{
     final extension = p.extension(file.path).toLowerCase();
-
+ bool? refresh;
     switch (extension) {
       // Image cases
       case '.jpg':
@@ -85,7 +85,7 @@ class FileOpener {
         
       // TODO: Add cases for .txt, .epub, .riv
 case '.zip':
-        Navigator.push(
+         refresh = await Navigator.push<bool>(
           context,
           MaterialPageRoute(builder: (_) => ArchiveViewerScreen(archiveFile: file)),
         );
@@ -104,5 +104,6 @@ case '.zip':
         OpenFilex.open(file.path);
         break;
     }
+     return refresh;
   }
 }
