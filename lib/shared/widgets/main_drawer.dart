@@ -1,8 +1,10 @@
 import 'package:bootstrap_icons/bootstrap_icons.dart';
+import 'package:explorer/core/services/auth_service.dart';
 import 'package:explorer/core/services/directory_services.dart';
 import 'package:explorer/features/category_view/bloc/bloc/screens/category_viewer_screen.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
+import 'package:explorer/features/vault/screens/vault_screen.dart';
 
 import 'package:explorer/shared/widgets/storage_drawer.dart';
 
@@ -90,7 +92,20 @@ class MainDrawer extends StatelessWidget {
       );
     }
   }
-      
+      if (category.name == 'Vault') {
+  final authService = AuthService();
+  final isAuthenticated = await authService.authenticate();
+
+  if (isAuthenticated && context.mounted) {
+    // If authentication succeeds, open the vault
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()));
+  } else {
+    // If it fails, show a message
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Authentication Failed'), backgroundColor: Colors.red),
+    );
+  }
+}
       }
                       );
                     }).toList(),
