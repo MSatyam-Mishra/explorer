@@ -10,3 +10,15 @@ class LoadDirectory extends FileExplorerEvent {
 
   LoadDirectory(this.path);
 }
+
+class ToggleSelectionMode extends FileExplorerEvent {
+  final bool enable;
+  ToggleSelectionMode({required this.enable});
+}
+
+class SelectItem extends FileExplorerEvent {
+  final FileSystemEntity entity;
+  SelectItem(this.entity);
+}
+
+class ClearSelection extends FileExplorerEvent {}

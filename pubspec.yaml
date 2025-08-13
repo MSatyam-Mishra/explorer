@@ -43,6 +43,9 @@ dependencies:
   intl: ^0.20.2
   percent_indicator: ^4.2.5
   disk_space_plus: ^0.2.6
+  photo_manager: ^3.7.1
+  collection: ^1.19.1
+  meta: ^1.16.0
   
 
 dev_dependencies:

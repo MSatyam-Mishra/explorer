@@ -1,27 +1,18 @@
 // FILE PATH: lib/main.dart
 
-
 import 'package:explorer/core/app/app_bloc_observer.dart';
 import 'package:explorer/core/theme/app_theme.dart';
 import 'package:explorer/core/theme/theme_cubit.dart';
-import 'package:explorer/features/dashboard/screens/dashboard_screen.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-
 import 'package:flutter_quill/flutter_quill.dart';
 
-
-
 void main() {
-Bloc.observer=const AppBlocObserver();
- 
-runApp(
-  App()
-);
+  Bloc.observer = const AppBlocObserver();
+
+  runApp(App());
 }
-
-
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -38,18 +29,16 @@ class App extends StatelessWidget {
             darkTheme: AppTheme.darkTheme,
             themeMode: themeMode,
             debugShowCheckedModeBanner: false,
-            
+
             // --- 2. ADD THESE LINES ---
-            supportedLocales: const [
-              Locale('en'),
-            ],
+            supportedLocales: const [Locale('en')],
             localizationsDelegates: [
               //...GlobalMaterialLocalizations.delegates,
               FlutterQuillLocalizations.delegate,
             ],
-            // -------------------------
 
-            home: const DashboardScreen(),
+            // -------------------------
+            home: const FileExplorerScreen(),
           );
         },
       ),

@@ -9,6 +9,39 @@ part 'file_explorer_state.dart';
 class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
   FileExplorerBloc() : super(FileExplorerInitial()) {
     on<LoadDirectory>(_onLoadDirectory);
+
+ on<ToggleSelectionMode>((event, emit) {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        emit(currentState.copyWith(
+          isSelectionMode: event.enable,
+          selectedItems: {}, // Clear selection when toggling mode
+        ));
+      }
+    });
+
+    on<SelectItem>((event, emit) {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        // Create a new, modifiable set from the current selection
+        final newSelectedItems = Set<FileSystemEntity>.from(currentState.selectedItems);
+        if (newSelectedItems.contains(event.entity)) {
+          newSelectedItems.remove(event.entity); // Deselect if already selected
+        } else {
+          newSelectedItems.add(event.entity); // Select if not selected
+        }
+        emit(currentState.copyWith(selectedItems: newSelectedItems));
+      }
+    });
+    
+    on<ClearSelection>((event, emit) {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        emit(currentState.copyWith(selectedItems: {}));
+      }
+    });
+
+
   }
 
   Future<void> _onLoadDirectory(

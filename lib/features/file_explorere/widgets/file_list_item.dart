@@ -6,17 +6,20 @@ import 'file_type_icon.dart';
 import 'gradient_folder_icon.dart';
 
 class FileListItem extends StatelessWidget {
-  final FileSystemEntity entity;
+ final FileSystemEntity entity;
+  final bool isSelectionMode;
+  final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
   const FileListItem({
     super.key,
     required this.entity,
+    required this.isSelectionMode,
+    required this.isSelected,
     required this.onTap,
     required this.onLongPress,
   });
-
   @override
   Widget build(BuildContext context) {
     final title = p.basename(entity.path);
@@ -31,7 +34,7 @@ class FileListItem extends StatelessWidget {
         child: Row(
           children: [
             // Conditionally show the correct icon
-            isDirectory ? const GradientFolderIcon() : FileTypeIcon(filePath: entity.path),
+          isDirectory ? const GradientFolderIcon() : FileTypeIcon(filePath: entity.path),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -57,6 +60,14 @@ class FileListItem extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 16),
+
+            // Checkbox is now at the end, and only visible in selection mode
+            if (isSelectionMode)
+              Checkbox(
+                value: isSelected,
+                onChanged: (val) => onTap(),
+              ),
           ],
         ),
       ),
