@@ -1,26 +1,29 @@
-
+import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:explorer/features/category_view/bloc/bloc/category_bloc.dart';
+
+import 'package:explorer/features/file_explorere/widgets/file_type_icon.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 class CategoryViewerScreen extends StatelessWidget {
-  final RequestType  categoryType;
+  final RequestType categoryType;
   final String title;
+  final String? path;
 
   const CategoryViewerScreen({
     super.key,
     required this.categoryType,
     required this.title,
+    this.path,
   });
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (context) => CategoryBloc()..add(LoadCategoryAssets(categoryType)),
+      create: (context) => CategoryBloc()..add(LoadCategoryAssets(categoryType, path: path)),
       child: Scaffold(
         appBar: AppBar(title: Text(title)),
         body: BlocBuilder<CategoryBloc, CategoryState>(
@@ -42,10 +45,10 @@ class CategoryViewerScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.all(16.0),
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
                         child: Text(
                           DateFormat.yMMMMd().format(date),
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       GridView.builder(
@@ -53,13 +56,21 @@ class CategoryViewerScreen extends StatelessWidget {
                         physics: const NeverScrollableScrollPhysics(),
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 4,
-                          crossAxisSpacing: 4,
-                          mainAxisSpacing: 4,
+                          crossAxisSpacing: 2,
+                          mainAxisSpacing: 2,
                         ),
                         itemCount: assets.length,
                         itemBuilder: (context, assetIndex) {
-                          final asset = assets[assetIndex];
-                          return AssetBytesThumbnail(asset: assets[assetIndex]);
+                          final item = assets[assetIndex];
+
+                          // --- THIS IS THE FIX ---
+                          if (item is AssetEntity) {
+                            return AssetBytesThumbnail(asset: item);
+                          } else if (item is FileSystemEntity) {
+                            return FileTypeIcon(filePath: item.path);
+                          }
+                          return const SizedBox.shrink();
+                          // -----------------------
                         },
                       ),
                     ],
@@ -75,29 +86,22 @@ class CategoryViewerScreen extends StatelessWidget {
   }
 }
 
-// Helper widget for displaying thumbnails efficiently
+// This helper widget for media thumbnails is still correct
 class AssetBytesThumbnail extends StatelessWidget {
   final AssetEntity asset;
   const AssetBytesThumbnail({super.key, required this.asset});
 
   @override
   Widget build(BuildContext context) {
-    // We use a FutureBuilder to asynchronously get the thumbnail data
     return FutureBuilder<Uint8List?>(
       future: asset.thumbnailData,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          // Show a small loader while the thumbnail is loading
           return const Center(child: CircularProgressIndicator(strokeWidth: 2));
         }
-        // If we have data, display it with Image.memory
         if (snapshot.hasData && snapshot.data != null) {
-          return Image.memory(
-            snapshot.data!,
-            fit: BoxFit.cover,
-          );
+          return Image.memory(snapshot.data!, fit: BoxFit.cover);
         }
-        // If there's an error or no data, show an error icon
         return const Icon(Icons.error_outline, color: Colors.redAccent);
       },
     );

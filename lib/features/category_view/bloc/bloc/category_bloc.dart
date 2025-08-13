@@ -15,18 +15,24 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
 
   // Inside CategoryBloc
 
+ // In lib/features/category_view/bloc/category_bloc.dart
+
+// In lib/features/category_view/bloc/category_bloc.dart
+
   Future<void> _onLoadCategoryAssets(
     LoadCategoryAssets event,
     Emitter<CategoryState> emit,
   ) async {
     emit(CategoryLoading());
     try {
-      // --- NEW LOGIC ---
-      if (event.type == RequestType.common) { // We'll use this for regular folders
-        final dir = Directory(event.path!); // A path must be provided
+      // --- THIS IS THE CORRECTED LOGIC FOR FOLDERS ---
+      if (event.type == RequestType.common) {
+        final dir = Directory(event.path!);
         if (await dir.exists()) {
+          // Get a flat list of all FILES recursively
           final files = await dir.list(recursive: true).where((e) => e is File).toList();
           
+          // Sort the files by their modified date
           files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
 
           final groupedFiles = groupBy(
@@ -37,22 +43,26 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
               file.statSync().modified.day,
             ),
           );
-          // Notice this state holds FileSystemEntity now
-          emit(CategoryLoaded(groupedFiles)); 
+          emit(CategoryLoaded(groupedFiles));
         } else {
           emit(CategoryError('Folder not found: ${event.path}'));
         }
-        return;
+        return; // Exit after handling this case
       }
-      // --- END OF NEW LOGIC ---
+      // ---------------------------------------------
 
-      // --- Existing photo_manager logic for media ---
+      // Media logic remains the same
       final List<AssetPathEntity> albums = await PhotoManager.getAssetPathList(type: event.type);
-      // ... (rest of the photo_manager logic is the same)
-      
+      final List<AssetEntity> allAssets = [];
+
+      for (final album in albums) {
+        final assets = await album.getAssetListRange(start: 0, end: await album.assetCountAsync);
+        allAssets.addAll(assets);
+      }
+      allAssets.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
       final groupedAssets = groupBy(
         allAssets,
-        (AssetEntity asset) => DateTime(asset.createDateTime.year, /* ... */),
+        (AssetEntity asset) => DateTime(asset.createDateTime.year, asset.createDateTime.month, asset.createDateTime.day),
       );
 
       emit(CategoryLoaded(groupedAssets));

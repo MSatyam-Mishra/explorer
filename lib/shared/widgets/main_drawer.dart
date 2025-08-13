@@ -1,4 +1,5 @@
 import 'package:bootstrap_icons/bootstrap_icons.dart';
+import 'package:explorer/core/services/directory_services.dart';
 import 'package:explorer/features/category_view/bloc/bloc/screens/category_viewer_screen.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
@@ -71,14 +72,26 @@ class MainDrawer extends StatelessWidget {
             title: category.name,
           ),
         ),
-      );}
-       if (category.name == 'Downloads') {
-      final downloadsDir = await getDownloadsDirectory();
-      if (downloadsDir != null) {
-        context.read<FileExplorerBloc>().add(LoadDirectory(downloadsDir.path));
-      }
+      );
     }
-                        },
+    if (category.name == 'Downloads') {
+      // Use our new smart function here as well
+      final downloadsDir = await DirectoryService.findDownloadsDirectory();
+      if (downloadsDir != null) {
+        Navigator.push(
+          context,
+        MaterialPageRoute(
+          builder: (_) => CategoryViewerScreen(
+            categoryType: RequestType.common,
+            title: 'Downloads',
+            path: downloadsDir.path, 
+          ),
+        ),
+      );
+    }
+  }
+      
+      }
                       );
                     }).toList(),
                   );
