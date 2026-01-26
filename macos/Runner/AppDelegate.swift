@@ -11,3 +11,18 @@ class AppDelegate: FlutterAppDelegate {
     return true
   }
 }
+
+import flutter_inappwebview_macos
+
+extension InAppWebView {
+    @objc public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        
+        if window != nil {
+            print("InAppWebView moved to window, enforcing transparency")
+            self.setValue(false, forKey: "opaque")
+            self.setValue(false, forKey: "drawsBackground")
+            self.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+}

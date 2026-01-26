@@ -161,14 +161,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.11"
-  device_apps:
-    dependency: "direct main"
-    description:
-      name: device_apps
-      sha256: e84dc74d55749993fd671148cc0bd53096e1be0c268fc364285511b1d8a4c19b
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.2.0"
   diff_match_patch:
     dependency: transitive
     description:
@@ -185,6 +177,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.6"
+  docx_file_viewer:
+    dependency: "direct main"
+    description:
+      name: docx_file_viewer
+      sha256: "690bf2b6558f055916c60c94227d6c130d522d32d24954fac0cdabe430123dfd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.7"
   epubx:
     dependency: "direct main"
     description:
@@ -201,6 +201,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.7"
+  excel:
+    dependency: "direct main"
+    description:
+      name: excel
+      sha256: "1a15327dcad260d5db21d1f6e04f04838109b39a2f6a84ea486ceda36e468780"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.6"
   external_path:
     dependency: "direct main"
     description:
@@ -290,10 +298,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_3d_controller
-      sha256: "45a0f21fa5f603af0ac824b75f0dd3bdb45978ece29cf412fcefbf678e02606f"
+      sha256: "7b5bcd3deab4a58798e1b2cef382374a4c210badac1853d9ec680f66bb3030b4"
       url: "https://pub.dev"
     source: hosted
-    version: "2.2.0"
+    version: "2.3.0"
   flutter_animate:
     dependency: "direct main"
     description:
@@ -549,6 +557,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.3.0"
+  installed_apps:
+    dependency: "direct main"
+    description:
+      name: installed_apps
+      sha256: a111e54eb48d84db5680871c25b1d6fbe7d044baf5c262d97d9d18c1b769e196
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   intl:
     dependency: "direct main"
     description:

@@ -6,6 +6,7 @@ import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/vault/screens/vault_screen.dart';
 import 'package:explorer/features/tools/screens/app_manager_screen.dart';
+import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
 
 import 'package:explorer/shared/widgets/storage_drawer.dart';
 
@@ -170,6 +171,25 @@ class MainDrawer extends StatelessWidget {
 
                 // Show a simple loader while categories are being counted
                 return const Center(child: CircularProgressIndicator());
+              },
+            ),
+            const Divider(height: 24),
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                'Tools',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(BootstrapIcons.usb_drive),
+              title: const Text('Bootable USB Creator'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const UsbBootScreen()),
+                );
               },
             ),
           ],

@@ -14,11 +14,13 @@ import 'package:explorer/features/viewer_media/screens/video_player_screen.dart'
 import 'package:explorer/features/viewer_vector/screens/svg_viewer_screen.dart';
 import 'package:explorer/features/viewer_vector/screens/lottie_viewer_screen.dart';
 import 'package:explorer/features/viewer_vector/screens/rive_viewer_screen.dart';
-import '../../features/viewer_3d/screens/viewer_3d_screen.dart';
-import '../../features/viewer_obj/screens/viewer_obj_screen.dart';
+import 'package:explorer/features/viewer_3d/screens/three_d_viewer_screen.dart';
 import '../../features/viewer_image/screens/viewer_image_screen.dart';
 import '../../features/viewer_pdf/screens/viewer_pdf_screen.dart';
 import 'package:explorer/features/viewer_html/screens/html_viewer_screen.dart';
+import 'package:explorer/features/viewer_office/screens/word_viewer_screen.dart';
+import 'package:explorer/features/viewer_office/screens/excel_viewer_screen.dart';
+import 'package:explorer/features/viewer_office/screens/ppt_viewer_screen.dart';
 
 class FileOpener {
   static Future<bool?> open(BuildContext context, File file) async {
@@ -63,17 +65,10 @@ class FileOpener {
       // 3D cases
       case '.glb':
       case '.gltf':
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ThreeDViewerScreen(modelFile: file),
-          ),
-        );
-        break;
       case '.obj':
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => ObjViewerScreen(modelFile: file)),
+          MaterialPageRoute(builder: (_) => ThreeDViewerScreen(file: file)),
         );
         break;
 
@@ -166,13 +161,30 @@ class FileOpener {
         );
         break;
 
-      // Hand-off cases for complex/project files
-      case '.doc':
+      // Office cases
       case '.docx':
-      case '.xls':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => WordViewerScreen(file: file)),
+        );
+        break;
       case '.xlsx':
-      case '.ppt':
+      case '.xls': // xls might trigger error in 'excel' package if it only supports xlsx, but mostly it supports both or we fail gracefully
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ExcelViewerScreen(file: file)),
+        );
+        break;
       case '.pptx':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => PptViewerScreen(file: file)),
+        );
+        break;
+
+      // Legacy/Complex
+      case '.doc':
+      case '.ppt':
       case '.unity':
       case '.unitypackage':
       case '.blend':

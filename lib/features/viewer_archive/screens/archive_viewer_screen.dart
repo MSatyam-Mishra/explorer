@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:rar/rar.dart';
 import 'package:explorer/core/services/archive_service.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:explorer/core/router/file_opener.dart';
 
 class ArchiveViewerScreen extends StatefulWidget {
   final File archiveFile;
@@ -88,6 +90,66 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     } finally {
       if (mounted) {
         setState(() => _isExtracting = false);
+      }
+    }
+  }
+
+  Future<void> _openFile(ArchiveItem item) async {
+    if (!item.isFile) return;
+
+    if (_isRar) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Opening files from RAR not supported yet.'),
+        ),
+      );
+      return;
+    }
+
+    if (item.originalObject == null) return;
+
+    setState(() => _isExtracting = true);
+
+    try {
+      final archiveFile = item.originalObject; // ArchiveFile (dynamic cast)
+
+      final tempDir = await getTemporaryDirectory();
+      final cacheDir = Directory(
+        p.join(tempDir.path, 'explorer_archive_cache'),
+      );
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      final fileName = p.basename(item.name);
+      final outFile = File(p.join(cacheDir.path, fileName));
+
+      // Check if we need to write?
+      // Always write to ensure fresh content or overwrite.
+      if (archiveFile.runtimeType.toString() == 'ArchiveFile' ||
+          archiveFile.toString().contains('ArchiveFile')) {
+        final file = archiveFile;
+        // dynamic dispatch for content.
+        // content can be List<int> or InputFileStream.
+        // If InputFileStream, we need to read it.
+        // The archive package handles this usually, but 'content' property access might be heavy if not decoded?
+        // Since listContents used standard decoder, content should be List<int>.
+        await outFile.writeAsBytes(file.content as List<int>);
+
+        if (mounted) {
+          setState(() => _isExtracting = false);
+          FileOpener.open(context, outFile);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isExtracting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open file: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -210,6 +272,7 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
                       subtitle: _isRar
                           ? null // Size not available for RAR list
                           : Text('${(file.size / 1024).toStringAsFixed(2)} KB'),
+                      onTap: () => _openFile(file),
                       trailing: (isFolder || _isRar)
                           ? null // Disable single extract for RAR or folders
                           : TextButton(

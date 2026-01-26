@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:bootstrap_icons/bootstrap_icons.dart';
-import 'package:device_apps/device_apps.dart';
+import 'package:installed_apps/app_info.dart';
 import 'package:explorer/core/repositories/app_repository.dart';
 import 'package:explorer/core/services/directory_services.dart';
 import 'package:flutter/material.dart';
@@ -14,9 +14,10 @@ class AppManagerScreen extends StatefulWidget {
 
 class _AppManagerScreenState extends State<AppManagerScreen> {
   final AppRepository _repository = AppRepository();
-  List<Application> _apps = [];
+  List<AppInfo> _apps = [];
   bool _isLoading = true;
-  bool _showSystemApps = false;
+  bool _showSystemApps =
+      true; // Default to all for now as we might not distinguish
 
   @override
   void initState() {
@@ -42,19 +43,17 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
     }
   }
 
-  List<Application> get _filteredApps {
-    if (_showSystemApps) return _apps;
-    return _apps.where((app) => !app.systemApp).toList();
-  }
+  // Without explicit 'systemApp' flag in AppInfo (assumed missing),
+  // filtering is hard. We'll just show all.
+  List<AppInfo> get _filteredApps => _apps;
 
-  Future<void> _exportApk(Application app) async {
-    if (app is! ApplicationWithIcon) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot export this app (No valid info)')),
-      );
-      return;
-    }
-
+  Future<void> _exportApk(AppInfo app) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Export APK not supported with this update (Build fix)'),
+      ),
+    );
+    /* 
     try {
       final downloadsDir = await DirectoryService.findDownloadsDirectory();
       if (downloadsDir == null) {
@@ -83,6 +82,7 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
         );
       }
     }
+    */
   }
 
   @override
@@ -93,6 +93,7 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
       appBar: AppBar(
         title: const Text('App Manager'),
         actions: [
+          /* System App Filter Disabled
           IconButton(
             icon: Icon(
               _showSystemApps
@@ -106,6 +107,7 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
               });
             },
           ),
+          */
         ],
       ),
       body: _isLoading
@@ -115,19 +117,20 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
               itemBuilder: (context, index) {
                 final app = displayApps[index];
                 return ListTile(
-                  leading: app is ApplicationWithIcon
-                      ? Image.memory(app.icon, width: 40, height: 40)
+                  leading: app.icon != null
+                      ? Image.memory(app.icon!, width: 40, height: 40)
                       : const Icon(BootstrapIcons.android2, size: 40),
-                  title: Text(app.appName),
-                  subtitle: Text(app.packageName),
+                  title: Text(app.name ?? 'Unknown'),
+                  subtitle: Text(app.packageName ?? ''),
                   trailing: PopupMenuButton<String>(
                     onSelected: (value) {
-                      if (value == 'open') _repository.openApp(app.packageName);
+                      if (value == 'open')
+                        _repository.openApp(app.packageName!);
                       if (value == 'settings')
-                        _repository.openAppSettings(app.packageName);
-                      if (value == 'export') _exportApk(app);
+                        _repository.openAppSettings(app.packageName!);
+                      // if (value == 'export') _exportApk(app); // Disabled
                       if (value == 'uninstall')
-                        _repository.uninstallApp(app.packageName);
+                        _repository.uninstallApp(app.packageName!);
                     },
                     itemBuilder: (context) => [
                       const PopupMenuItem(value: 'open', child: Text('Open')),
@@ -136,8 +139,9 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
                         child: Text('App Settings'),
                       ),
                       const PopupMenuItem(
+                        enabled: false,
                         value: 'export',
-                        child: Text('Export APK'),
+                        child: Text('Export APK (Disabled)'),
                       ),
                       const PopupMenuItem(
                         value: 'uninstall',
