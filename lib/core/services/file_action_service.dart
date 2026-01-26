@@ -13,9 +13,16 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'package:explorer/core/repositories/file_repository.dart';
+
 class FileActionsService {
+  final FileRepository repository;
+
+  FileActionsService({FileRepository? repository})
+    : repository = repository ?? LocalFileRepository();
+
   // Method to show the main options menu
-   void showFileOptionsMenu(BuildContext context, FileSystemEntity entity) {
+  void showFileOptionsMenu(BuildContext context, FileSystemEntity entity) {
     showModalBottomSheet(
       context: context,
       builder: (sheetContext) {
@@ -38,8 +45,14 @@ class FileActionsService {
               },
             ),
             ListTile(
-              leading: const Icon(BootstrapIcons.trash_fill, color: Colors.redAccent),
-              title: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+              leading: const Icon(
+                BootstrapIcons.trash_fill,
+                color: Colors.redAccent,
+              ),
+              title: const Text(
+                'Delete',
+                style: TextStyle(color: Colors.redAccent),
+              ),
               onTap: () {
                 Navigator.pop(sheetContext);
                 showDeleteConfirmationDialog(context, entity);
@@ -50,7 +63,7 @@ class FileActionsService {
               title: const Text('Info'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                showInfoSheet( entity,context);
+                showInfoSheet(entity, context);
               },
             ),
             const Divider(),
@@ -84,7 +97,7 @@ class FileActionsService {
 
   // --- All our helper methods are now static here ---
 
-   Future<void> showRenameDialog(
+  Future<void> showRenameDialog(
     BuildContext blocContext,
     FileSystemEntity entity,
   ) async {
@@ -113,7 +126,7 @@ class FileActionsService {
     if (newName != null && newName.isNotEmpty) {
       try {
         final newPath = p.join(entity.parent.path, newName);
-        await entity.rename(newPath);
+        await repository.rename(entity.path, newPath);
         // Use the passed-in blocContext, which is guaranteed to have the BLoC
         final currentState = blocContext.read<FileExplorerBloc>().state;
         if (currentState is FileExplorerLoaded) {
@@ -123,11 +136,12 @@ class FileActionsService {
         }
       } catch (e) {
         // ... error handling
+        print("Error renaming: $e");
       }
     }
   }
 
-   Future<void> showDeleteConfirmationDialog(
+  Future<void> showDeleteConfirmationDialog(
     BuildContext blocContext,
     FileSystemEntity entity,
   ) async {
@@ -158,8 +172,7 @@ class FileActionsService {
 
     if (confirmed == true) {
       try {
-        await entity.delete(recursive: true);
-        // Use the passed-in blocContext
+        await repository.delete(entity.path, recursive: true);
         final currentState = blocContext.read<FileExplorerBloc>().state;
         if (currentState is FileExplorerLoaded) {
           blocContext.read<FileExplorerBloc>().add(
@@ -167,11 +180,72 @@ class FileActionsService {
           );
         }
       } catch (e) {
-        // ... error handling
+        print("Error deleting: $e");
       }
     }
   }
 
+  Future<void> deleteFiles(
+    BuildContext context,
+    List<FileSystemEntity> files,
+  ) async {
+    if (files.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Delete ${files.length} items?'),
+          content: const Text(
+            'Are you sure you want to delete these items? This cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text(
+                'Delete',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      int successCount = 0;
+      for (final file in files) {
+        try {
+          await repository.delete(file.path, recursive: true);
+          successCount++;
+        } catch (e) {
+          print("Error deleting ${file.path}: $e");
+        }
+      }
+
+      if (context.mounted) {
+        if (successCount > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Deleted $successCount items')),
+          );
+        }
+
+        final currentState = context.read<FileExplorerBloc>().state;
+        if (currentState is FileExplorerLoaded) {
+          context.read<FileExplorerBloc>().add(
+            LoadDirectory(currentState.path),
+          );
+          context.read<FileExplorerBloc>().add(
+            ToggleSelectionMode(enable: false),
+          );
+        }
+      }
+    }
+  }
 
   void showInfoSheet(FileSystemEntity entity, BuildContext context) {
     showModalBottomSheet(
@@ -248,13 +322,12 @@ class FileActionsService {
     );
   }
 
-
   static Future<int> calculateDirectorySize(Directory dir) async {
     // ... same size calculation logic
     return 0; // Placeholder
   }
 
-   void share(BuildContext context, FileSystemEntity entity) {
+  void share(BuildContext context, FileSystemEntity entity) {
     if (entity is File) {
       Share.shareXFiles([XFile(entity.path)]);
     } else if (entity is Directory) {
@@ -262,7 +335,10 @@ class FileActionsService {
     }
   }
 
-  Future<void> shareZippedFolder(BuildContext context, Directory directory) async {
+  Future<void> shareZippedFolder(
+    BuildContext context,
+    Directory directory,
+  ) async {
     // Show a loading indicator
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Zipping folder for sharing...')),
@@ -304,6 +380,4 @@ class FileActionsService {
       }
     }
   }
-
-  
 }

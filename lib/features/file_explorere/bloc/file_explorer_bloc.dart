@@ -2,21 +2,29 @@ import 'dart:io';
 import 'package:bloc/bloc.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
+import 'package:explorer/core/services/folder_prefs_service.dart';
+import 'package:explorer/core/repositories/file_repository.dart';
 
 part 'file_explorer_event.dart';
 part 'file_explorer_state.dart';
 
 class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
-  FileExplorerBloc() : super(FileExplorerInitial()) {
+  final FileRepository repository;
+
+  FileExplorerBloc({FileRepository? repository})
+    : repository = repository ?? LocalFileRepository(),
+      super(FileExplorerInitial()) {
     on<LoadDirectory>(_onLoadDirectory);
 
- on<ToggleSelectionMode>((event, emit) {
+    on<ToggleSelectionMode>((event, emit) {
       final currentState = state;
       if (currentState is FileExplorerLoaded) {
-        emit(currentState.copyWith(
-          isSelectionMode: event.enable,
-          selectedItems: {}, // Clear selection when toggling mode
-        ));
+        emit(
+          currentState.copyWith(
+            isSelectionMode: event.enable,
+            selectedItems: {}, // Clear selection when toggling mode
+          ),
+        );
       }
     });
 
@@ -24,7 +32,9 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final currentState = state;
       if (currentState is FileExplorerLoaded) {
         // Create a new, modifiable set from the current selection
-        final newSelectedItems = Set<FileSystemEntity>.from(currentState.selectedItems);
+        final newSelectedItems = Set<FileSystemEntity>.from(
+          currentState.selectedItems,
+        );
         if (newSelectedItems.contains(event.entity)) {
           newSelectedItems.remove(event.entity); // Deselect if already selected
         } else {
@@ -33,15 +43,43 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
         emit(currentState.copyWith(selectedItems: newSelectedItems));
       }
     });
-    
+
     on<ClearSelection>((event, emit) {
       final currentState = state;
       if (currentState is FileExplorerLoaded) {
         emit(currentState.copyWith(selectedItems: {}));
       }
     });
+    on<ChangeViewMode>((event, emit) async {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        await FolderPrefsService().setViewMode(currentState.path, event.mode);
+        emit(currentState.copyWith(viewMode: event.mode));
+      }
+    });
 
-
+    on<ChangeSortOrder>((event, emit) async {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        await FolderPrefsService().setSort(
+          currentState.path,
+          event.option,
+          event.order,
+        );
+        final sortedEntities = _sortEntities(
+          currentState.entities,
+          event.option,
+          event.order,
+        );
+        emit(
+          currentState.copyWith(
+            sortOption: event.option,
+            sortOrder: event.order,
+            entities: sortedEntities,
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _onLoadDirectory(
@@ -50,32 +88,78 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
   ) async {
     try {
       emit(FileExplorerLoading());
-      final directory = Directory(event.path);
-      
-      // Check if directory exists and we have permission
-      if (!await directory.exists()) {
+
+      if (!await repository.exists(event.path)) {
         emit(FileExplorerError("Directory not found or access denied."));
         return;
       }
-      
-      final List<FileSystemEntity> entities = await directory.list().toList();
-      
-      // Sort the list: folders first, then files, all alphabetically
-      entities.sort((a, b) {
-        if (a is Directory && b is File) {
-          return -1; // a (directory) comes before b (file)
-        }
-        if (a is File && b is Directory) {
-          return 1; // b (directory) comes before a (file)
-        }
-        // Both are files or both are directories, sort by path
-        return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
-      });
 
-      emit(FileExplorerLoaded(entities: entities, path: event.path));
+      await FolderPrefsService().init();
+      final viewMode = FolderPrefsService().getViewMode(event.path);
+      final sortOption = FolderPrefsService().getSortOption(event.path);
+      final sortOrder = FolderPrefsService().getSortOrder(event.path);
 
+      final List<FileSystemEntity> entities = await repository.listEntities(
+        event.path,
+      );
+      final sortedEntities = _sortEntities(entities, sortOption, sortOrder);
+
+      emit(
+        FileExplorerLoaded(
+          entities: sortedEntities,
+          path: event.path,
+          viewMode: viewMode,
+          sortOption: sortOption,
+          sortOrder: sortOrder,
+        ),
+      );
     } catch (e) {
       emit(FileExplorerError("Failed to read directory: ${e.toString()}"));
     }
+  }
+
+  List<FileSystemEntity> _sortEntities(
+    List<FileSystemEntity> entities,
+    SortOption option,
+    SortOrder order,
+  ) {
+    entities.sort((a, b) {
+      int comparison = 0;
+      switch (option) {
+        case SortOption.name:
+          comparison = p
+              .basename(a.path)
+              .toLowerCase()
+              .compareTo(p.basename(b.path).toLowerCase());
+          break;
+        case SortOption.size:
+          // For directories, we can't easily get size without traversing, so treat them as 0 or equal
+          int sizeA = (a is File) ? a.lengthSync() : 0;
+          int sizeB = (b is File) ? b.lengthSync() : 0;
+          comparison = sizeA.compareTo(sizeB);
+          break;
+        case SortOption.date:
+          comparison = a.statSync().modified.compareTo(b.statSync().modified);
+          break;
+        case SortOption.type:
+          String typeA = (a is Directory) ? 'dir' : p.extension(a.path);
+          String typeB = (b is Directory) ? 'dir' : p.extension(b.path);
+          comparison = typeA.compareTo(typeB);
+          break;
+      }
+
+      // Always keep folders on top regardless of sort option?
+      // User requirements didn't strictly say "Folders on top", but it's standard convention.
+      // However, for "Sort by Size/Date", mixing might be desired.
+      // Let's implement strict sorting first, but keep folders-first as a secondary rule if names collide?
+      // Actually, standard behavior is usually Folders First. Let's enforce Folders First.
+      bool aIsDir = a is Directory;
+      bool bIsDir = b is Directory;
+      if (aIsDir && !bIsDir) return -1;
+      if (!aIsDir && bIsDir) return 1;
+
+      return order == SortOrder.ascending ? comparison : -comparison;
+    });
+    return entities;
   }
 }

@@ -33,7 +33,7 @@ dependencies:
   flutter_3d_controller: ^2.2.0
   bootstrap_icons: ^1.11.3
   liquid_glass_renderer: ^0.1.1-dev.10
-  rive: ^0.13.20
+  rive: ^0.14.1
   flutter_animate: ^4.5.2
   epubx: ^4.0.0
   flutter_inappwebview: ^6.1.5
@@ -47,7 +47,17 @@ dependencies:
   collection: ^1.19.1
   meta: ^1.16.0
   local_auth: ^2.3.0
-  
+  rar: ^0.3.0
+  just_audio: ^0.10.5
+  chewie: ^1.13.0
+  flutter_svg: ^2.2.3
+  lottie: ^3.3.0
+  simple_animations: ^5.2.0
+  file_picker: ^10.3.8
+  shelf: ^1.4.1
+  shelf_static: ^1.1.2
+  device_apps: ^2.2.0
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

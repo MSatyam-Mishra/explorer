@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:epubx/epubx.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:explorer/core/services/bookmark_service.dart';
 
 class EpubViewerScreen extends StatefulWidget {
   final File epubFile;
@@ -23,11 +23,42 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   String? _error;
   int _currentChapterIndex = 0;
   InAppWebViewController? _webViewController;
+  final BookmarkService _bookmarkService = BookmarkService();
+  List<Bookmark> _bookmarks = [];
 
   @override
   void initState() {
     super.initState();
     _loadBook();
+    _loadBookmarks();
+  }
+
+  Future<void> _loadBookmarks() async {
+    final bookmarks = await _bookmarkService.getBookmarks(widget.epubFile.path);
+    setState(() {
+      _bookmarks = bookmarks;
+    });
+  }
+
+  Future<void> _addBookmark() async {
+    String label = "Chapter ${_currentChapterIndex + 1}";
+    if (_chapters.isNotEmpty &&
+        _currentChapterIndex < _chapters.length &&
+        _chapters[_currentChapterIndex].Title != null) {
+      label = _chapters[_currentChapterIndex].Title!;
+    }
+
+    await _bookmarkService.addBookmark(
+      widget.epubFile.path,
+      _currentChapterIndex,
+      label,
+    );
+    _loadBookmarks();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bookmarked current chapter')),
+      );
+    }
   }
 
   Future<void> _loadBook() async {
@@ -47,7 +78,14 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       });
 
       if (_chapters.isNotEmpty) {
-        _loadChapter(0);
+        int initialChapter = 0;
+        final lastRead = await _bookmarkService.getLastReadPosition(
+          widget.epubFile.path,
+        );
+        if (lastRead != null && lastRead is int) {
+          initialChapter = lastRead.clamp(0, _chapters.length - 1);
+        }
+        _loadChapter(initialChapter);
       } else {
         setState(() {
           _error = "No chapters found in this EPUB file";
@@ -62,36 +100,18 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       debugPrint("Error loading EPUB: $e");
     }
   }
-Uint8List? getImageBytes(EpubBook book, String imagePath) {
-  final imageFile = book.Content?.Images?[imagePath];
-  if (imageFile != null && imageFile.Content != null) {
-    return Uint8List.fromList(imageFile.Content!); // ✅ Convert List<int> → Uint8List
-  }
-  return null;
-}
 
-String fixImagePaths(EpubBook book, String htmlContent) {
-  final regex = RegExp(r'src="([^"]+)"');
-  return htmlContent.replaceAllMapped(regex, (match) {
-    final path = match.group(1)!;
-    final bytes = getImageBytes(book, path);
-    if (bytes != null) {
-      final base64Image = base64Encode(bytes);
-      final extension = path.split('.').last.toLowerCase();
-      return 'src="data:image/$extension;base64,$base64Image"'; // ✅ Embed directly
-    }
-    return match.group(0)!;
-  });
-}
+  Future<void> _loadChapter(int chapterIndex) async {
+    if (chapterIndex < 0 || chapterIndex >= _chapters.length) return;
 
-Future<void> _loadChapter(int chapterIndex) async {
-  if (chapterIndex < 0 || chapterIndex >= _chapters.length) return;
+    _bookmarkService.saveLastReadPosition(widget.epubFile.path, chapterIndex);
 
-  final chapter = _chapters[chapterIndex];
-  String htmlContent = chapter.HtmlContent ?? "<p>No content available</p>";
-  htmlContent = fixImagePaths(_book!, htmlContent);
+    final chapter = _chapters[chapterIndex];
+    String htmlContent = chapter.HtmlContent ?? "<p>No content available</p>";
+    htmlContent = fixImagePaths(_book!, htmlContent);
 
- String styledHtml = '''
+    String styledHtml =
+        '''
 <!DOCTYPE html>
 <html>
 <head>
@@ -106,7 +126,7 @@ Future<void> _loadChapter(int chapterIndex) async {
       column-gap: 40px;
       height: 100vh;
       overflow: hidden;
-      transition: transform 0.6s ease; /* Smooth page turn */
+      transition: transform 0.6s ease;
     }
     img { max-width: 100%; height: auto; }
   </style>
@@ -144,19 +164,17 @@ Future<void> _loadChapter(int chapterIndex) async {
 </html>
 ''';
 
+    setState(() {
+      _currentHtml = styledHtml;
+      _currentChapterIndex = chapterIndex;
+    });
 
-  setState(() {
-    _currentHtml = styledHtml;
-    _currentChapterIndex = chapterIndex;
-  });
-
-  _webViewController?.loadData(
-    data: _currentHtml,
-    mimeType: 'text/html',
-    encoding: 'utf-8',
-  );
-}
-
+    _webViewController?.loadData(
+      data: _currentHtml,
+      mimeType: 'text/html',
+      encoding: 'utf-8',
+    );
+  }
 
   void _previousChapter() {
     if (_currentChapterIndex > 0) {
@@ -176,18 +194,23 @@ Future<void> _loadChapter(int chapterIndex) async {
       appBar: AppBar(
         title: Text(_book?.Title ?? "EPUB Reader"),
         actions: [
-          // ✅ Add navigation buttons in app bar
+          IconButton(
+            onPressed: _addBookmark,
+            icon: const Icon(Icons.bookmark_border),
+            tooltip: 'Bookmark Chapter',
+          ),
           IconButton(
             onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
             icon: const Icon(Icons.arrow_back_ios),
             tooltip: 'Previous Chapter',
           ),
           IconButton(
-            onPressed: _currentChapterIndex < _chapters.length - 1 ? _nextChapter : null,
+            onPressed: _currentChapterIndex < _chapters.length - 1
+                ? _nextChapter
+                : null,
             icon: const Icon(Icons.arrow_forward_ios),
             tooltip: 'Next Chapter',
           ),
-          // ✅ Chapter counter
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             margin: const EdgeInsets.only(right: 8),
@@ -202,81 +225,147 @@ Future<void> _loadChapter(int chapterIndex) async {
           ),
         ],
       ),
-      drawer: _chapters.isNotEmpty ? Drawer(
-        child: ListView(
-          children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor,
-              ),
+      drawer: _chapters.isNotEmpty
+          ? Drawer(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text(
-                    _book?.Title ?? "Book",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                  DrawerHeader(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).primaryColor,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            _book?.Title ?? "Book",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            maxLines: 2,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _book?.Author ?? "Unknown Author",
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _book?.Author ?? "Unknown Author",
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
+                  Expanded(
+                    child: DefaultTabController(
+                      length: 2,
+                      child: Column(
+                        children: [
+                          const TabBar(
+                            tabs: [
+                              Tab(text: "Index"),
+                              Tab(text: "Bookmarks"),
+                            ],
+                          ),
+                          Expanded(
+                            child: TabBarView(
+                              children: [
+                                // Tab 1: Index
+                                ListView.builder(
+                                  itemCount: _chapters.length,
+                                  itemBuilder: (context, i) => ListTile(
+                                    leading: CircleAvatar(
+                                      radius: 12,
+                                      backgroundColor: i == _currentChapterIndex
+                                          ? Theme.of(context).primaryColor
+                                          : Colors.grey.shade300,
+                                      child: Text(
+                                        '${i + 1}',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: i == _currentChapterIndex
+                                              ? Colors.white
+                                              : Colors.black54,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      _chapters[i].Title ?? "Chapter ${i + 1}",
+                                      style: TextStyle(
+                                        fontWeight: i == _currentChapterIndex
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        color: i == _currentChapterIndex
+                                            ? Theme.of(context).primaryColor
+                                            : null,
+                                      ),
+                                    ),
+                                    selected: i == _currentChapterIndex,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      _loadChapter(i);
+                                    },
+                                  ),
+                                ),
+                                // Tab 2: Bookmarks
+                                _bookmarks.isEmpty
+                                    ? const Center(child: Text("No bookmarks"))
+                                    : ListView.builder(
+                                        itemCount: _bookmarks.length,
+                                        itemBuilder: (context, index) {
+                                          final bookmark = _bookmarks[index];
+                                          return ListTile(
+                                            title: Text(bookmark.label),
+                                            subtitle: Text(
+                                              "${bookmark.createdAt.year}-${bookmark.createdAt.month}-${bookmark.createdAt.day}",
+                                            ),
+                                            trailing: IconButton(
+                                              icon: const Icon(
+                                                Icons.delete,
+                                                color: Colors.red,
+                                              ),
+                                              onPressed: () async {
+                                                await _bookmarkService
+                                                    .removeBookmark(
+                                                      widget.epubFile.path,
+                                                      bookmark.id,
+                                                    );
+                                                _loadBookmarks();
+                                              },
+                                            ),
+                                            onTap: () {
+                                              Navigator.pop(context);
+                                              _loadChapter(
+                                                bookmark.position as int,
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-            // ✅ Chapter list with current chapter highlight
-            for (int i = 0; i < _chapters.length; i++)
-              ListTile(
-                leading: CircleAvatar(
-                  radius: 12,
-                  backgroundColor: i == _currentChapterIndex 
-                    ? Theme.of(context).primaryColor 
-                    : Colors.grey.shade300,
-                  child: Text(
-                    '${i + 1}',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: i == _currentChapterIndex ? Colors.white : Colors.black54,
-                    ),
-                  ),
-                ),
-                title: Text(
-                  _chapters[i].Title ?? "Chapter ${i + 1}",
-                  style: TextStyle(
-                    fontWeight: i == _currentChapterIndex 
-                      ? FontWeight.bold 
-                      : FontWeight.normal,
-                    color: i == _currentChapterIndex 
-                      ? Theme.of(context).primaryColor 
-                      : null,
-                  ),
-                ),
-                selected: i == _currentChapterIndex,
-                onTap: () {
-                  Navigator.pop(context);
-                  _loadChapter(i);
-                },
-              )
-          ],
-        ),
-      ) : null,
+            )
+          : null,
       body: _buildBody(),
-      // ✅ Add floating action button for quick navigation
-      floatingActionButton: _chapters.isNotEmpty ? FloatingActionButton(
-        onPressed: () => Scaffold.of(context).openDrawer(),
-        child: const Icon(Icons.menu_book),
-        tooltip: 'Table of Contents',
-      ) : null,
+      floatingActionButton: _chapters.isNotEmpty
+          ? FloatingActionButton(
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              child: const Icon(Icons.menu_book),
+              tooltip: 'Table of Contents',
+            )
+          : null,
     );
   }
 
@@ -301,11 +390,7 @@ Future<void> _loadChapter(int chapterIndex) async {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
-                Icons.error_outline,
-                color: Colors.red,
-                size: 64,
-              ),
+              const Icon(Icons.error_outline, color: Colors.red, size: 64),
               const SizedBox(height: 16),
               Text(
                 _error!,
@@ -313,10 +398,7 @@ Future<void> _loadChapter(int chapterIndex) async {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _loadBook,
-                child: const Text('Retry'),
-              ),
+              ElevatedButton(onPressed: _loadBook, child: const Text('Retry')),
             ],
           ),
         ),
@@ -324,54 +406,40 @@ Future<void> _loadChapter(int chapterIndex) async {
     }
 
     if (_currentHtml.isEmpty) {
-      return const Center(
-        child: Text('No content to display'),
-      );
+      return const Center(child: Text('No content to display'));
     }
 
-    // ✅ Enhanced WebView with better configuration
     return InAppWebView(
       initialData: InAppWebViewInitialData(
         data: _currentHtml,
         encoding: 'utf-8',
       ),
-      initialOptions: InAppWebViewGroupOptions(
-        crossPlatform: InAppWebViewOptions(
-          useShouldOverrideUrlLoading: true,
-          mediaPlaybackRequiresUserGesture: false,
-          useOnDownloadStart: true,
-        ),
-        android: AndroidInAppWebViewOptions(
-          useHybridComposition: true,
-          domStorageEnabled: true,
-          databaseEnabled: true,
-        ),
-        ios: IOSInAppWebViewOptions(
-          allowsInlineMediaPlayback: true,
-        ),
+      initialSettings: InAppWebViewSettings(
+        useShouldOverrideUrlLoading: true,
+        mediaPlaybackRequiresUserGesture: false,
+        useOnDownloadStart: true,
+        javaScriptEnabled: true,
       ),
       onWebViewCreated: (controller) {
-  _webViewController = controller;
-
-  // ✅ Add handlers so HTML can call Flutter
-  _webViewController?.addJavaScriptHandler(
-    handlerName: 'nextChapter',
-    callback: (args) {
-      _nextChapter();
-      return null;
-    },
-  );
-  _webViewController?.addJavaScriptHandler(
-    handlerName: 'previousChapter',
-    callback: (args) {
-      _previousChapter();
-      return null;
-    },
-  );
-},
+        _webViewController = controller;
+        _webViewController?.addJavaScriptHandler(
+          handlerName: 'nextChapter',
+          callback: (args) {
+            _nextChapter();
+            return null;
+          },
+        );
+        _webViewController?.addJavaScriptHandler(
+          handlerName: 'previousChapter',
+          callback: (args) {
+            _previousChapter();
+            return null;
+          },
+        );
+      },
       onLoadStop: (controller, url) async {
-        // ✅ Add swipe gestures for chapter navigation
-        await controller.evaluateJavascript(source: '''
+        await controller.evaluateJavascript(
+          source: '''
           let startX = 0;
           let startY = 0;
           
@@ -387,22 +455,43 @@ Future<void> _loadChapter(int chapterIndex) async {
             let deltaX = endX - startX;
             let deltaY = endY - startY;
             
-            // Only handle horizontal swipes (not vertical scrolling)
             if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
               if (deltaX > 0) {
-                // Swipe right - previous chapter
                 window.flutter_inappwebview.callHandler('previousChapter');
               } else {
-                // Swipe left - next chapter
                 window.flutter_inappwebview.callHandler('nextChapter');
               }
             }
           });
-        ''');
+        ''',
+        );
       },
       onConsoleMessage: (controller, consoleMessage) {
         debugPrint("Console: ${consoleMessage.message}");
       },
     );
   }
+}
+
+// Helper functions
+Uint8List? getImageBytes(EpubBook book, String imagePath) {
+  final imageFile = book.Content?.Images?[imagePath];
+  if (imageFile != null && imageFile.Content != null) {
+    return Uint8List.fromList(imageFile.Content!);
+  }
+  return null;
+}
+
+String fixImagePaths(EpubBook book, String htmlContent) {
+  final regex = RegExp(r'src="([^"]+)"');
+  return htmlContent.replaceAllMapped(regex, (match) {
+    final path = match.group(1)!;
+    final bytes = getImageBytes(book, path);
+    if (bytes != null) {
+      final base64Image = base64Encode(bytes);
+      final extension = path.split('.').last.toLowerCase();
+      return 'src="data:image/$extension;base64,$base64Image"';
+    }
+    return match.group(0)!;
+  });
 }

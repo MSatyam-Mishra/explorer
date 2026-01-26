@@ -1,7 +1,5 @@
 part of 'file_explorer_bloc.dart';
 
-
-
 @immutable
 abstract class FileExplorerEvent {}
 
@@ -19,6 +17,17 @@ class ToggleSelectionMode extends FileExplorerEvent {
 class SelectItem extends FileExplorerEvent {
   final FileSystemEntity entity;
   SelectItem(this.entity);
+}
+
+class ChangeViewMode extends FileExplorerEvent {
+  final ViewMode mode;
+  ChangeViewMode(this.mode);
+}
+
+class ChangeSortOrder extends FileExplorerEvent {
+  final SortOption option;
+  final SortOrder order;
+  ChangeSortOrder(this.option, this.order);
 }
 
 class ClearSelection extends FileExplorerEvent {}

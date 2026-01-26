@@ -1,0 +1,83 @@
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
+
+enum ViewMode { list, grid, compact, gallery }
+
+enum SortOption { name, size, date, type }
+
+enum SortOrder { ascending, descending }
+
+class FolderPrefsService {
+  static final FolderPrefsService _instance = FolderPrefsService._internal();
+  factory FolderPrefsService() => _instance;
+  FolderPrefsService._internal();
+
+  late SharedPreferences _prefs;
+  bool _initialized = false;
+
+  Future<void> init() async {
+    if (!_initialized) {
+      _prefs = await SharedPreferences.getInstance();
+      _initialized = true;
+    }
+  }
+
+  // Generate a hash for the path to keep keys short and clean
+  String _getPathKey(String path) {
+    var bytes = utf8.encode(path);
+    var digest = sha256.convert(bytes);
+    return 'folder_prefs_${digest.toString().substring(0, 16)}';
+  }
+
+  ViewMode getViewMode(String path) {
+    final key = _getPathKey(path);
+    final jsonString = _prefs.getString(key);
+    if (jsonString == null) return ViewMode.list; // Default
+
+    final map = jsonDecode(jsonString);
+    return ViewMode.values[map['viewMode'] ?? 0];
+  }
+
+  SortOption getSortOption(String path) {
+    final key = _getPathKey(path);
+    final jsonString = _prefs.getString(key);
+    if (jsonString == null) return SortOption.name; // Default
+
+    final map = jsonDecode(jsonString);
+    return SortOption.values[map['sortOption'] ?? 0];
+  }
+
+  SortOrder getSortOrder(String path) {
+    final key = _getPathKey(path);
+    final jsonString = _prefs.getString(key);
+    if (jsonString == null) return SortOrder.ascending; // Default
+
+    final map = jsonDecode(jsonString);
+    return SortOrder.values[map['sortOrder'] ?? 0];
+  }
+
+  Future<void> setViewMode(String path, ViewMode mode) async {
+    await _updatePrefs(path, {'viewMode': mode.index});
+  }
+
+  Future<void> setSort(String path, SortOption option, SortOrder order) async {
+    await _updatePrefs(path, {
+      'sortOption': option.index,
+      'sortOrder': order.index,
+    });
+  }
+
+  Future<void> _updatePrefs(String path, Map<String, dynamic> updates) async {
+    final key = _getPathKey(path);
+    final jsonString = _prefs.getString(key);
+    Map<String, dynamic> currentPrefs = {};
+
+    if (jsonString != null) {
+      currentPrefs = jsonDecode(jsonString);
+    }
+
+    currentPrefs.addAll(updates);
+    await _prefs.setString(key, jsonEncode(currentPrefs));
+  }
+}

@@ -6,12 +6,13 @@ import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_quill/flutter_quill.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // await File.initialize(); // Init not found in this version/namespace
   Bloc.observer = const AppBlocObserver();
 
-  runApp(App());
+  runApp(const App());
 }
 
 class App extends StatelessWidget {
@@ -34,7 +35,7 @@ class App extends StatelessWidget {
             supportedLocales: const [Locale('en')],
             localizationsDelegates: [
               //...GlobalMaterialLocalizations.delegates,
-              FlutterQuillLocalizations.delegate,
+              // FlutterQuillLocalizations.delegate,
             ],
 
             // -------------------------
