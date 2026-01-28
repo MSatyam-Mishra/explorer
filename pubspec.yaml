@@ -25,29 +25,29 @@ dependencies:
   flutter_colorpicker: ^1.1.0
   model_viewer_plus: ^1.9.3
   photo_view: ^0.15.0
-  flutter_pdfview: ^1.4.1+1
+  flutter_pdfview: ^1.4.4
   open_filex: ^4.7.0
-  video_player: ^2.10.0
-  flutter_quill: ^11.4.2
+  video_player: ^2.10.1
+  flutter_quill: ^11.5.0
   flutter_bloc: ^9.1.1
   flutter_3d_controller: ^2.3.0
   bootstrap_icons: ^1.11.3
   liquid_glass_renderer: ^0.1.1-dev.10
-  rive: ^0.14.1
+  rive: ^0.14.1 # Check if newer exists, otherwise might need 0.14.4+ or similar if available
   flutter_animate: ^4.5.2
   epubx: ^4.0.0
   flutter_inappwebview: ^6.1.5
-  archive: ^3.1.6
-  share_plus: ^11.0.0
+  archive: ^3.6.1 # Avoid 4.0.0 for now unless necessary as it's a major bump
+  share_plus: ^12.0.1
   filesize: ^2.0.1
   intl: ^0.20.2
   percent_indicator: ^4.2.5
   disk_space_plus: ^0.2.6
   photo_manager: ^3.7.1
   collection: ^1.19.1
-  meta: ^1.16.0
+  meta: ^1.17.0
   local_auth: ^2.3.0
-  rar: ^0.3.0
+  # rar: ^0.3.0
   just_audio: ^0.10.5
   chewie: ^1.13.0
   flutter_svg: ^2.2.3
@@ -60,6 +60,8 @@ dependencies:
   qr_flutter: ^4.1.0
   excel: ^4.0.6
   docx_file_viewer: ^0.0.7
+  xml: ^6.5.0
+  # quick_usb: ^0.4.0
 
 dev_dependencies:
   flutter_test:

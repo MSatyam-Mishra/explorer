@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
-import 'package:rar/rar.dart';
+// import 'package:rar/rar.dart';
 
 class ArchiveItem {
   final String name;
@@ -29,7 +29,8 @@ class ArchiveService {
     // We handle logic inside.
 
     if (extension == '.rar') {
-      return _listRar(file);
+      // return _listRar(file);
+      throw Exception(".rar support temporarily disabled");
     }
 
     final bytes = await file.readAsBytes();
@@ -84,6 +85,7 @@ class ArchiveService {
     throw Exception("Unsupported or invalid archive format");
   }
 
+  /*
   Future<List<ArchiveItem>> _listRar(File file) async {
     final result = await Rar.listRarContents(rarFilePath: file.path);
     if (result['success'] == true && result['files'] != null) {
@@ -102,6 +104,7 @@ class ArchiveService {
     }
     throw Exception(result['message'] ?? 'Failed to list RAR contents');
   }
+*/
 
   /// Extracts the entire archive to destination
   Future<void> extractAll(File archiveFile, Directory destination) async {
@@ -112,6 +115,7 @@ class ArchiveService {
     }
 
     if (extension == '.rar') {
+      /*
       final result = await Rar.extractRarFile(
         rarFilePath: archiveFile.path,
         destinationPath: destination.path,
@@ -119,7 +123,9 @@ class ArchiveService {
       if (result['success'] != true) {
         throw Exception(result['message']);
       }
-      return;
+      */
+      throw Exception(".rar support temporarily disabled");
+      // return;
     }
 
     // Reuse logic: decode archive then write files

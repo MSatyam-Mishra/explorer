@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:filesize/filesize.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
 import 'package:explorer/core/services/root_service.dart';
+import 'package:explorer/core/services/usb_host_service.dart';
 import 'package:explorer/core/services/usb_boot_service.dart';
 
 class UsbBootScreen extends StatefulWidget {
@@ -17,93 +18,77 @@ class UsbBootScreen extends StatefulWidget {
 
 class _UsbBootScreenState extends State<UsbBootScreen> {
   final _rootService = RootService();
-  final _usbService = UsbBootService();
+  final _usbRootService = UsbBootService();
+  final _usbHostService = UsbHostService();
 
   bool _isLoading = true;
+  bool _useRoot = false; // Default to Rootless if possible
   String? _isoPath;
   int? _isoSize;
-  BlockDevice? _selectedDevice;
-  List<BlockDevice> _devices = [];
-  bool _isFlashing = false;
 
-  // Progress
+  // Union type for selection (Root BlockDevice or Rootless UsbDeviceWrapper)
+  dynamic _selectedDevice;
+  List<dynamic> _devices = [];
+
+  bool _isFlashing = false;
   double _progress = 0.0;
   String _progressStatus = '';
-
   Process? _flashProcess;
 
   @override
   void initState() {
     super.initState();
-    _checkRootAndLoadDevices();
+    _init();
   }
 
-  Future<void> _checkRootAndLoadDevices() async {
+  Future<void> _init() async {
+    await _usbHostService.init();
+    _loadDevices();
+  }
+
+  Future<void> _loadDevices() async {
     setState(() => _isLoading = true);
+    _devices = [];
+    _selectedDevice = null;
 
-    // 1. Check Root
-    bool rooted = await _rootService.isRooted();
-    if (!rooted) {
-      // Try requesting
-      rooted = await _rootService.requestRootAccess();
-    }
+    try {
+      if (_useRoot) {
+        // Root Logic
+        bool rooted = await _rootService.isRooted();
+        if (!rooted) rooted = await _rootService.requestRootAccess();
 
-    if (!rooted) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        _showRootErrorDialog();
-      }
-      return;
-    }
-
-    // 2. Load Devices
-    final devices = await _usbService.getConnectableDevices();
-
-    if (mounted) {
-      setState(() {
-        _devices = devices;
-        _isLoading = false;
-        if (devices.isNotEmpty) {
-          _selectedDevice = devices.first;
+        if (rooted) {
+          final devices = await _usbRootService.getConnectableDevices();
+          if (mounted) {
+            setState(() {
+              _devices = devices;
+              if (devices.isNotEmpty) _selectedDevice = devices.first;
+            });
+          }
         }
-      });
+      } else {
+        // Rootless Logic
+        final devices = await _usbHostService.getDeviceList();
+        if (mounted) {
+          setState(() {
+            _devices = devices;
+            if (devices.isNotEmpty) _selectedDevice = devices.first;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading devices: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  void _showRootErrorDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Root Access Required"),
-        content: const Text(
-          "This feature requires Root access to write directly to USB drives.\n\n"
-          "Please root your device or grant permisions to use this tool.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), // Close screen
-            child: const Text("Exit Tool"),
-          ),
-        ],
-      ),
-    ).then((_) => Navigator.pop(context));
   }
 
   Future<void> _pickIso() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType
-          .any, // .iso not strictly supported filters in all file pickers properly sometimes
-      // allowedExtensions: ['iso', 'img'],
-    );
-
+    final result = await FilePicker.platform.pickFiles(type: FileType.any);
     if (result != null && result.files.single.path != null) {
       final path = result.files.single.path!;
       final file = File(path);
       final size = await file.length();
-
       setState(() {
         _isoPath = path;
         _isoSize = size;
@@ -114,15 +99,17 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
   Future<void> _startFlashing() async {
     if (_isoPath == null || _selectedDevice == null) return;
 
-    // Safety Warning
+    // Safety check
+    final deviceName = _useRoot
+        ? (_selectedDevice as BlockDevice).name
+        : (_selectedDevice as UsbDeviceWrapper).name;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("WARNING: DATA LOSS"),
         content: Text(
-          "Are you SURE you want to write to ${_selectedDevice!.name}?\n\n"
-          "ALL DATA on ${_selectedDevice!.path} (${_selectedDevice!.sizeHumanReadable}) will be PERMANENTLY ERASED.\n\n"
-          "This operation cannot be undone.",
+          "Are you SURE you want to write to $deviceName?\n\nALL DATA will be ERASED.",
           style: const TextStyle(color: Colors.red),
         ),
         actions: [
@@ -148,38 +135,62 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
     });
 
     try {
-      _flashProcess = await _usbService.flashIsoToDevice(
-        _isoPath!,
-        _selectedDevice!.path,
-      );
+      if (_useRoot) {
+        // Root Flash (dd)
+        _flashProcess = await _usbRootService.flashIsoToDevice(
+          _isoPath!,
+          (_selectedDevice as BlockDevice).path,
+        );
+        _flashProcess!.stderr.transform(utf8.decoder).listen((data) {
+          // Parse dd progress (same as before)
+          final regex = RegExp(r'(\d+) bytes');
+          final match = regex.firstMatch(data);
+          if (match != null && _isoSize != null) {
+            final bytes = int.parse(match.group(1)!);
+            if (mounted)
+              setState(() {
+                _progress = (bytes / _isoSize!).clamp(0.0, 1.0);
+                _progressStatus = "${filesize(bytes)} / ${filesize(_isoSize)}";
+              });
+          }
+        });
+        await _flashProcess!.exitCode;
+      } else {
+        // Rootless Flash
+        final wrapper = _selectedDevice as UsbDeviceWrapper;
 
-      // Listen to stderr for progress (dd writes stats to stderr)
-      _flashProcess!.stderr.transform(utf8.decoder).listen((data) {
-        _parseDdProgress(data);
-      });
+        // Request Permission
+        bool hasPerm = await _usbHostService.hasPermission(wrapper);
+        if (!hasPerm) {
+          hasPerm = await _usbHostService.requestPermission(wrapper);
+        }
 
-      final exitCode = await _flashProcess!.exitCode;
+        if (!hasPerm) {
+          throw Exception("USB Permission Denied");
+        }
+
+        await _usbHostService.flashIsoToDevice(
+          File(_isoPath!),
+          wrapper,
+          onProgress: (pct) {
+            if (mounted)
+              setState(() {
+                _progress = pct;
+                _progressStatus = "${(pct * 100).toStringAsFixed(1)}%";
+              });
+          },
+        );
+      }
 
       if (mounted) {
         setState(() {
           _isFlashing = false;
-          _progress = exitCode == 0 ? 1.0 : 0.0;
-          _progressStatus = exitCode == 0
-              ? "Success!"
-              : "Failed (Code: $exitCode)";
+          _progress = 1.0;
+          _progressStatus = "Success!";
         });
-
-        if (exitCode == 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Flashing Complete! Safe to remove USB."),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Flashing Failed. Code: $exitCode")),
-          );
-        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Flashing Complete!")));
       }
     } catch (e) {
       if (mounted) {
@@ -187,23 +198,9 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
           _isFlashing = false;
           _progressStatus = "Error: $e";
         });
-      }
-    }
-  }
-
-  void _parseDdProgress(String data) {
-    // Example: 209715200 bytes (210 MB, 200 MiB) copied, 5.003 s, 41.9 MB/s
-    // Regex to capture bytes
-    final regex = RegExp(r'(\d+) bytes');
-    final match = regex.firstMatch(data);
-    if (match != null && _isoSize != null && _isoSize! > 0) {
-      final bytesCopied = int.parse(match.group(1)!);
-      final pct = bytesCopied / _isoSize!;
-      if (mounted) {
-        setState(() {
-          _progress = pct.clamp(0.0, 1.0);
-          _progressStatus = "${filesize(bytesCopied)} / ${filesize(_isoSize!)}";
-        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
       }
     }
   }
@@ -211,119 +208,129 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
   @override
   void dispose() {
     _flashProcess?.kill();
+    _usbHostService.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Bootable USB Creator")),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Step 1: ISO Selection
-                  _buildSectionHeader("1. Select ISO Image"),
-                  Card(
-                    child: ListTile(
-                      title: Text(
-                        _isoPath != null
-                            ? _isoPath!.split('/').last
-                            : "No ISO Selected",
-                      ),
-                      subtitle: _isoPath != null
-                          ? Text(filesize(_isoSize))
-                          : const Text("Tap to select .iso file"),
-                      trailing: const Icon(Icons.folder_open),
-                      onTap: _isFlashing ? null : _pickIso,
-                    ),
+      appBar: AppBar(
+        title: const Text("Bootable USB Creator"),
+        actions: [
+          Switch(
+            value: _useRoot,
+            onChanged: _isFlashing
+                ? null
+                : (v) {
+                    setState(() => _useRoot = v);
+                    _loadDevices();
+                  },
+          ),
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.only(right: 16.0),
+              child: Text("Root Mode"),
+            ),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!_useRoot)
+              const Card(
+                color: Colors.blueAccent,
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: Text(
+                    "Rootless Mode: Uses Android USB Host API. Requires OTG adapter.",
+                    style: TextStyle(color: Colors.white),
                   ),
-                  const SizedBox(height: 24),
-
-                  // Step 2: Drive Selection
-                  _buildSectionHeader("2. Select Target USB Drive"),
-                  if (_devices.isEmpty)
-                    const Card(
-                      color: Colors.orangeAccent,
-                      child: Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Text(
-                          "No External Drives Detected.\nPlease plug in a USB OTG drive.",
-                        ),
-                      ),
-                    )
-                  else
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<BlockDevice>(
-                            value: _selectedDevice,
-                            isExpanded: true,
-                            hint: const Text("Select Drive"),
-                            onChanged: _isFlashing
-                                ? null
-                                : (val) =>
-                                      setState(() => _selectedDevice = val),
-                            items: _devices.map((device) {
-                              return DropdownMenuItem(
-                                value: device,
-                                child: Text(
-                                  "${device.name} (${device.sizeHumanReadable}) - ${device.path}",
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-
-                  // Step 3: Flash
-                  _buildSectionHeader("3. Flash Image"),
-                  if (_isFlashing) ...[
-                    LinearPercentIndicator(
-                      lineHeight: 20.0,
-                      percent: _progress,
-                      center: Text("${(_progress * 100).toStringAsFixed(1)}%"),
-                      progressColor: Colors.blue,
-                    ),
-                    const SizedBox(height: 10),
-                    Text(_progressStatus, textAlign: TextAlign.center),
-                  ] else ...[
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.all(16),
-                        backgroundColor: Colors.deepPurple,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.flash_on),
-                      label: const Text("START FLASHING"),
-                      onPressed: (_isoPath != null && _selectedDevice != null)
-                          ? _startFlashing
-                          : null,
-                    ),
-                  ],
-
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Note: This tool uses the 'dd' command via Root access.\n"
-                    "Ensure you select the correct drive to avoid data loss.",
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+                ),
+              ),
+            // Step 1: ISO
+            _buildSectionHeader("1. Select ISO Image"),
+            Card(
+              child: ListTile(
+                title: Text(_isoPath?.split('/').last ?? "No ISO Selected"),
+                subtitle: Text(
+                  _isoPath != null ? filesize(_isoSize) : "Tap to select",
+                ),
+                trailing: const Icon(Icons.folder_open),
+                onTap: _isFlashing ? null : _pickIso,
               ),
             ),
+            const SizedBox(height: 24),
+
+            // Step 2: Device
+            _buildSectionHeader("2. Select Target USB Drive"),
+            if (_devices.isEmpty)
+              const Card(
+                color: Colors.orangeAccent,
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text("No Drives Detected"),
+                ),
+              )
+            else
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<dynamic>(
+                      value: _selectedDevice,
+                      isExpanded: true,
+                      onChanged: _isFlashing
+                          ? null
+                          : (v) => setState(() => _selectedDevice = v),
+                      items: _devices.map((d) {
+                        String label = _useRoot
+                            ? "${(d as BlockDevice).name} (${d.sizeHumanReadable})"
+                            : "${(d as UsbDeviceWrapper).name} (ID: ${d.productId})";
+                        return DropdownMenuItem(value: d, child: Text(label));
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 24),
+
+            // Step 3: Flash
+            _buildSectionHeader("3. Flash Image"),
+            if (_isFlashing) ...[
+              LinearPercentIndicator(
+                lineHeight: 20.0,
+                percent: _progress.clamp(0.0, 1.0),
+                center: Text("${(_progress * 100).toStringAsFixed(1)}%"),
+                progressColor: Colors.blue,
+              ),
+              Text(_progressStatus, textAlign: TextAlign.center),
+            ] else
+              ElevatedButton.icon(
+                icon: const Icon(Icons.flash_on),
+                label: const Text("START FLASHING"),
+                onPressed: (_isoPath != null && _selectedDevice != null)
+                    ? _startFlashing
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
+      padding: const EdgeInsets.only(bottom: 8.0, top: 16.0),
       child: Text(
         title,
         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),

@@ -3,7 +3,7 @@ import 'package:archive/archive.dart';
 import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:rar/rar.dart';
+// import 'package:rar/rar.dart';
 import 'package:explorer/core/services/archive_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:explorer/core/router/file_opener.dart';
@@ -28,7 +28,8 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _isRar = p.extension(widget.archiveFile.path).toLowerCase() == '.rar';
+    // _isRar = p.extension(widget.archiveFile.path).toLowerCase() == '.rar';
+    _isRar = false; // RAR support temporarily disabled
     _loadArchive();
   }
 
@@ -61,10 +62,6 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     try {
       final sourceDir = widget.archiveFile.parent;
       final folderName = p.basenameWithoutExtension(widget.archiveFile.path);
-      // Determine destination. If tar.gz, basnameWithoutExtension gives .tar.
-      // We might want to strip two extensions?
-      // p.basenameWithoutExtension('foo.tar.gz') -> 'foo.tar'.
-      // Correct.
 
       final destinationDir = Directory(p.join(sourceDir.path, folderName));
 
@@ -156,8 +153,6 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
 
   Future<void> _extractFile(ArchiveItem item) async {
     // Single file extraction
-    // Not explicitly in service yet, but we can do it here or add to service.
-    // For RAR it is hard.
     if (_isRar) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -176,33 +171,10 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     });
 
     try {
-      // Manual extraction using the object we have in memory
-      // This assumes ArchiveFile is from 'archive' package
-      // We need to support the Abstraction.
-      // The ArchiveService returns ArchiveItem(originalObject: dynamic).
-      // We know it is ArchiveFile from 'archive'.
-      // We must cast it carefully. (We imported archive)
-
-      // WAIT: originalObject type needs to be imported?
-      // ArchiveItem is in service.
-      // We can just rely on internal logic if we moved it to service.
-      // But I didn't move single extract to service.
-      // I'll assume it's ArchiveFile for non-RAR.
-
-      // Ideally we add extractFile(ArchiveItem, dest) to Service.
-      // But let's fail fast:
-      // The 'archive' package types might clash or be hidden if I didn't export them?
-      // archive_service.dart imports 'package:archive/archive.dart'.
-      // archive_viewer_screen.dart imports 'package:archive/archive.dart' too.
-      // So casting should work.
-
       final archiveFile = item.originalObject;
-      // We can't type check easily without knowing the type at compile time?
-      // Dynamic dispatch.
+
       if (archiveFile.runtimeType.toString() == 'ArchiveFile' ||
           archiveFile.toString().contains('ArchiveFile')) {
-        // It's a bit hacky to rely on dynamic but okay.
-        // Actually, I can just cast if I import archive.
         final file = archiveFile; // dynamic
 
         if (file.isFile) {

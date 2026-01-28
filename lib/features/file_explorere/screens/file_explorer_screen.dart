@@ -34,7 +34,7 @@ class FileExplorerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     // We use a FutureBuilder to handle the initial permission check.
     return FutureBuilder<PermissionStatus>(
-      future: Permission.manageExternalStorage.status,
+      future: _checkAndRequestPermission(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Scaffold(
@@ -43,15 +43,31 @@ class FileExplorerScreen extends StatelessWidget {
         }
 
         final status = snapshot.data!;
+        // Handle both standard usage and "manage external storage" scenarios
         if (status.isGranted) {
-          // If permission is granted, we build the main app UI with all the providers.
           return const _FileExplorerWithProviders();
         } else {
-          // If permission is not granted, we show a dedicated screen.
           return const _PermissionDeniedScreen();
         }
       },
     );
+  }
+
+  Future<PermissionStatus> _checkAndRequestPermission() async {
+    // Check if we already have permission
+    var status = await Permission.manageExternalStorage.status;
+
+    // If not granted, request it immediately
+    if (!status.isGranted) {
+      status = await Permission.manageExternalStorage.request();
+    }
+
+    // Fallback for older Android versions (SDK < 30) if needed,
+    // strictly speaking should check SDK version, but checking Permission.storage
+    // is a common pattern if manageExternalStorage is not applicable.
+    // However, keeping consistent with existing logic which only used manageExternalStorage.
+
+    return status;
   }
 }
 
