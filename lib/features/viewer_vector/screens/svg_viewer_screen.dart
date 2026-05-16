@@ -1,6 +1,9 @@
 import 'dart:io';
+
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:path/path.dart' as p;
 
 class SvgViewerScreen extends StatelessWidget {
   final File file;
@@ -9,15 +12,9 @@ class SvgViewerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white, // SVG often needs white bg or checkerboard
-      appBar: AppBar(
-        title: Text(file.path.split('/').last),
-        iconTheme: const IconThemeData(color: Colors.black),
-        backgroundColor: Colors.white,
-        elevation: 1,
-        titleTextStyle: const TextStyle(color: Colors.black, fontSize: 18),
-      ),
+    return ExplorerScaffold(
+      backgroundColor: Colors.white,
+      title: p.basename(file.path),
       body: Center(
         child: SvgPicture.file(
           file,

@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
+import 'package:explorer/shared/widgets/glossy_drawer.dart';
 import 'package:flutter/material.dart';
 import 'package:epubx/epubx.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -190,43 +193,43 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_book?.Title ?? "EPUB Reader"),
-        actions: [
+    final barFg = ClearGlassForeground.icon(context);
+
+    return ExplorerScaffold(
+      title: _book?.Title ?? 'EPUB Reader',
+      trailing: ExplorerTopBar.actions(
+        context,
+        [
           IconButton(
             onPressed: _addBookmark,
-            icon: const Icon(Icons.bookmark_border),
+            icon: Icon(Icons.bookmark_border, color: barFg),
             tooltip: 'Bookmark Chapter',
           ),
           IconButton(
             onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
-            icon: const Icon(Icons.arrow_back_ios),
+            icon: Icon(Icons.arrow_back_ios, color: barFg, size: 18),
             tooltip: 'Previous Chapter',
           ),
           IconButton(
             onPressed: _currentChapterIndex < _chapters.length - 1
                 ? _nextChapter
                 : null,
-            icon: const Icon(Icons.arrow_forward_ios),
+            icon: Icon(Icons.arrow_forward_ios, color: barFg, size: 18),
             tooltip: 'Next Chapter',
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: Colors.black26,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '${_currentChapterIndex + 1}/${_chapters.length}',
-              style: const TextStyle(fontSize: 12),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Center(
+              child: Text(
+                '${_currentChapterIndex + 1}/${_chapters.length}',
+                style: ExplorerTopBar.pageIndicatorStyle(context),
+              ),
             ),
           ),
         ],
       ),
       drawer: _chapters.isNotEmpty
-          ? Drawer(
+          ? GlossyDrawer(
               child: Column(
                 children: [
                   DrawerHeader(

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:path/path.dart' as p;
@@ -68,11 +69,9 @@ Future<void> _loadComicBook() async {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return ExplorerScaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(p.basename(widget.comicFile.path)),
-      ),
+      title: p.basename(widget.comicFile.path),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _images.isEmpty

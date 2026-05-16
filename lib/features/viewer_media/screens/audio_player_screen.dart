@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
@@ -79,13 +80,8 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
   Widget build(BuildContext context) {
     final title = p.basename(widget.audioFile.path);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Music Player'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      extendBodyBehindAppBar: true,
+    return ExplorerScaffold(
+      title: title,
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(

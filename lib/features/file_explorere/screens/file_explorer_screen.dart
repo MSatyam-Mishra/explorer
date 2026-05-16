@@ -1,10 +1,12 @@
 import 'dart:io';
-import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:explorer/core/router/file_opener.dart';
+import 'package:explorer/shared/icons/app_icons.dart';
+import 'package:explorer/shared/widgets/explorer_options_sheet.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/core/services/file_action_service.dart';
 
-import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/core/services/archive_service.dart';
+import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/core/services/http_server_service.dart';
 import 'package:explorer/features/network/widgets/server_status_dialog.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
@@ -128,151 +130,13 @@ class _FileExplorerUI extends StatelessWidget {
           context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
         }
       },
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: isSelectionMode
-              ? Theme.of(context).colorScheme.surface
-              : null,
-          title: Text(
-            fileExplorerState is FileExplorerLoaded
-                ? (fileExplorerState.path == '/storage/emulated/0'
-                      ? 'Files'
-                      : p.basename(fileExplorerState.path))
-                : 'Files',
-          ),
-          leading: isSelectionMode
-              ? IconButton(
-                  icon: const Icon(BootstrapIcons.x_lg),
-                  onPressed: () {
-                    context.read<FileExplorerBloc>().add(
-                      ToggleSelectionMode(enable: false),
-                    );
-                  },
-                )
-              : null,
-          actions: [
-            if (isSelectionMode) ...[
-              IconButton(
-                icon: const Icon(BootstrapIcons.file_zip),
-                tooltip: 'Compress',
-                onPressed: () => _handleCompress(context, fileExplorerState),
-              ),
-              IconButton(
-                icon: const Icon(BootstrapIcons.trash),
-                tooltip: 'Delete',
-                // Existing delete logic via FileActionsService usually triggers dialog,
-                // but we should invoke it properly.
-                // For now, let's stick to Compress implementation focus.
-                // Or better, assume Delete is handled elsewhere or unimplemented in this view?
-                // The task.md says "Refactor File Explorer" was done.
-                // But I don't see Delete button in the code I viewed.
-                // Ah, maybe I should only add Compress for now to match the task scope.
-                onPressed: () {
-                  FileActionsService().deleteFiles(
-                    context,
-                    fileExplorerState.selectedItems
-                        .map((e) => e as File)
-                        .toList(), // risky cast if dir
-                  );
-                  // Wait, I should not implement Delete if not asked.
-                  // The prompt said 'Add Compress to ZIP'.
-                  // I'll stick to Compress.
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Delete not implemented yet here'),
-                    ),
-                  );
-                },
-              ),
-            ],
-            if (!isSelectionMode) ...[
-              IconButton(
-                icon: const Icon(BootstrapIcons.globe),
-                tooltip: 'Share via HTTP',
-                onPressed: () => _handleHttpShare(context, fileExplorerState),
-              ),
-              PopupMenuButton<ViewMode>(
-                icon: const Icon(BootstrapIcons.grid),
-                tooltip: 'View Mode',
-                onSelected: (mode) {
-                  context.read<FileExplorerBloc>().add(ChangeViewMode(mode));
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: ViewMode.list,
-                    child: Text('List'),
-                  ),
-                  const PopupMenuItem(
-                    value: ViewMode.grid,
-                    child: Text('Grid'),
-                  ),
-                  const PopupMenuItem(
-                    value: ViewMode.compact,
-                    child: Text('Compact'),
-                  ),
-                  const PopupMenuItem(
-                    value: ViewMode.gallery,
-                    child: Text('Gallery'),
-                  ),
-                ],
-              ),
-              PopupMenuButton<dynamic>(
-                icon: const Icon(BootstrapIcons.sort_alpha_down),
-                tooltip: 'Sort By',
-                onSelected: (value) {
-                  if (value is SortOption) {
-                    context.read<FileExplorerBloc>().add(
-                      ChangeSortOrder(
-                        value,
-                        fileExplorerState is FileExplorerLoaded
-                            ? fileExplorerState.sortOrder
-                            : SortOrder.ascending,
-                      ),
-                    );
-                  } else if (value is SortOrder) {
-                    context.read<FileExplorerBloc>().add(
-                      ChangeSortOrder(
-                        fileExplorerState is FileExplorerLoaded
-                            ? fileExplorerState.sortOption
-                            : SortOption.name,
-                        value,
-                      ),
-                    );
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(enabled: false, child: Text('Sort By')),
-                  const PopupMenuItem(
-                    value: SortOption.name,
-                    child: Text('Name'),
-                  ),
-                  const PopupMenuItem(
-                    value: SortOption.size,
-                    child: Text('Size'),
-                  ),
-                  const PopupMenuItem(
-                    value: SortOption.date,
-                    child: Text('Date'),
-                  ),
-                  const PopupMenuItem(
-                    value: SortOption.type,
-                    child: Text('Type'),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(
-                    value: SortOrder.ascending,
-                    child: Text('Ascending'),
-                  ),
-                  const PopupMenuItem(
-                    value: SortOrder.descending,
-                    child: Text('Descending'),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
+      child: DockedTopBarScaffold(
         drawer: const MainDrawer(),
+        topBarBuilder: (scaffoldContext) => _buildDockedTopBar(
+          scaffoldContext,
+          fileExplorerState: fileExplorerState,
+          isSelectionMode: isSelectionMode,
+        ),
         body: Stack(
           children: [
             _buildFileList(context, fileExplorerState),
@@ -294,10 +158,89 @@ class _FileExplorerUI extends StatelessWidget {
                   }
                 },
                 label: const Text('Paste'),
-                icon: const Icon(BootstrapIcons.clipboard_check),
+                icon: AppIcons.clipboard(),
               )
             : null,
       ),
+    );
+  }
+
+  Widget _buildDockedTopBar(
+    BuildContext context, {
+    required FileExplorerState fileExplorerState,
+    required bool isSelectionMode,
+  }) {
+    final title = fileExplorerState is FileExplorerLoaded
+        ? (fileExplorerState.path == '/storage/emulated/0'
+            ? 'Files'
+            : p.basename(fileExplorerState.path))
+        : 'Files';
+
+    if (isSelectionMode && fileExplorerState is FileExplorerLoaded) {
+      return DockedGlossyTopBar(
+        title: title,
+        leading: IconButton(
+          icon: AppIcons.cancel(),
+          tooltip: 'Cancel selection',
+          onPressed: () {
+            context.read<FileExplorerBloc>().add(
+                  ToggleSelectionMode(enable: false),
+                );
+          },
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: AppIcons.archive(),
+              tooltip: 'Compress',
+              onPressed: () => _handleCompress(context, fileExplorerState),
+            ),
+            IconButton(
+              icon: AppIcons.delete(),
+              tooltip: 'Delete',
+              onPressed: () {
+                FileActionsService().deleteFiles(
+                  context,
+                  fileExplorerState.selectedItems
+                      .map((e) => e as File)
+                      .toList(),
+                );
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Delete not implemented yet here'),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
+    return DockedGlossyTopBar(
+      title: title,
+      onMenuPressed: () => Scaffold.of(context).openDrawer(),
+      onMorePressed: fileExplorerState is FileExplorerLoaded
+          ? () {
+              ExplorerOptionsSheet.show(
+                context,
+                fileState: fileExplorerState,
+                onHttpShare: () =>
+                    _handleHttpShare(context, fileExplorerState),
+                onSortChanged: (SortOption option, SortOrder order) {
+                  context.read<FileExplorerBloc>().add(
+                        ChangeSortOrder(option, order),
+                      );
+                },
+                onViewModeChanged: (ViewMode mode) {
+                  context.read<FileExplorerBloc>().add(
+                        ChangeViewMode(mode),
+                      );
+                },
+              );
+            }
+          : null,
     );
   }
 
@@ -323,7 +266,12 @@ class _FileExplorerUI extends StatelessWidget {
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
           ),
-          padding: const EdgeInsets.all(8),
+          padding: EdgeInsets.fromLTRB(
+            8,
+            DockedGlossyTopBar.contentTopInset(context) + 8,
+            8,
+            8,
+          ),
           itemCount: state.entities.length,
           itemBuilder: (context, index) {
             final entity = state.entities[index];
@@ -375,6 +323,9 @@ class _FileExplorerUI extends StatelessWidget {
       // Default to List View (Compact or List)
       return ListView.separated(
         physics: const BouncingScrollPhysics(),
+        padding: EdgeInsets.only(
+          top: DockedGlossyTopBar.contentTopInset(context),
+        ),
         itemCount: state.entities.length,
         itemBuilder: (context, index) {
           final entity = state.entities[index];

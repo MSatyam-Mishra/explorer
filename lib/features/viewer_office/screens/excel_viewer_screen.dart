@@ -1,6 +1,9 @@
 import 'dart:io';
+
 import 'package:excel/excel.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 class ExcelViewerScreen extends StatefulWidget {
   final File file;
@@ -44,13 +47,8 @@ class _ExcelViewerScreenState extends State<ExcelViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.file.uri.pathSegments.last,
-          style: const TextStyle(fontSize: 16),
-        ),
-      ),
+    return ExplorerScaffold(
+      title: p.basename(widget.file.path),
       body: _buildBody(),
     );
   }

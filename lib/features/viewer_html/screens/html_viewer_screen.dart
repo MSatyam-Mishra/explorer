@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as p;
@@ -89,44 +90,38 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(p.basename(widget.file.path)),
-        centerTitle: true,
-        actions: [
-          // Toggle Button
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(
-                  value: 0,
-                  label: Text('Render'),
-                  icon: Icon(Icons.web),
-                ),
-                ButtonSegment(
-                  value: 1,
-                  label: Text('Source'),
-                  icon: Icon(Icons.code),
-                ),
-              ],
-              selected: {_viewMode},
-              onSelectionChanged: (newSelection) {
-                if (_isEditing) {
-                  setState(() => _isEditing = false);
-                }
-                setState(() {
-                  _viewMode = newSelection.first;
-                });
-              },
-              showSelectedIcon: false,
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
+    return ExplorerScaffold(
+      title: p.basename(widget.file.path),
+      trailing: Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(
+              value: 0,
+              label: Text('Render'),
+              icon: Icon(Icons.web, size: 18),
             ),
+            ButtonSegment(
+              value: 1,
+              label: Text('Source'),
+              icon: Icon(Icons.code, size: 18),
+            ),
+          ],
+          selected: {_viewMode},
+          onSelectionChanged: (newSelection) {
+            if (_isEditing) {
+              setState(() => _isEditing = false);
+            }
+            setState(() {
+              _viewMode = newSelection.first;
+            });
+          },
+          showSelectedIcon: false,
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-        ],
+        ),
       ),
       body: _buildBody(),
       floatingActionButton: _viewMode == 1

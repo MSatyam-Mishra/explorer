@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:explorer/features/category_view/bloc/bloc/category_bloc.dart';
 
 import 'package:explorer/features/file_explorere/widgets/file_type_icon.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
@@ -24,8 +25,8 @@ class CategoryViewerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (context) => CategoryBloc()..add(LoadCategoryAssets(categoryType, path: path)),
-      child: Scaffold(
-        appBar: AppBar(title: Text(title)),
+      child: ExplorerScaffold(
+        title: title,
         body: BlocBuilder<CategoryBloc, CategoryState>(
           builder: (context, state) {
             if (state is CategoryLoading) {

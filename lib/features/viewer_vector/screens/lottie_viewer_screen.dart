@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:lottie/lottie.dart';
 
 class LottieViewerScreen extends StatefulWidget {
@@ -109,46 +111,27 @@ class _LottiePlayerPageState extends State<LottiePlayerPage>
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // Content
-        Center(
-          child: Lottie.file(
-            widget.file,
-            controller: _controller,
-            onLoaded: (composition) {
-              setState(() {
-                _controller.duration = composition.duration;
-                if (_isPlaying) {
-                  _controller.forward();
-                  _controller.repeat();
-                }
-              });
-            },
-          ),
-        ),
-
-        // Top Bar (filename + back button)
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            child: AppBar(
-              title: Text(widget.file.path.split('/').last),
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              iconTheme: const IconThemeData(color: Colors.white),
-              titleTextStyle: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-              ),
+    return ExplorerScaffold(
+      backgroundColor: Colors.black,
+      title: p.basename(widget.file.path),
+      body: Stack(
+        children: [
+          Center(
+            child: Lottie.file(
+              widget.file,
+              controller: _controller,
+              onLoaded: (composition) {
+                setState(() {
+                  _controller.duration = composition.duration;
+                  if (_isPlaying) {
+                    _controller.forward();
+                    _controller.repeat();
+                  }
+                });
+              },
             ),
           ),
-        ),
-
-        // Bottom Controls
-        Positioned(
+          Positioned(
           bottom: 0,
           left: 0,
           right: 0,
@@ -193,7 +176,8 @@ class _LottiePlayerPageState extends State<LottiePlayerPage>
             ),
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }

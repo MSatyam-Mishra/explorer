@@ -2,17 +2,17 @@ import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:explorer/core/services/auth_service.dart';
 import 'package:explorer/core/services/directory_services.dart';
 import 'package:explorer/features/category_view/bloc/bloc/screens/category_viewer_screen.dart';
-import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/vault/screens/vault_screen.dart';
 import 'package:explorer/features/tools/screens/app_manager_screen.dart';
 import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
 
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/glossy_drawer.dart';
 import 'package:explorer/shared/widgets/storage_drawer.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:path/path.dart' as p;
 
@@ -21,17 +21,28 @@ class MainDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Drawer(
-      child: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                'Storage',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+    final sectionStyle = ClearGlassForeground.title(context).copyWith(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+        );
+    final itemColor = ClearGlassForeground.icon(context);
+
+    return GlossyDrawer(
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          listTileTheme: ListTileThemeData(
+            textColor: itemColor,
+            iconColor: itemColor,
+          ),
+        ),
+        child: SafeArea(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text('Storage', style: sectionStyle),
             ),
             BlocBuilder<SidebarBloc, SidebarState>(
               builder: (context, state) {
@@ -56,13 +67,13 @@ class MainDrawer extends StatelessWidget {
               },
             ),
 
-            const Divider(height: 24),
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                'Categories',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+            Divider(
+              height: 24,
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text('Categories', style: sectionStyle),
             ),
 
             // Use a BlocBuilder to show the categories when they are loaded
@@ -173,13 +184,13 @@ class MainDrawer extends StatelessWidget {
                 return const Center(child: CircularProgressIndicator());
               },
             ),
-            const Divider(height: 24),
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                'Tools',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+            Divider(
+              height: 24,
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text('Tools', style: sectionStyle),
             ),
             ListTile(
               leading: const Icon(BootstrapIcons.usb_drive),
@@ -192,7 +203,8 @@ class MainDrawer extends StatelessWidget {
                 );
               },
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

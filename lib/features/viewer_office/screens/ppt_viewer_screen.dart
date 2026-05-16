@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 // open_xml doesn't seem to have a widely used 'viewer' API, but we'll import what we can.
@@ -91,8 +92,8 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(p.basename(widget.file.path))),
+    return ExplorerScaffold(
+      title: p.basename(widget.file.path),
       body: _buildBody(),
     );
   }

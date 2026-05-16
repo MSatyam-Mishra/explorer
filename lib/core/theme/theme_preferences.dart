@@ -1,0 +1,42 @@
+import 'package:explorer/core/theme/app_color_theme.dart';
+import 'package:explorer/core/theme/app_theme_settings.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+abstract final class ThemePreferences {
+  static const _keyThemeMode = 'theme_mode';
+  static const _keyColorThemeId = 'color_theme_id';
+
+  static Future<AppThemeSettings> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final modeName = prefs.getString(_keyThemeMode);
+    final colorId = prefs.getString(_keyColorThemeId);
+
+    return AppThemeSettings(
+      themeMode: _parseThemeMode(modeName),
+      colorThemeId: _resolveColorThemeId(colorId),
+    );
+  }
+
+  static Future<void> save(AppThemeSettings settings) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyThemeMode, settings.themeMode.name);
+    await prefs.setString(_keyColorThemeId, settings.colorThemeId);
+  }
+
+  static String _resolveColorThemeId(String? stored) {
+    if (stored == null || stored.isEmpty) return AppColorThemes.oceanId;
+    return stored;
+  }
+
+  static ThemeMode _parseThemeMode(String? value) {
+    switch (value) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.dark;
+    }
+  }
+}

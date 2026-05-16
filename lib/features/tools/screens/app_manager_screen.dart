@@ -3,6 +3,7 @@ import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:explorer/core/repositories/app_repository.dart';
 import 'package:explorer/core/services/directory_services.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 
 class AppManagerScreen extends StatefulWidget {
@@ -89,27 +90,8 @@ class _AppManagerScreenState extends State<AppManagerScreen> {
   Widget build(BuildContext context) {
     final displayApps = _filteredApps;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('App Manager'),
-        actions: [
-          /* System App Filter Disabled
-          IconButton(
-            icon: Icon(
-              _showSystemApps
-                  ? BootstrapIcons.eye_slash_fill
-                  : BootstrapIcons.eye_fill,
-            ),
-            tooltip: _showSystemApps ? 'Hide System Apps' : 'Show System Apps',
-            onPressed: () {
-              setState(() {
-                _showSystemApps = !_showSystemApps;
-              });
-            },
-          ),
-          */
-        ],
-      ),
+    return ExplorerScaffold(
+      title: 'App Manager',
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(

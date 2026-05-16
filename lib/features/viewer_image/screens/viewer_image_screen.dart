@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
@@ -71,24 +72,16 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
+      return const ExplorerScaffold(
         backgroundColor: Colors.black,
+        title: 'Photos',
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
-    return Scaffold(
+    return ExplorerScaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text(
-          '${_currentIndex + 1} / ${_images.length}',
-          style: const TextStyle(color: Colors.white),
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      extendBodyBehindAppBar: true,
+      title: '${_currentIndex + 1} / ${_images.length}',
       body: PhotoViewGallery.builder(
         scrollPhysics: const BouncingScrollPhysics(),
         builder: (BuildContext context, int index) {

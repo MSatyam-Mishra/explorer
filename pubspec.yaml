@@ -61,6 +61,8 @@ dependencies:
   excel: ^4.0.6
   docx_file_viewer: ^0.0.7
   xml: ^6.5.0
+  hugeicons: ^1.1.7
+  liquid_glass_easy: 1.1.1
   # quick_usb: ^0.4.0
 
 dev_dependencies:

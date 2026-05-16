@@ -1,73 +1,106 @@
+import 'package:explorer/core/theme/app_color_theme.dart';
+import 'package:explorer/core/theme/app_theme_settings.dart';
+import 'package:explorer/core/theme/explorer_theme_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Our app's signature gradient. This will be used for both themes.
-  static const Gradient primaryGradient = LinearGradient(
-    colors: [Color(0xFF64B5F6), Color(0xFF2196F3)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
+  static const double iconSize = 20;
 
-  // --- DARK THEME ---
-  static final ThemeData darkTheme = ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.dark,
-    scaffoldBackgroundColor: Colors.black, // PURE BLACK background
-    
-    // A solid blue as a fallback primary color
-    colorScheme: const ColorScheme.dark(
-      primary: Color(0xFF2196F3),
-      background: Colors.black,
-      surface: Color(0xFF1A1A1A), // A very dark grey for subtle surfaces
-      onSurface: Colors.white,
-    ),
+  static ThemeData build({
+    required AppColorThemeSpec colorTheme,
+    required Brightness brightness,
+  }) {
+    final appearance = colorTheme.appearanceFor(brightness);
+    final isDark = brightness == Brightness.dark;
 
-    textTheme: GoogleFonts.poppinsTextTheme(
-      ThemeData.dark().textTheme.apply(
-        bodyColor: Colors.white,
-        displayColor: Colors.white,
+    final colorScheme = ColorScheme(
+      brightness: brightness,
+      primary: colorTheme.primary,
+      onPrimary: colorTheme.neutral,
+      secondary: colorTheme.secondary,
+      onSecondary: colorTheme.neutral,
+      tertiary: colorTheme.tertiary,
+      onTertiary: colorTheme.neutral,
+      error: colorTheme.tertiary,
+      onError: colorTheme.neutral,
+      surface: appearance.surface,
+      onSurface: appearance.textPrimary,
+      surfaceContainerHighest: appearance.surfaceVariant,
+    );
+
+    final base = isDark ? ThemeData.dark() : ThemeData.light();
+    final inter = GoogleFonts.interTextTheme(base.textTheme);
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor:
+          appearance.screenGradient != null ||
+                  colorTheme.screenBackgroundGradient != null
+              ? Colors.transparent
+              : appearance.background,
+      textTheme: inter.apply(
+        bodyColor: appearance.textPrimary,
+        displayColor: appearance.textPrimary,
       ),
-    ),
+      iconTheme: const IconThemeData(size: iconSize),
+      primaryIconTheme: const IconThemeData(size: iconSize),
+      appBarTheme: AppBarTheme(
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: colorTheme.neutral,
+        iconTheme: IconThemeData(
+          color: colorTheme.neutral,
+          size: iconSize,
+        ),
+        titleTextStyle: inter.titleLarge?.copyWith(
+          color: colorTheme.neutral,
+          fontWeight: FontWeight.w500,
+          fontSize: 18,
+        ),
+      ),
+      dividerTheme: DividerThemeData(
+        color: appearance.border.withValues(alpha: 0.25),
+        thickness: 0.5,
+      ),
+      cardTheme: CardThemeData(
+        color: appearance.glassFill,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: appearance.glassBorder),
+        ),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: colorTheme.neutral,
+        foregroundColor: appearance.textPrimary,
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: Colors.transparent,
+        modalBackgroundColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+      ),
+      extensions: [
+        ExplorerThemeExtension(
+          colorTheme: colorTheme,
+          appearance: appearance,
+          appBarGradientStart: colorTheme.appBarGradientStart,
+          appBarGradientEnd: colorTheme.appBarGradientEnd,
+          glassBlurSigma: isDark ? 24 : 20,
+        ),
+      ],
+    );
+  }
 
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.black,
-      elevation: 0,
-    ),
-
-    dividerTheme: DividerThemeData(
-      color: Colors.grey.shade800,
-      thickness: 0.5,
-    ),
-  );
-
-  // --- LIGHT THEME ---
-  static final ThemeData lightTheme = ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.light,
-    scaffoldBackgroundColor: Colors.white, // PURE WHITE background
-
-    colorScheme: const ColorScheme.light(
-      primary: Color(0xFF2196F3),
-      background: Colors.white,
-      surface: Color(0xFFF5F5F5), // A very light grey for subtle surfaces
-      onSurface: Colors.black,
-    ),
-    
-    textTheme: GoogleFonts.poppinsTextTheme(
-      ThemeData.light().textTheme,
-    ),
-
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      iconTheme: IconThemeData(color: Colors.black),
-      titleTextStyle: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.w500),
-    ),
-
-    dividerTheme: DividerThemeData(
-      color: Colors.grey.shade200,
-      thickness: 1,
-    ),
-  );
+  static ThemeData forSettings(
+    AppThemeSettings settings, {
+    required Brightness brightness,
+  }) {
+    return build(colorTheme: settings.colorTheme, brightness: brightness);
+  }
 }

@@ -1,5 +1,7 @@
 import 'dart:io' as io;
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:rive/rive.dart';
 
 class RiveViewerScreen extends StatefulWidget {
@@ -138,48 +140,31 @@ class _RivePlayerPageState extends State<RivePlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // Content
-        Center(
-          child: _isLoading
-              ? const CircularProgressIndicator()
-              : _error != null
-              ? Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              : _controller == null
-              ? const Text(
-                  'Unable to initialize Rive controller',
-                  style: TextStyle(color: Colors.white),
-                )
-              : RiveWidget(controller: _controller!, fit: Fit.contain),
-        ),
-
-        // Top Bar
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            child: AppBar(
-              title: Text(widget.file.path.split('/').last),
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              iconTheme: const IconThemeData(color: Colors.white),
-              titleTextStyle: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-              ),
-            ),
-          ),
-        ),
-      ],
+    return ExplorerScaffold(
+      backgroundColor: Colors.black,
+      title: p.basename(widget.file.path),
+      body: Center(
+        child: _isLoading
+            ? const CircularProgressIndicator()
+            : _error != null
+                ? Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : _controller == null
+                    ? const Text(
+                        'Unable to initialize Rive controller',
+                        style: TextStyle(color: Colors.white),
+                      )
+                    : RiveWidget(
+                        controller: _controller!,
+                        fit: Fit.contain,
+                      ),
+      ),
     );
   }
 }

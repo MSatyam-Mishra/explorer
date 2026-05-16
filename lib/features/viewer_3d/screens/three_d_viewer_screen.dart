@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_3d_controller/flutter_3d_controller.dart';
 import 'package:path/path.dart' as p;
@@ -48,14 +50,17 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     final ext = p.extension(widget.file.path).toLowerCase();
     final isObj = ext == '.obj';
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(p.basename(widget.file.path)),
-        actions: isObj
-            ? []
-            : [
+    final barFg = ClearGlassForeground.icon(context);
+
+    return ExplorerScaffold(
+      title: p.basename(widget.file.path),
+      trailing: isObj
+          ? null
+          : ExplorerTopBar.actions(
+              context,
+              [
                 IconButton(
-                  icon: const Icon(Icons.refresh),
+                  icon: Icon(Icons.refresh, color: barFg),
                   tooltip: 'Reset Camera',
                   onPressed: () {
                     _controller.resetCameraOrbit();
@@ -63,21 +68,17 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.play_arrow),
+                  icon: Icon(Icons.play_arrow, color: barFg),
                   tooltip: 'Play Animation',
-                  onPressed: () {
-                    _controller.playAnimation();
-                  },
+                  onPressed: _controller.playAnimation,
                 ),
                 IconButton(
-                  icon: const Icon(Icons.pause),
+                  icon: Icon(Icons.pause, color: barFg),
                   tooltip: 'Pause Animation',
-                  onPressed: () {
-                    _controller.pauseAnimation();
-                  },
+                  onPressed: _controller.pauseAnimation,
                 ),
               ],
-      ),
+            ),
       body: Stack(
         children: [
           _buildViewer(isObj),

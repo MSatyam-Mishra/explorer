@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:filesize/filesize.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
@@ -214,10 +216,15 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Bootable USB Creator"),
-        actions: [
+    return ExplorerScaffold(
+      title: 'Bootable USB Creator',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Root Mode',
+            style: TextStyle(color: ClearGlassForeground.primaryText(context)),
+          ),
           Switch(
             value: _useRoot,
             onChanged: _isFlashing
@@ -226,12 +233,6 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
                     setState(() => _useRoot = v);
                     _loadDevices();
                   },
-          ),
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.only(right: 16.0),
-              child: Text("Root Mode"),
-            ),
           ),
         ],
       ),

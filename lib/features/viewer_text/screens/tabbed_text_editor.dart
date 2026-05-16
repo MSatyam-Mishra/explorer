@@ -1,6 +1,10 @@
 import 'dart:io';
 
+import 'package:explorer/shared/icons/app_icons.dart';
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
@@ -124,50 +128,69 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Text Editor'),
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: _files.map((file) {
-            return Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(p.basename(file.path)),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: () {
-                      // Find index of this file
-                      int idx = _files.indexOf(file);
-                      _closeTab(idx);
-                    },
-                    child: const Icon(Icons.close, size: 16),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
+    final iconColor = ClearGlassForeground.icon(context);
+
+    return ExplorerScaffold(
+      title: 'Text Editor',
+      trailing: ExplorerTopBar.actions(
+        context,
+        [
+          ExplorerTopBar.iconButton(
+            context: context,
+            icon: AppIcons.huge(
+              HugeIcons.strokeRoundedAdd01,
+              color: iconColor,
+            ),
             tooltip: 'Open another file',
             onPressed: _addFile,
           ),
-          IconButton(
-            icon: const Icon(Icons.save),
+          ExplorerTopBar.iconButton(
+            context: context,
+            icon: AppIcons.huge(
+              HugeIcons.strokeRoundedFloppyDisk,
+              color: iconColor,
+            ),
             tooltip: 'Save current file',
             onPressed: _saveCurrentFile,
           ),
         ],
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: _files.map((file) {
-          return SingleFileEditor(key: _getKeyForFile(file), textFile: file);
-        }).toList(),
+      body: Column(
+        children: [
+          TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            tabs: _files.map((file) {
+              return Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(p.basename(file.path)),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () {
+                        final idx = _files.indexOf(file);
+                        _closeTab(idx);
+                      },
+                      child: const Icon(Icons.close, size: 16),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: _files.map((file) {
+                return SingleFileEditor(
+                  key: _getKeyForFile(file),
+                  textFile: file,
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }

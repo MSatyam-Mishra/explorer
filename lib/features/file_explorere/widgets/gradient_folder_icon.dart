@@ -1,6 +1,7 @@
-import 'package:bootstrap_icons/bootstrap_icons.dart';
-import 'package:explorer/core/theme/app_theme.dart';
+import 'package:explorer/core/theme/explorer_theme_extension.dart';
+import 'package:explorer/shared/icons/app_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 class GradientFolderIcon extends StatelessWidget {
   final double size;
@@ -8,17 +9,29 @@ class GradientFolderIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = context.explorerTheme;
+    final gradient = LinearGradient(
+      colors: [
+        theme.colorTheme.primary,
+        theme.colorTheme.secondary,
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient, // Use the gradient from our theme
-        borderRadius: BorderRadius.circular(size * 0.2), // Proportional radius
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(size * 0.2),
       ),
-      child: Icon(
-        BootstrapIcons.folder_fill,
-        color: Colors.white,
-        size: size * 0.57, // Proportional icon size (~24/42)
+      child: Center(
+        child: AppIcons.huge(
+          HugeIcons.strokeRoundedFolder01,
+          color: theme.colorTheme.neutral,
+          size: size * 0.52,
+        ),
       ),
     );
   }

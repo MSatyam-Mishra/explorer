@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:bootstrap_icons/bootstrap_icons.dart';
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 // import 'package:rar/rar.dart';
@@ -205,19 +207,18 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(p.basename(widget.archiveFile.path)),
-        actions: [
-          TextButton.icon(
-            onPressed: _isExtracting ? null : _extractAll,
-            icon: const Icon(BootstrapIcons.box_arrow_down),
-            label: const Text('Extract All'),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-        ],
+    return ExplorerScaffold(
+      title: p.basename(widget.archiveFile.path),
+      trailing: TextButton.icon(
+        onPressed: _isExtracting ? null : _extractAll,
+        icon: Icon(
+          BootstrapIcons.box_arrow_down,
+          color: ClearGlassForeground.icon(context),
+        ),
+        label: Text(
+          'Extract All',
+          style: TextStyle(color: ClearGlassForeground.primaryText(context)),
+        ),
       ),
       body: Stack(
         children: [
