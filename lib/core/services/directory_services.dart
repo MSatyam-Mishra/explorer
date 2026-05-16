@@ -4,8 +4,15 @@ import 'package:path/path.dart' as p;
 
 class DirectoryService {
   static Future<Directory?> findDownloadsDirectory() async {
+    if (Platform.isWindows) {
+      final profile = Platform.environment['USERPROFILE'];
+      if (profile != null) {
+        final downloads = Directory(p.join(profile, 'Downloads'));
+        if (await downloads.exists()) return downloads;
+      }
+    }
+
     try {
-      // Get the root of external storage
       final Directory? externalDir = await getExternalStorageDirectory();
       if (externalDir == null) return null;
 

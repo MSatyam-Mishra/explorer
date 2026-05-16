@@ -114,7 +114,9 @@ class FileOpener {
       case '.svg':
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => SvgViewerScreen(file: file)),
+          MaterialPageRoute(
+            builder: (_) => SvgViewerScreen(filePath: file.path),
+          ),
         );
         break;
 

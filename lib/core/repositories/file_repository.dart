@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/platform/windows_locations.dart';
+
 /// Abstract repository to handle file system operations.
 /// This allows us to swap implementations for Root or Network access later.
 abstract class FileRepository {
@@ -16,6 +19,17 @@ abstract class FileRepository {
 class LocalFileRepository implements FileRepository {
   @override
   Future<List<FileSystemEntity>> listEntities(String path) async {
+    if (ExplorerPaths.isWindowsRoots(path)) {
+      final locations = await WindowsLocations.listAll();
+      final entities = <FileSystemEntity>[];
+      for (final location in locations) {
+        if (await Directory(location.path).exists()) {
+          entities.add(Directory(location.path));
+        }
+      }
+      return entities;
+    }
+
     final dir = Directory(path);
     if (!await dir.exists()) {
       throw FileSystemException("Directory not found", path);
@@ -23,10 +37,22 @@ class LocalFileRepository implements FileRepository {
     return dir.list().toList();
   }
 
+  /// Display labels for entries under [ExplorerPaths.windowsRoots].
+  Future<Map<String, String>> windowsRootLabels() async {
+    final labels = <String, String>{};
+    for (final location in await WindowsLocations.listAll()) {
+      labels[location.path] = location.displayName;
+    }
+    return labels;
+  }
+
   @override
   Future<List<Directory>> getStorageVolumes() async {
-    // Only works on Android/Linux usually.
-    // Scan /storage/
+    if (Platform.isWindows) {
+      final drives = await WindowsLocations.listDrives();
+      return drives.map((d) => Directory(d.path)).toList();
+    }
+
     if (!Platform.isAndroid) return [];
 
     final storageRoot = Directory('/storage');
@@ -75,6 +101,9 @@ class LocalFileRepository implements FileRepository {
 
   @override
   Future<bool> exists(String path) {
+    if (ExplorerPaths.isWindowsRoots(path)) {
+      return Future.value(true);
+    }
     return FileSystemEntity.type(
       path,
     ).then((type) => type != FileSystemEntityType.notFound);

@@ -6,11 +6,12 @@ import 'file_type_icon.dart';
 import 'gradient_folder_icon.dart';
 
 class FileListItem extends StatelessWidget {
- final FileSystemEntity entity;
+  final FileSystemEntity entity;
   final bool isSelectionMode;
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final String? displayName;
 
   const FileListItem({
     super.key,
@@ -19,10 +20,12 @@ class FileListItem extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
+    this.displayName,
   });
   @override
   Widget build(BuildContext context) {
-    final title = p.basename(entity.path);
+    final rawTitle = displayName ?? p.basename(entity.path);
+    final title = rawTitle.isEmpty ? entity.path : rawTitle;
     final isDirectory = entity is Directory;
     const subtitle = '10 KB Aug 07, 2025'; // Placeholder
 

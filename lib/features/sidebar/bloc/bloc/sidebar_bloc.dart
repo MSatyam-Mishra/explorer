@@ -24,24 +24,29 @@ class SidebarBloc extends Bloc<SidebarEvent, SidebarState> {
   ) async {
     emit(SidebarLoading());
     try {
-      final ps = await PhotoManager.requestPermissionExtend();
-      if (!ps.hasAccess) {
-        emit(
-          SidebarError('Storage permission is required to list categories.'),
-        );
-        return;
-      }
+      int photoCount = 0;
+      int videoCount = 0;
+      int audioCount = 0;
 
-      // Media counts are the same
-      final photoCount = await PhotoManager.getAssetCount(
-        type: RequestType.image,
-      );
-      final videoCount = await PhotoManager.getAssetCount(
-        type: RequestType.video,
-      );
-      final audioCount = await PhotoManager.getAssetCount(
-        type: RequestType.audio,
-      );
+      if (!Platform.isWindows) {
+        final ps = await PhotoManager.requestPermissionExtend();
+        if (!ps.hasAccess) {
+          emit(
+            SidebarError('Storage permission is required to list categories.'),
+          );
+          return;
+        }
+
+        photoCount = await PhotoManager.getAssetCount(
+          type: RequestType.image,
+        );
+        videoCount = await PhotoManager.getAssetCount(
+          type: RequestType.video,
+        );
+        audioCount = await PhotoManager.getAssetCount(
+          type: RequestType.audio,
+        );
+      }
 
       // Downloads Logic
       int downloadCount = 0;

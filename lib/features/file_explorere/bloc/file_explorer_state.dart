@@ -16,6 +16,9 @@ class FileExplorerLoaded extends FileExplorerState {
   final SortOption sortOption;
   final SortOrder sortOrder;
 
+  /// Optional display names (e.g. Windows drives / libraries on This PC).
+  final Map<String, String> pathLabels;
+
   FileExplorerLoaded({
     required this.entities,
     required this.path,
@@ -24,7 +27,13 @@ class FileExplorerLoaded extends FileExplorerState {
     this.viewMode = ViewMode.list,
     this.sortOption = SortOption.name,
     this.sortOrder = SortOrder.ascending,
+    this.pathLabels = const {},
   });
+
+  String labelFor(FileSystemEntity entity) {
+    return pathLabels[entity.path] ??
+        ExplorerPaths.displayNameForEntity(entity.path);
+  }
 
   FileExplorerLoaded copyWith({
     List<FileSystemEntity>? entities,
@@ -34,6 +43,7 @@ class FileExplorerLoaded extends FileExplorerState {
     ViewMode? viewMode,
     SortOption? sortOption,
     SortOrder? sortOrder,
+    Map<String, String>? pathLabels,
   }) {
     return FileExplorerLoaded(
       entities: entities ?? this.entities,
@@ -43,6 +53,7 @@ class FileExplorerLoaded extends FileExplorerState {
       viewMode: viewMode ?? this.viewMode,
       sortOption: sortOption ?? this.sortOption,
       sortOrder: sortOrder ?? this.sortOrder,
+      pathLabels: pathLabels ?? this.pathLabels,
     );
   }
 }

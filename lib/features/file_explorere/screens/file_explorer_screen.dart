@@ -1,4 +1,6 @@
 import 'dart:io';
+
+import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/shared/icons/app_icons.dart';
 import 'package:explorer/shared/widgets/explorer_options_sheet.dart';
@@ -56,7 +58,10 @@ class FileExplorerScreen extends StatelessWidget {
   }
 
   Future<PermissionStatus> _checkAndRequestPermission() async {
-    // Check if we already have permission
+    if (ExplorerPaths.isDesktop) {
+      return PermissionStatus.granted;
+    }
+
     var status = await Permission.manageExternalStorage.status;
 
     // If not granted, request it immediately
@@ -84,7 +89,7 @@ class _FileExplorerWithProviders extends StatelessWidget {
         BlocProvider(
           create: (context) =>
               FileExplorerBloc(repository: LocalFileRepository())
-                ..add(LoadDirectory('/storage/emulated/0')),
+                ..add(LoadDirectory(ExplorerPaths.initialPath)),
         ),
         BlocProvider(
           create: (context) => SidebarBloc()..add(LoadSidebarData()),
@@ -112,7 +117,7 @@ class _FileExplorerUI extends StatelessWidget {
     final taskState = context.watch<TaskProgressBloc>().state;
 
     final bool canPop = fileExplorerState is FileExplorerLoaded
-        ? fileExplorerState.path == '/storage/emulated/0'
+        ? ExplorerPaths.isAppRoot(fileExplorerState.path)
         : true;
     final bool isSelectionMode = fileExplorerState is FileExplorerLoaded
         ? fileExplorerState.isSelectionMode
@@ -126,8 +131,11 @@ class _FileExplorerUI extends StatelessWidget {
       onPopInvoked: (didPop) {
         if (didPop) return;
         if (fileExplorerState is FileExplorerLoaded) {
-          final parentPath = p.dirname(fileExplorerState.path);
-          context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
+          final parentPath =
+              ExplorerPaths.parentOf(fileExplorerState.path);
+          if (parentPath != null) {
+            context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
+          }
         }
       },
       child: DockedTopBarScaffold(
@@ -171,9 +179,7 @@ class _FileExplorerUI extends StatelessWidget {
     required bool isSelectionMode,
   }) {
     final title = fileExplorerState is FileExplorerLoaded
-        ? (fileExplorerState.path == '/storage/emulated/0'
-            ? 'Files'
-            : p.basename(fileExplorerState.path))
+        ? ExplorerPaths.titleForPath(fileExplorerState.path)
         : 'Files';
 
     if (isSelectionMode && fileExplorerState is FileExplorerLoaded) {
@@ -305,7 +311,7 @@ class _FileExplorerUI extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4.0),
                       child: Text(
-                        p.basename(entity.path),
+                        state.labelFor(entity),
                         textAlign: TextAlign.center,
                         overflow: TextOverflow.ellipsis,
                         maxLines: 2,
@@ -332,6 +338,7 @@ class _FileExplorerUI extends StatelessWidget {
           final isSelected = state.selectedItems.contains(entity);
           return FileListItem(
             entity: entity,
+            displayName: state.labelFor(entity),
             isSelectionMode: state.isSelectionMode,
             isSelected: isSelected,
             onTap: () => _handleTap(context, state, entity),

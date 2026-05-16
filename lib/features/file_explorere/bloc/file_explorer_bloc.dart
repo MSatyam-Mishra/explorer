@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:bloc/bloc.dart';
+import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/repositories/file_repository.dart';
+import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
-import 'package:explorer/core/services/folder_prefs_service.dart';
-import 'package:explorer/core/repositories/file_repository.dart';
 
 part 'file_explorer_event.dart';
 part 'file_explorer_state.dart';
@@ -70,6 +71,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
           currentState.entities,
           event.option,
           event.order,
+          pathLabels: currentState.pathLabels,
         );
         emit(
           currentState.copyWith(
@@ -99,10 +101,22 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final sortOption = FolderPrefsService().getSortOption(event.path);
       final sortOrder = FolderPrefsService().getSortOrder(event.path);
 
+      Map<String, String> pathLabels = {};
+      if (ExplorerPaths.isWindowsRoots(event.path) &&
+          repository is LocalFileRepository) {
+        pathLabels =
+            await (repository as LocalFileRepository).windowsRootLabels();
+      }
+
       final List<FileSystemEntity> entities = await repository.listEntities(
         event.path,
       );
-      final sortedEntities = _sortEntities(entities, sortOption, sortOrder);
+      final sortedEntities = _sortEntities(
+        entities,
+        sortOption,
+        sortOrder,
+        pathLabels: pathLabels,
+      );
 
       emit(
         FileExplorerLoaded(
@@ -111,6 +125,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
           viewMode: viewMode,
           sortOption: sortOption,
           sortOrder: sortOrder,
+          pathLabels: pathLabels,
         ),
       );
     } catch (e) {
@@ -118,19 +133,21 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
     }
   }
 
+  String _sortKey(FileSystemEntity entity, Map<String, String> pathLabels) {
+    return (pathLabels[entity.path] ?? p.basename(entity.path)).toLowerCase();
+  }
+
   List<FileSystemEntity> _sortEntities(
     List<FileSystemEntity> entities,
     SortOption option,
-    SortOrder order,
-  ) {
+    SortOrder order, {
+    Map<String, String> pathLabels = const {},
+  }) {
     entities.sort((a, b) {
       int comparison = 0;
       switch (option) {
         case SortOption.name:
-          comparison = p
-              .basename(a.path)
-              .toLowerCase()
-              .compareTo(p.basename(b.path).toLowerCase());
+          comparison = _sortKey(a, pathLabels).compareTo(_sortKey(b, pathLabels));
           break;
         case SortOption.size:
           // For directories, we can't easily get size without traversing, so treat them as 0 or equal

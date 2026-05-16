@@ -1,8 +1,9 @@
 import 'package:disk_space_plus/disk_space_plus.dart';
+import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 
 class StorageDrawerItem extends StatefulWidget {
   final IconData icon;
@@ -36,7 +37,7 @@ class _StorageDrawerItemState extends State<StorageDrawerItem> {
     double? total;
     double? free;
 
-    if (widget.path == '/storage/emulated/0') {
+    if (widget.path == ExplorerPaths.androidInternalStorage) {
       try {
         total = await diskSpacePlus.getTotalDiskSpace;
         free = await diskSpacePlus.getFreeDiskSpace;
