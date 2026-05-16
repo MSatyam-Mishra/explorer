@@ -1,2 +1,0 @@
-#!/usr/bin/env python3
-print('Processing verify_build_23855.py system updates...')
