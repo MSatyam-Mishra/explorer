@@ -123,17 +123,17 @@ class _PdfPageThumbnailState extends State<PdfPageThumbnail> {
       child: _image != null
           ? RawImage(image: _image, fit: BoxFit.fill)
           : widget.pageNumber == null
-              ? null
-              : Center(
-                  child: SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: Colors.black.withValues(alpha: 0.3),
-                    ),
-                  ),
+          ? null
+          : Center(
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Colors.black.withValues(alpha: 0.3),
                 ),
+              ),
+            ),
     );
     return RotatedBox(quarterTurns: widget.quarterTurns % 4, child: sheet);
   }

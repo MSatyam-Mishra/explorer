@@ -6,6 +6,7 @@
 //   name - display name of the file (optional)
 //   size - file size in bytes, used for progress (optional)
 //   bg   - initial background: dark | light | gradient | transparent
+//   inset - CSS px at the top hidden behind the app's floating bar (optional)
 //
 // The app may define `window.__viewer3dFiles` (array of paths relative to the
 // model's folder) so references with wrong case, backslashes or absolute
@@ -61,6 +62,11 @@ class ViewerError extends Error {
 
 const stage = document.getElementById('stage');
 
+// Render-loop state (declared first: helpers below may request a render).
+const clock = new THREE.Clock();
+let needsRender = true;
+let tween = null;
+
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({
@@ -97,21 +103,29 @@ renderer.domElement.addEventListener('webglcontextlost', (event) => {
 const scene = new THREE.Scene();
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.9;
+scene.environmentIntensity = 0.55;
 pmrem.dispose();
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
 scene.add(camera);
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x60646e, 0.8);
+// Image-based light alone is very even; a sky/ground hemisphere plus a key
+// light give faces readable contrast (and light Phong/Lambert materials,
+// which ignore the environment map).
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x3c404a, 0.9);
 scene.add(hemiLight);
 
-// Head light: follows the camera so the visible side is always lit.
-const headLight = new THREE.DirectionalLight(0xffffff, 1.4);
-headLight.position.set(1, 1.5, 0);
-headLight.target.position.set(0, 0, -2);
-camera.add(headLight);
-camera.add(headLight.target);
+// Key light: rides with the camera (from the upper left) so the visible
+// side is always lit while orbiting.
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.9);
+keyLight.position.set(-1.2, 2, 0.6);
+keyLight.target.position.set(0, 0, -3);
+camera.add(keyLight);
+camera.add(keyLight.target);
+
+// Space covered by the app's floating top bar (CSS px). The projection
+// centre is shifted down so models frame within the visible area.
+let topInset = Math.max(0, Number(params.get('inset')) || 0);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -159,10 +173,6 @@ applyBackground();
 // Render loop (renders on demand; continuous only while something moves)
 // ---------------------------------------------------------------------------
 
-const clock = new THREE.Clock();
-let needsRender = true;
-let tween = null;
-
 function requestRender() {
   needsRender = true;
 }
@@ -197,14 +207,24 @@ renderer.setAnimationLoop(() => {
   }
 });
 
-new ResizeObserver(() => {
+function effectiveInset(h) {
+  return Math.min(topInset, h * 0.4);
+}
+
+function applyViewport() {
   const w = Math.max(1, stage.clientWidth);
   const h = Math.max(1, stage.clientHeight);
   renderer.setSize(w, h, false);
-  camera.aspect = w / h;
+  const inset = effectiveInset(h);
+  camera.aspect = w / (h + inset);
+  if (inset > 0) camera.setViewOffset(w, h + inset, 0, 0, w, h);
+  else camera.clearViewOffset();
   camera.updateProjectionMatrix();
   requestRender();
-}).observe(stage);
+}
+
+new ResizeObserver(applyViewport).observe(stage);
+applyViewport();
 
 renderer.domElement.addEventListener('dblclick', () => resetView());
 
@@ -214,8 +234,15 @@ renderer.domElement.addEventListener('dblclick', () => resetView());
 
 const fileIndex = new Map(); // lower-case relative path -> actual path
 const baseIndex = new Map(); // lower-case basename -> shallowest actual path
-{
-  const files = Array.isArray(window.__viewer3dFiles) ? window.__viewer3dFiles : [];
+let indexBuilt = false;
+
+// Built on first use: the app injects the list at document start, but some
+// WebViews only run that script after the page started executing.
+function ensureIndex() {
+  if (indexBuilt) return;
+  const files = window.__viewer3dFiles;
+  if (!Array.isArray(files)) return;
+  indexBuilt = true;
   const sorted = files
     .filter((f) => typeof f === 'string' && f)
     .sort((a, b) => a.split('/').length - b.split('/').length);
@@ -227,10 +254,17 @@ const baseIndex = new Map(); // lower-case basename -> shallowest actual path
   }
 }
 
+// Exact (case-insensitive) match of a path relative to the model folder.
+function indexedPath(path) {
+  ensureIndex();
+  return fileIndex.get(path.toLowerCase()) || null;
+}
+
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|tga|tiff?|psd|dds|exr|hdr|avif)$/i;
 const ALT_IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'tga'];
 
 function lookupFile(path) {
+  ensureIndex();
   const segs = [];
   for (const s of path.split('/')) {
     if (!s || s === '.') continue;
@@ -408,7 +442,7 @@ function decodeText(buffer) {
 function makeDefaultMaterial(geometry) {
   const hasColor = !!(geometry && geometry.attributes && geometry.attributes.color);
   return new THREE.MeshStandardMaterial({
-    color: hasColor ? 0xffffff : 0xc4c8d0,
+    color: hasColor ? 0xffffff : 0xb4bac6,
     roughness: 0.55,
     metalness: 0.05,
     side: THREE.DoubleSide,
@@ -516,7 +550,7 @@ const FORMAT_LOADERS = {
     for (const m of text.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)) libLines.push(m[1].trim());
     let implicit = false;
     if (!libLines.length) {
-      const sibling = fileIndex.get(`${NAME.replace(/\.[^.]+$/, '')}.mtl`.toLowerCase());
+      const sibling = indexedPath(`${NAME.replace(/\.[^.]+$/, '')}.mtl`);
       if (sibling) {
         libLines.push(sibling);
         implicit = true;
@@ -553,7 +587,10 @@ const FORMAT_LOADERS = {
         const { MTLLoader } = await import('three/addons/loaders/MTLLoader.js');
         const mtlLoader = new MTLLoader(manager);
         mtlLoader.setMaterialOptions({ side: THREE.DoubleSide });
-        const creator = mtlLoader.parse(texts.join('\n'), MODEL_BASE);
+        // MTLLoader drops backslashes; Windows-authored texture paths need
+        // forward slashes to survive (line-continuation backslashes kept).
+        const mtlText = texts.join('\n').replace(/\\(?!\r?\n)/g, '/');
+        const creator = mtlLoader.parse(mtlText, MODEL_BASE);
         creator.preload();
         loader.setMaterials(creator);
         materialsLoaded = true;
@@ -577,7 +614,9 @@ const FORMAT_LOADERS = {
     const { STLLoader } = await import('three/addons/loaders/STLLoader.js');
     postProgress('parse', null, 'Processing model', true);
     const geometry = new STLLoader(manager).parse(buffer);
-    if (!geometry.attributes.normal) geometry.computeVertexNormals();
+    // Many exporters write zero or wrong facet normals; recompute them
+    // (non-indexed geometry, so this yields exact face normals).
+    geometry.computeVertexNormals();
     const material = makeDefaultMaterial(geometry);
     if (geometry.hasColors) {
       material.vertexColors = true;
@@ -696,9 +735,13 @@ const FORMAT_LOADERS = {
     const vrmlScene = new VRMLLoader(manager).parse(text, MODEL_BASE);
     // Drop the Background node's sky/ground spheres (renderOrder -Infinity):
     // the viewer controls the background and they'd break auto-framing.
+    const backgrounds = [];
+    vrmlScene.traverse((o) => {
+      if (o.renderOrder === -Infinity) backgrounds.push(o);
+    });
+    for (const b of backgrounds) b.removeFromParent();
     const group = new THREE.Group();
-    const children = vrmlScene.children.filter((c) => c.renderOrder !== -Infinity);
-    if (children.length) group.add(...children);
+    if (vrmlScene.children.length) group.add(...vrmlScene.children);
     return { object: group };
   },
 
@@ -734,7 +777,7 @@ const FORMAT_LOADERS = {
     // MD2 skins live next to the model; try common image types.
     const stem = NAME.replace(/\.[^.]+$/, '');
     for (const e of ['png', 'jpg', 'jpeg', 'tga']) {
-      const skin = fileIndex.get(`${stem}.${e}`.toLowerCase());
+      const skin = indexedPath(`${stem}.${e}`);
       if (!skin) continue;
       if (e === 'tga') await registerTextureHandlers();
       const handler = manager.getHandler(skin);
@@ -761,7 +804,21 @@ const FORMAT_LOADERS = {
   async gcode(buffer) {
     const { GCodeLoader } = await import('three/addons/loaders/GCodeLoader.js');
     postProgress('parse', null, 'Processing tool paths', true);
-    return { object: new GCodeLoader(manager).parse(decodeText(buffer)) };
+    const object = new GCodeLoader(manager).parse(decodeText(buffer));
+    // Show the printed part: drop travel moves (they reach the printer's
+    // home position and ruin framing) when there is extrusion to show.
+    const travel = [];
+    let extruded = false;
+    object.traverse((o) => {
+      if (!o.isLine || !o.material) return;
+      if (o.material.name === 'path') travel.push(o);
+      if (o.material.name === 'extruded') {
+        extruded = true;
+        o.material.color.set(0xff9e40);
+      }
+    });
+    if (extruded) for (const t of travel) t.removeFromParent();
+    return { object };
   },
 
   async '3dm'() {
@@ -984,9 +1041,14 @@ function recenter() {
 
 function frameCamera(animate) {
   const r = bounds.radius;
-  const vFov = THREE.MathUtils.degToRad(camera.fov);
-  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-  const distance = Math.max(r / Math.sin(vFov / 2), r / Math.sin(hFov / 2)) * 1.08;
+  // Fit the bounding sphere into the part of the canvas below the top bar.
+  const h = Math.max(1, stage.clientHeight);
+  const inset = effectiveInset(h);
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  const tanV = tanHalf * ((h - inset) / (h + inset));
+  const tanH = tanHalf * camera.aspect;
+  const halfAngle = Math.atan(Math.min(tanV, tanH));
+  const distance = (r / Math.sin(halfAngle)) * 1.02;
   const target = new THREE.Vector3(0, bounds.size.y / 2, 0);
   const dir = new THREE.Vector3(0.6, 0.45, 1).normalize();
   const position = target.clone().addScaledVector(dir, distance);
@@ -1105,7 +1167,7 @@ function flatVariant(material) {
     cached.flatShading = true;
   } else {
     cached = new THREE.MeshStandardMaterial({
-      color: material.color ? material.color.clone() : 0xc4c8d0,
+      color: material.color ? material.color.clone() : 0xb4bac6,
       map: material.map || null,
       vertexColors: !!material.vertexColors,
       side: material.side,
@@ -1384,6 +1446,11 @@ const COMMANDS = {
     frameCamera(true);
     scheduleStats();
   },
+  setInsets(insets) {
+    const top = Number(insets && insets.top);
+    topInset = Number.isFinite(top) ? Math.max(0, top) : 0;
+    applyViewport();
+  },
   setPointSize(scale) {
     const s = Number(scale);
     state.pointScale = Number.isFinite(s) ? THREE.MathUtils.clamp(s, 0.1, 10) : 1;
@@ -1428,7 +1495,11 @@ function describeError(error) {
   if (fetchFail) {
     return { code: 'missing_file', message: `Missing file "${displayNameOf(fetchFail[1])}" referenced by the model.`, detail: raw };
   }
-  let m = /Unknown extension "([^"]+)"/.exec(raw);
+  let m = /Failed to load buffer "([^"]+)"/.exec(raw);
+  if (m) {
+    return { code: 'missing_file', message: `Missing file "${safeDecode(m[1])}" referenced by the model.`, detail: raw };
+  }
+  m = /Unknown extension "([^"]+)"/.exec(raw);
   if (m) {
     return { code: 'unsupported_extension', message: `This glTF needs the unsupported extension ${m[1]}.`, detail: raw };
   }

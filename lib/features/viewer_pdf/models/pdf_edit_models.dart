@@ -31,11 +31,11 @@ class PdfPageMeta {
 /// blank page of [blankSize].
 class PagePlanEntry {
   const PagePlanEntry.source(int this.sourceIndex, {this.quarterTurns = 0})
-      : blankSize = null;
+    : blankSize = null;
 
   const PagePlanEntry.blank(Size this.blankSize)
-      : sourceIndex = null,
-        quarterTurns = 0;
+    : sourceIndex = null,
+      quarterTurns = 0;
 
   final int? sourceIndex;
   final int quarterTurns;

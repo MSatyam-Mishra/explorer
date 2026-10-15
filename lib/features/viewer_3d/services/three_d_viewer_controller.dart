@@ -105,6 +105,8 @@ class ThreeDViewerController extends ChangeNotifier {
 
   /// Puts the viewer into the error state (used for Flutter-side failures).
   void fail(String message, {String? detail, String? code}) {
+    // The screen drops the web view in the error state.
+    _web = null;
     _phase = ViewerPhase.error;
     _errorMessage = message;
     _errorDetail = detail;
@@ -126,6 +128,8 @@ class ThreeDViewerController extends ChangeNotifier {
     _clips = const [];
     _animationIndex = -2;
     _animationPlaying = false;
+    // The reloaded page starts from its URL's inset; resend the live one.
+    _sentTopInset = null;
     _notify();
   }
 
@@ -290,6 +294,20 @@ class ThreeDViewerController extends ChangeNotifier {
 
   /// Asks the page for a PNG; the result arrives via [onScreenshot].
   void requestScreenshot() => _send('screenshot');
+
+  double? _sentTopInset;
+
+  /// Tells the page how much of the canvas the floating top bar covers so
+  /// models are framed in the visible area. Only sends real changes.
+  void updateTopInset(double inset) {
+    if (_web == null || !isReady) return;
+    if (_sentTopInset != null && (_sentTopInset! - inset).abs() < 0.5) return;
+    _sentTopInset = inset;
+    _send('setInsets', {'top': inset});
+  }
+
+  /// Records the inset already passed to the page in its URL.
+  void initialTopInset(double inset) => _sentTopInset = inset;
 
   Future<void> _send(String name, [Object? arg]) async {
     final web = _web;

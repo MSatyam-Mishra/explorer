@@ -30,16 +30,21 @@ class PdfPageRasterizer {
   bool get isClosed => _closed;
 
   static Future<PdfPageRasterizer> open(Uint8List bytes) async {
-    final id = 'explorer_pdf_${DateTime.now().microsecondsSinceEpoch}_'
+    final id =
+        'explorer_pdf_${DateTime.now().microsecondsSinceEpoch}_'
         '${_counter++}';
     final dir = await Directory.systemTemp.createTemp('pdf_pages_');
     final file = File(p.join(dir.path, '$id.pdf'));
     await file.writeAsBytes(bytes, flush: true);
-    final pageCount =
-        await PdfViewerPlatform.instance.loadPdfFromFile(file.path, id);
+    final pageCount = await PdfViewerPlatform.instance.loadPdfFromFile(
+      file.path,
+      id,
+    );
     if (pageCount == null || (int.tryParse(pageCount) ?? 0) <= 0) {
       await _deleteQuietly(dir);
-      throw const FileSystemException('The page renderer could not open the PDF');
+      throw const FileSystemException(
+        'The page renderer could not open the PDF',
+      );
     }
     return PdfPageRasterizer._(id, dir);
   }

@@ -1,15 +1,32 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:math' as math;
 
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
-import 'package:explorer/shared/widgets/explorer_scaffold.dart';
-import 'package:explorer/shared/widgets/glossy_drawer.dart';
-import 'package:flutter/material.dart';
-import 'package:epubx/epubx.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:explorer/core/services/bookmark_service.dart';
+import 'package:explorer/shared/layout/adaptive_layout.dart';
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
+import 'package:explorer/shared/widgets/explorer_scaffold.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../book/book_models.dart';
+import '../book/book_source.dart';
+import '../book/document_preparer.dart';
+import '../reader/reader_session.dart';
+import '../reader/reader_settings.dart';
+import '../widgets/reader_controls.dart';
+import '../widgets/reader_search_sheet.dart';
+import '../widgets/reader_settings_sheet.dart';
+import '../widgets/reader_side_panel.dart';
+
+/// E-book reader for EPUB 2/3, FB2 (`.fb2`, `.fb2.zip`, `.fbz`) and
+/// MOBI/AZW/AZW3/PRC (best effort). The format is detected from the file
+/// content, falling back to the extension.
 class EpubViewerScreen extends StatefulWidget {
   final File epubFile;
   const EpubViewerScreen({super.key, required this.epubFile});
@@ -19,482 +36,1248 @@ class EpubViewerScreen extends StatefulWidget {
 }
 
 class _EpubViewerScreenState extends State<EpubViewerScreen> {
-  EpubBook? _book;
-  List<EpubChapter> _chapters = [];
-  String _currentHtml = "";
-  bool _isLoading = true;
-  String? _error;
-  int _currentChapterIndex = 0;
-  InAppWebViewController? _webViewController;
   final BookmarkService _bookmarkService = BookmarkService();
-  List<Bookmark> _bookmarks = [];
+  final ReaderSearchController _search = ReaderSearchController();
+  final FocusNode _focus = FocusNode(debugLabel: 'ebook-reader');
+
+  BookSource? _source;
+  ReaderSession? _session;
+  InAppWebViewController? _web;
+  int _webGeneration = 0;
+
+  bool _opening = true;
+  String? _error;
+  bool _retryable = false;
+
+  ReaderSettings _settings = const ReaderSettings();
+  ReaderPosition? _pendingStart;
+
+  int _spine = 0;
+  int _page = 0;
+  int _pages = 1;
+  double _fraction = 0;
+  Map<String, int> _anchorPages = const {};
+  bool _docLoading = true;
+  String? _docError;
+
+  int _loadId = 0;
+  String? _expectedUrl;
+  Map<String, dynamic> _lastTarget = const {'type': 'start'};
+
+  bool _controlsVisible = false;
+  bool? _panelPreference;
+  double? _scrubValue;
+
+  List<Bookmark> _bookmarks = const [];
+  Uint8List? _cover;
+  List<int> _cumulative = const [0, 1];
+
+  Map<String, dynamic>? _hinge;
+  String _hingeKey = '';
+
+  Timer? _saveTimer;
+  Timer? _readyTimer;
+
+  String get _path => widget.epubFile.path;
+  BookInfo? get _info => _source?.info;
+
+  static bool get _platformSupported =>
+      !kIsWeb &&
+      (Platform.isAndroid ||
+          Platform.isIOS ||
+          Platform.isMacOS ||
+          Platform.isWindows);
 
   @override
   void initState() {
     super.initState();
-    _loadBook();
-    _loadBookmarks();
+    _open();
   }
 
-  Future<void> _loadBookmarks() async {
-    final bookmarks = await _bookmarkService.getBookmarks(widget.epubFile.path);
-    setState(() {
-      _bookmarks = bookmarks;
-    });
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    _readyTimer?.cancel();
+    _savePosition();
+    _session?.dispose();
+    final source = _source;
+    if (source != null) unawaited(source.dispose());
+    _search.dispose();
+    _focus.dispose();
+    super.dispose();
   }
 
-  Future<void> _addBookmark() async {
-    String label = "Chapter ${_currentChapterIndex + 1}";
-    if (_chapters.isNotEmpty &&
-        _currentChapterIndex < _chapters.length &&
-        _chapters[_currentChapterIndex].Title != null) {
-      label = _chapters[_currentChapterIndex].Title!;
+  // ------------------------------------------------------------ opening
+
+  Future<void> _open() async {
+    if (!_platformSupported) {
+      setState(() {
+        _opening = false;
+        _error = "The e-book reader isn't available on this platform.";
+        _retryable = false;
+      });
+      return;
     }
-
-    await _bookmarkService.addBookmark(
-      widget.epubFile.path,
-      _currentChapterIndex,
-      label,
-    );
-    _loadBookmarks();
+    _session?.dispose();
+    final old = _source;
+    if (old != null) unawaited(old.dispose());
+    _session = null;
+    _source = null;
+    _web = null;
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bookmarked current chapter')),
-      );
+      setState(() {
+        _opening = true;
+        _error = null;
+        _docError = null;
+        _cover = null;
+      });
+    }
+
+    try {
+      final settingsFuture = ReaderSettings.load();
+      final source = await BookSource.open(widget.epubFile);
+      if (!mounted) {
+        unawaited(source.dispose());
+        return;
+      }
+      final session = ReaderSession(source);
+      try {
+        await session.start();
+      } catch (_) {
+        unawaited(source.dispose());
+        rethrow;
+      }
+      final settings = await settingsFuture;
+      dynamic saved;
+      var bookmarks = const <Bookmark>[];
+      try {
+        saved = await _bookmarkService.getLastReadPosition(_path);
+        bookmarks = await _bookmarkService.getBookmarks(_path);
+      } catch (e) {
+        debugPrint('EPUB reader: could not read saved position: $e');
+      }
+      if (!mounted) {
+        session.dispose();
+        unawaited(source.dispose());
+        return;
+      }
+
+      final info = source.info;
+      final start = ReaderPosition.fromSaved(saved, info) ??
+          ReaderPosition(_firstLinear(info), 0);
+      final cumulative = <int>[0];
+      var total = 0;
+      for (final s in info.spine) {
+        total += math.max(1, s.size);
+        cumulative.add(total);
+      }
+
+      setState(() {
+        _source = source;
+        _session = session;
+        _settings = settings;
+        _bookmarks = bookmarks;
+        _cumulative = cumulative;
+        _pendingStart = start;
+        _spine = start.spine;
+        _fraction = start.progress;
+        _page = 0;
+        _pages = 1;
+        _docLoading = true;
+        _opening = false;
+      });
+      _loadCover();
+    } on BookOpenException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _opening = false;
+        _error = e.message;
+        _retryable = e.retryable;
+      });
+    } catch (e, st) {
+      debugPrint('EPUB reader: open failed: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _opening = false;
+        _error = "Couldn't open this book. It may be damaged or in an "
+            'unsupported format.';
+        _retryable = true;
+      });
     }
   }
 
-  Future<void> _loadBook() async {
+  int _firstLinear(BookInfo info) {
+    final i = info.spine.indexWhere((s) => s.linear);
+    return i < 0 ? 0 : i;
+  }
+
+  Future<void> _loadCover() async {
+    final source = _source;
+    final path = source?.info.metadata.coverPath;
+    if (source == null || path == null) return;
     try {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
+      final bytes = await source.readResource(path);
+      if (mounted && bytes != null && identical(source, _source)) {
+        setState(() => _cover = bytes);
+      }
+    } catch (_) {
+      // The header falls back to a placeholder.
+    }
+  }
 
-      final bytes = await widget.epubFile.readAsBytes();
-      final epubBook = await EpubReader.readBook(bytes);
+  // ------------------------------------------------------- navigation
 
-      setState(() {
-        _book = epubBook;
-        _chapters = epubBook.Chapters ?? [];
-        _isLoading = false;
-      });
+  Future<void> _openSpine(int index, Map<String, dynamic> target) async {
+    final session = _session;
+    final web = _web;
+    final info = _info;
+    if (session == null || web == null || info == null) return;
+    index = index.clamp(0, info.spine.length - 1);
+    final loadId = ++_loadId;
+    _lastTarget = target;
+    _readyTimer?.cancel();
+    setState(() {
+      _spine = index;
+      _docLoading = true;
+      _docError = null;
+      _anchorPages = const {};
+      _page = 0;
+      _pages = 1;
+      final value = target['value'];
+      _fraction = target['type'] == 'fraction' && value is num
+          ? value.toDouble()
+          : 0;
+    });
 
-      if (_chapters.isNotEmpty) {
-        int initialChapter = 0;
-        final lastRead = await _bookmarkService.getLastReadPosition(
-          widget.epubFile.path,
-        );
-        if (lastRead != null && lastRead is int) {
-          initialChapter = lastRead.clamp(0, _chapters.length - 1);
-        }
-        _loadChapter(initialChapter);
-      } else {
+    PreparedDocument doc;
+    try {
+      doc = await session.prepare(index);
+    } on BookOpenException catch (e) {
+      if (mounted && loadId == _loadId) {
         setState(() {
-          _error = "No chapters found in this EPUB file";
-          _isLoading = false;
+          _docLoading = false;
+          _docError = e.message;
         });
       }
+      return;
     } catch (e) {
-      setState(() {
-        _error = "Error loading EPUB: $e";
-        _isLoading = false;
-      });
-      debugPrint("Error loading EPUB: $e");
+      debugPrint('EPUB reader: preparing section $index failed: $e');
+      if (mounted && loadId == _loadId) {
+        setState(() {
+          _docLoading = false;
+          _docError = 'This section could not be displayed.';
+        });
+      }
+      return;
+    }
+    if (!mounted || loadId != _loadId || !identical(session, _session)) return;
+
+    session.configJson =
+        ReaderSession.encodeConfig(_configFor(index, loadId, target));
+    final url = session.documentUrl(index, doc).toString();
+    _expectedUrl = url;
+    _readyTimer = Timer(const Duration(seconds: 10), () => _onReadyTimeout(loadId));
+    try {
+      await web.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+    } catch (e) {
+      debugPrint('EPUB reader: loadUrl failed: $e');
+      if (mounted && loadId == _loadId) {
+        setState(() {
+          _docLoading = false;
+          _docError = 'This section could not be loaded.';
+        });
+      }
     }
   }
 
-  Future<void> _loadChapter(int chapterIndex) async {
-    if (chapterIndex < 0 || chapterIndex >= _chapters.length) return;
-
-    _bookmarkService.saveLastReadPosition(widget.epubFile.path, chapterIndex);
-
-    final chapter = _chapters[chapterIndex];
-    String htmlContent = chapter.HtmlContent ?? "<p>No content available</p>";
-    htmlContent = fixImagePaths(_book!, htmlContent);
-
-    String styledHtml =
-        '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <style>
-    body {
-      font-family: sans-serif;
-      margin: 0;
-      padding: 20px;
-      column-width: 90vw;
-      column-gap: 40px;
-      height: 100vh;
-      overflow: hidden;
-      transition: transform 0.6s ease;
-    }
-    img { max-width: 100%; height: auto; }
-  </style>
-</head>
-<body>
-  $htmlContent
- <script>
-  let currentPage = 0;
-  let totalPages = Math.ceil(document.body.scrollWidth / window.innerWidth);
-
-  function showPage(page) {
-    if (page < 0) {
-      window.flutter_inappwebview.callHandler('previousChapter');
-      return;
-    }
-    if (page >= totalPages) {
-      window.flutter_inappwebview.callHandler('nextChapter');
-      return;
-    }
-    currentPage = page;
-    window.scrollTo({ left: window.innerWidth * currentPage, behavior: 'smooth' });
+  Map<String, dynamic> _configFor(
+    int index,
+    int loadId,
+    Map<String, dynamic> target,
+  ) {
+    final info = _info!;
+    return {
+      'loadId': loadId,
+      'target': target,
+      'anchors': _anchorsFor(index),
+      'dir': info.metadata.rtl ? 'rtl' : 'auto',
+      'fixed': info.spine[index].fixedLayout,
+      'settings': _settings.toJs(),
+      'hinge': _hinge,
+      'hasPrev': _adjacent(index, -1) != null,
+      'hasNext': _adjacent(index, 1) != null,
+    };
   }
 
-  let startX = 0;
-  document.addEventListener('touchstart', e => startX = e.touches[0].clientX);
-  document.addEventListener('touchend', e => {
-    let deltaX = e.changedTouches[0].clientX - startX;
-    if (Math.abs(deltaX) > 50) {
-      if (deltaX < 0) showPage(currentPage + 1);
-      else showPage(currentPage - 1);
+  List<String> _anchorsFor(int index) => {
+        for (final f in _info!.flatToc)
+          if (f.entry.spineIndex == index && f.entry.fragment != null)
+            f.entry.fragment!,
+      }.toList();
+
+  /// Next/previous spine item in reading order, skipping non-linear items.
+  int? _adjacent(int index, int dir) {
+    final spine = _info?.spine;
+    if (spine == null) return null;
+    for (var j = index + dir; j >= 0 && j < spine.length; j += dir) {
+      if (spine[j].linear) return j;
     }
-  });
-</script>
-</body>
-</html>
-''';
+    final j = index + dir;
+    if (!spine[index].linear && j >= 0 && j < spine.length) return j;
+    return null;
+  }
 
-    setState(() {
-      _currentHtml = styledHtml;
-      _currentChapterIndex = chapterIndex;
-    });
-
-    _webViewController?.loadData(
-      data: _currentHtml,
-      mimeType: 'text/html',
-      encoding: 'utf-8',
+  void _goTo(int index, String? fragment) {
+    if (index == _spine && !_docLoading && _docError == null) {
+      if (fragment != null) {
+        _js('ER.goToFragment(${jsonEncode(fragment)})');
+      } else {
+        _js('ER.goToStart()');
+      }
+      return;
+    }
+    _openSpine(
+      index,
+      fragment != null
+          ? {'type': 'fragment', 'id': fragment}
+          : const {'type': 'start'},
     );
   }
 
-  void _previousChapter() {
-    if (_currentChapterIndex > 0) {
-      _loadChapter(_currentChapterIndex - 1);
+  void _goToPosition(int spine, double fraction) {
+    if (spine == _spine && !_docLoading && _docError == null) {
+      _js('ER.goToFraction($fraction)');
+    } else {
+      _openSpine(spine, {'type': 'fraction', 'value': fraction});
     }
   }
 
-  void _nextChapter() {
-    if (_currentChapterIndex < _chapters.length - 1) {
-      _loadChapter(_currentChapterIndex + 1);
+  void _next() {
+    if (_docError != null) return _onEdge(1);
+    if (!_docLoading) _js('ER.next()');
+  }
+
+  void _prev() {
+    if (_docError != null) return _onEdge(-1);
+    if (!_docLoading) _js('ER.prev()');
+  }
+
+  void _onEdge(int dir) {
+    final target = _adjacent(_spine, dir);
+    if (target == null) {
+      _snack(dir > 0
+          ? "You've reached the end of the book."
+          : 'This is the beginning of the book.');
+      return;
+    }
+    _openSpine(target, {'type': dir > 0 ? 'start' : 'end'});
+  }
+
+  void _prefetchNext() {
+    final session = _session;
+    final next = _adjacent(_spine, 1);
+    if (session == null || next == null) return;
+    session.prepare(next).then((_) {}, onError: (_) {});
+  }
+
+  // ---------------------------------------------------- web view glue
+
+  Future<dynamic> _js(String source) async {
+    final web = _web;
+    if (web == null) return null;
+    try {
+      return await web.evaluateJavascript(source: source);
+    } catch (e) {
+      debugPrint('EPUB reader: JS failed: $e');
+      return null;
+    }
+  }
+
+  static String _stripFragment(String url) {
+    final i = url.indexOf('#');
+    var s = i < 0 ? url : url.substring(0, i);
+    try {
+      s = Uri.decodeFull(s);
+    } catch (_) {}
+    return s;
+  }
+
+  dynamic _onJsMessage(List<dynamic> args) {
+    if (!mounted || args.isEmpty) return null;
+    final type = '${args[0]}';
+    var data = const <String, dynamic>{};
+    if (args.length > 1) {
+      try {
+        final raw = args[1];
+        final decoded = raw is String ? jsonDecode(raw) : raw;
+        if (decoded is Map) data = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    if (type == 'log') {
+      debugPrint('EPUB reader JS: ${data['message']} ${data['source'] ?? ''}');
+      return null;
+    }
+    final id = data['loadId'];
+    if (id is num && id.toInt() != _loadId) return null;
+    switch (type) {
+      case 'ready':
+      case 'layout':
+      case 'relocated':
+        _applyState(data, ready: type == 'ready');
+      case 'toggleControls':
+        setState(() => _controlsVisible = !_controlsVisible);
+      case 'edge':
+        _onEdge((data['dir'] as num?)?.toInt() ?? 1);
+      case 'link':
+        final href = data['href'];
+        if (href is String) _onLink(href);
+    }
+    return null;
+  }
+
+  void _applyState(Map<String, dynamic> d, {bool ready = false}) {
+    final pages = math.max(1, (d['pages'] as num?)?.toInt() ?? _pages);
+    final page = ((d['page'] as num?)?.toInt() ?? _page).clamp(0, pages - 1);
+    final fraction =
+        ((d['fraction'] as num?)?.toDouble() ?? _fraction).clamp(0.0, 1.0);
+    final anchors = d['anchors'];
+    final wasLoading = _docLoading;
+    setState(() {
+      _pages = pages;
+      _page = page;
+      _fraction = fraction;
+      if (anchors is Map) {
+        _anchorPages = {
+          for (final e in anchors.entries)
+            if (e.value is num) '${e.key}': (e.value as num).toInt(),
+        };
+      }
+      _docLoading = false;
+    });
+    if (wasLoading) {
+      _readyTimer?.cancel();
+      _prefetchNext();
+    }
+    _scheduleSave();
+  }
+
+  Future<void> _onLoadStop(InAppWebViewController c, WebUri? url) async {
+    final expected = _expectedUrl;
+    if (url == null || expected == null) return;
+    if (_stripFragment(url.toString()) != _stripFragment(expected)) return;
+    final loadId = _loadId;
+    dynamic result;
+    try {
+      result = await c.evaluateJavascript(
+        source: 'window.ER ? ER.state() : "__no_reader__"',
+      );
+    } catch (_) {
+      return;
+    }
+    if (!mounted || loadId != _loadId) return;
+    if (result == '__no_reader__') {
+      // An XHTML parse error stops scripts; retry with the HTML parser.
+      if (_session?.forceHtml(_spine) ?? false) {
+        _openSpine(_spine, _lastTarget);
+      } else if (_docLoading) {
+        setState(() => _docLoading = false);
+      }
+      return;
+    }
+    if (result is String && _docLoading) {
+      try {
+        final d = jsonDecode(result);
+        if (d is Map && d['ready'] == true) {
+          _applyState(Map<String, dynamic>.from(d), ready: true);
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _onReadyTimeout(int loadId) async {
+    if (!mounted || loadId != _loadId || !_docLoading) return;
+    final result = await _js('window.ER ? ER.state() : null');
+    if (!mounted || loadId != _loadId || !_docLoading) return;
+    if (result is String) {
+      try {
+        final d = jsonDecode(result);
+        if (d is Map) {
+          _applyState(Map<String, dynamic>.from(d), ready: true);
+          return;
+        }
+      } catch (_) {}
+    }
+    setState(() => _docLoading = false);
+  }
+
+  Future<NavigationActionPolicy?> _shouldOverride(
+    InAppWebViewController c,
+    NavigationAction action,
+  ) async {
+    final url = action.request.url?.toString();
+    if (url == null || !action.isForMainFrame) {
+      return NavigationActionPolicy.ALLOW;
+    }
+    if (url == 'about:blank' || url.startsWith('data:')) {
+      return NavigationActionPolicy.ALLOW;
+    }
+    final expected = _expectedUrl;
+    if (expected != null && _stripFragment(url) == _stripFragment(expected)) {
+      return NavigationActionPolicy.ALLOW;
+    }
+    _onLink(url);
+    return NavigationActionPolicy.CANCEL;
+  }
+
+  void _onLink(String href) {
+    final uri = Uri.tryParse(href);
+    if (uri == null) return;
+    final resolved = _session?.resolveBookUrl(uri);
+    if (resolved != null) {
+      final (index, _, fragment) = resolved;
+      if (index == null) {
+        _snack("This link points to a part of the book that isn't in the "
+            'reading order.');
+        return;
+      }
+      _goTo(index, fragment);
+      return;
+    }
+    if (uri.scheme == 'http' || uri.scheme == 'https') {
+      _confirmExternalLink(href);
+      return;
+    }
+    Clipboard.setData(ClipboardData(text: href));
+    _snack('Link copied to clipboard: $href');
+  }
+
+  Future<void> _confirmExternalLink(String href) async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Open external link?'),
+        content: SelectableText(href),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'copy'),
+            child: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'open'),
+            child: const Text('Open'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'open') {
+      try {
+        await InAppBrowser.openWithSystemBrowser(url: WebUri(href));
+        return;
+      } catch (e) {
+        debugPrint('EPUB reader: could not open browser: $e');
+      }
+    }
+    await Clipboard.setData(ClipboardData(text: href));
+    if (mounted) _snack('Link copied to clipboard');
+  }
+
+  // ---------------------------------------------------------- position
+
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 700), _savePosition);
+  }
+
+  void _savePosition() {
+    if (_source == null || _docLoading || _docError != null) return;
+    final position = ReaderPosition(_spine, _fraction).toJson();
+    _bookmarkService
+        .saveLastReadPosition(_path, position)
+        .catchError((Object e) => debugPrint('EPUB reader: save failed: $e'));
+  }
+
+  double _overall(int spine, double fraction) {
+    if (_cumulative.length < 2) return 0;
+    final s = spine.clamp(0, _cumulative.length - 2);
+    final size = _cumulative[s + 1] - _cumulative[s];
+    return ((_cumulative[s] + fraction * size) / _cumulative.last)
+        .clamp(0.0, 1.0);
+  }
+
+  (int, double) _fromOverall(double value) {
+    final last = _cumulative.length - 2;
+    final target = value.clamp(0.0, 1.0) * _cumulative.last;
+    for (var s = 0; s <= last; s++) {
+      if (target < _cumulative[s + 1] || s == last) {
+        final size = math.max(1, _cumulative[s + 1] - _cumulative[s]);
+        return (s, ((target - _cumulative[s]) / size).clamp(0.0, 0.999));
+      }
+    }
+    return (0, 0);
+  }
+
+  double get _displayOverall =>
+      _overall(_spine, _pages > 0 ? (_page + 1) / _pages : _fraction);
+
+  FlatTocEntry? _currentTocEntry() {
+    final info = _info;
+    if (info == null) return null;
+    FlatTocEntry? best;
+    var bestSpine = -1;
+    var bestPage = -1;
+    for (final f in info.flatToc) {
+      final s = f.entry.spineIndex;
+      if (s == null || s > _spine) continue;
+      var page = 0;
+      final frag = f.entry.fragment;
+      if (s == _spine && frag != null) {
+        final p = _anchorPages[frag];
+        if (p == null || p > _page) continue;
+        page = p;
+      }
+      if (s > bestSpine || (s == bestSpine && page >= bestPage)) {
+        best = f;
+        bestSpine = s;
+        bestPage = page;
+      }
+    }
+    return best;
+  }
+
+  String _titleForSpine(int index) {
+    final info = _info;
+    if (info == null) return '';
+    FlatTocEntry? before;
+    for (final f in info.flatToc) {
+      final s = f.entry.spineIndex;
+      if (s == index) return f.entry.title;
+      if (s != null && s < index) before = f;
+    }
+    final own = info.spine[index].title;
+    if (own != null) return own;
+    return before?.entry.title ?? 'Section ${index + 1}';
+  }
+
+  String get _chapterTitle {
+    if (_info == null) return '';
+    return _currentTocEntry()?.entry.title ?? _titleForSpine(_spine);
+  }
+
+  // --------------------------------------------------------- bookmarks
+
+  Bookmark? _currentBookmark() {
+    final info = _info;
+    if (info == null || _docLoading) return null;
+    for (final b in _bookmarks) {
+      final p = ReaderPosition.fromSaved(b.position, info);
+      if (p == null || p.spine != _spine) continue;
+      final page = (p.progress * _pages + 1e-6).floor().clamp(0, _pages - 1);
+      if (page == _page) return b;
+    }
+    return null;
+  }
+
+  Future<void> _reloadBookmarks() async {
+    try {
+      final list = await _bookmarkService.getBookmarks(_path);
+      if (mounted) setState(() => _bookmarks = list);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleBookmark() async {
+    final existing = _currentBookmark();
+    try {
+      if (existing != null) {
+        await _bookmarkService.removeBookmark(_path, existing.id);
+        if (mounted) _snack('Bookmark removed');
+      } else {
+        final label =
+            '$_chapterTitle · ${(_displayOverall * 100).round()}%';
+        await _bookmarkService.addBookmark(
+          _path,
+          ReaderPosition(_spine, _fraction).toJson(),
+          label,
+        );
+        if (mounted) _snack('Bookmarked "$label"');
+      }
+    } catch (e) {
+      if (mounted) _snack("Couldn't update bookmarks: $e");
+    }
+    await _reloadBookmarks();
+  }
+
+  void _goToBookmark(Bookmark b) {
+    final info = _info;
+    if (info == null) return;
+    final p = ReaderPosition.fromSaved(b.position, info);
+    if (p == null) {
+      _snack("This bookmark's position can't be found in the book.");
+      return;
+    }
+    _goToPosition(p.spine, p.progress);
+  }
+
+  Future<void> _deleteBookmark(Bookmark b) async {
+    try {
+      await _bookmarkService.removeBookmark(_path, b.id);
+    } catch (_) {}
+    await _reloadBookmarks();
+  }
+
+  // ------------------------------------------------------------ sheets
+
+  void _updateSettings(ReaderSettings s) {
+    if (!mounted) return;
+    setState(() => _settings = s);
+    unawaited(s.save());
+    if (!_docLoading) {
+      _js('window.ER && ER.applySettings(${jsonEncode(s.toJs())})');
+    }
+  }
+
+  void _openSettings() {
+    final info = _info;
+    if (info == null) return;
+    ReaderSettingsSheet.show(
+      context,
+      initial: _settings,
+      onChanged: _updateSettings,
+      fixedLayout: info.metadata.fixedLayout,
+    );
+  }
+
+  void _openSearch() {
+    final source = _source;
+    if (source == null) return;
+    ReaderSearchSheet.show(
+      context,
+      controller: _search,
+      source: source,
+      titleForSpine: _titleForSpine,
+      onSelect: _openSearchHit,
+    );
+  }
+
+  void _openSearchHit(SearchHit hit) {
+    final query = _search.query;
+    if (hit.spineIndex == _spine && !_docLoading && _docError == null) {
+      _js('ER.find(${jsonEncode(query)}, ${hit.occurrence})');
+    } else {
+      _openSpine(hit.spineIndex, {
+        'type': 'search',
+        'query': query,
+        'occurrence': hit.occurrence,
+      });
+    }
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    // Only when the reader itself (not the web view) has focus; the page
+    // script handles keys while the web view is focused.
+    if (!node.hasPrimaryFocus || event is KeyUpEvent || _info == null) {
+      return KeyEventResult.ignored;
+    }
+    final rtl = _info!.metadata.rtl;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      rtl ? _prev() : _next();
+    } else if (key == LogicalKeyboardKey.arrowLeft) {
+      rtl ? _next() : _prev();
+    } else if (key == LogicalKeyboardKey.pageDown ||
+        key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.arrowDown) {
+      _next();
+    } else if (key == LogicalKeyboardKey.pageUp ||
+        key == LogicalKeyboardKey.arrowUp) {
+      _prev();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  // ------------------------------------------------------------- layout
+
+  /// Tells the page about a vertical hinge it must keep text away from.
+  void _syncHinge(FoldInfo? fold) {
+    final hinge = fold == null
+        ? null
+        : <String, dynamic>{
+            'x': fold.bounds.left,
+            'width': fold.bounds.width,
+          };
+    final key = hinge == null ? '' : '${hinge['x']}:${hinge['width']}';
+    if (key == _hingeKey) return;
+    _hingeKey = key;
+    _hinge = hinge;
+    if (_web != null && !_docLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _js('window.ER && ER.setHinge(${jsonEncode(hinge)})');
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final barFg = ClearGlassForeground.icon(context);
+    final info = _info;
+    final fold = FoldInfo.of(context);
+    final verticalHinge = fold != null && fold.isVertical;
+    final wide = AdaptiveSplitView.isSplit(context);
+    final docked = info != null &&
+        _error == null &&
+        wide &&
+        (_panelPreference ?? !verticalHinge);
+    _syncHinge(!docked && verticalHinge ? fold : null);
+
+    final fg = ClearGlassForeground.icon(context);
+    final bookmarked = _currentBookmark() != null;
 
     return ExplorerScaffold(
-      title: _book?.Title ?? 'EPUB Reader',
-      trailing: ExplorerTopBar.actions(
-        context,
-        [
-          IconButton(
-            onPressed: _addBookmark,
-            icon: Icon(Icons.bookmark_border, color: barFg),
-            tooltip: 'Bookmark Chapter',
+      title: info?.metadata.title ?? widget.epubFile.uri.pathSegments.last,
+      trailing: info == null
+          ? null
+          : ExplorerTopBar.actions(context, [
+              ExplorerTopBar.iconButton(
+                context: context,
+                icon: Icon(Icons.search, color: fg),
+                tooltip: 'Search in book',
+                onPressed: _openSearch,
+              ),
+              ExplorerTopBar.iconButton(
+                context: context,
+                icon: Icon(
+                  bookmarked ? Icons.bookmark : Icons.bookmark_border,
+                  color: fg,
+                ),
+                tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
+                onPressed: _docLoading || _docError != null
+                    ? null
+                    : _toggleBookmark,
+              ),
+              Builder(
+                builder: (barContext) => ExplorerTopBar.iconButton(
+                  context: barContext,
+                  icon: Icon(Icons.toc, color: fg),
+                  tooltip: 'Contents & bookmarks',
+                  onPressed: () {
+                    if (wide) {
+                      setState(() => _panelPreference = !docked);
+                    } else {
+                      Scaffold.maybeOf(barContext)?.openDrawer();
+                    }
+                  },
+                ),
+              ),
+              ExplorerTopBar.iconButton(
+                context: context,
+                icon: Icon(Icons.text_format, color: fg),
+                tooltip: 'Reading settings',
+                onPressed: _openSettings,
+              ),
+            ]),
+      drawer: info != null && !docked ? _buildDrawer(context) : null,
+      body: Column(
+        children: [
+          SizedBox(height: DockedGlossyTopBar.contentTopInset(context)),
+          Expanded(child: _buildContent(context, docked, fold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawer(BuildContext context) {
+    final width = math.min(380.0, MediaQuery.sizeOf(context).width * 0.88);
+    return Drawer(
+      width: width,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        child: Builder(
+          builder: (drawerContext) => _buildPanel(
+            onDone: () => Scaffold.maybeOf(drawerContext)?.closeDrawer(),
           ),
-          IconButton(
-            onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
-            icon: Icon(Icons.arrow_back_ios, color: barFg, size: 18),
-            tooltip: 'Previous Chapter',
-          ),
-          IconButton(
-            onPressed: _currentChapterIndex < _chapters.length - 1
-                ? _nextChapter
-                : null,
-            icon: Icon(Icons.arrow_forward_ios, color: barFg, size: 18),
-            tooltip: 'Next Chapter',
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Center(
-              child: Text(
-                '${_currentChapterIndex + 1}/${_chapters.length}',
-                style: ExplorerTopBar.pageIndicatorStyle(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPanel({VoidCallback? onDone, VoidCallback? onClose}) {
+    final info = _info!;
+    return ReaderSidePanel(
+      info: info,
+      cover: _cover,
+      current: _currentTocEntry(),
+      bookmarks: _bookmarks,
+      bookmarkLabel: (b) => b.label,
+      onTocTap: (entry) {
+        final target = _tocTarget(entry);
+        if (target == null) return;
+        onDone?.call();
+        _goTo(target.spineIndex!, target.fragment);
+      },
+      onBookmarkTap: (b) {
+        onDone?.call();
+        _goToBookmark(b);
+      },
+      onBookmarkDelete: _deleteBookmark,
+      onClose: onClose,
+    );
+  }
+
+  /// The entry itself, or for a heading without a link its first child
+  /// that has one.
+  static TocEntry? _tocTarget(TocEntry entry) {
+    if (entry.spineIndex != null) return entry;
+    for (final child in entry.children) {
+      final t = _tocTarget(child);
+      if (t != null) return t;
+    }
+    return null;
+  }
+
+  Widget _buildContent(BuildContext context, bool docked, FoldInfo? fold) {
+    if (_opening) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Opening book…'),
+          ],
+        ),
+      );
+    }
+    final error = _error;
+    if (error != null || _info == null) {
+      return _ErrorView(
+        message: error ?? 'Unknown error',
+        onRetry: _retryable ? _open : null,
+      );
+    }
+
+    final hingeSplit = docked && fold != null && fold.isVertical;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final panelWidth = hingeSplit
+        ? fold.bounds.left
+        : (screenWidth >= 1200 ? 360.0 : 320.0);
+    return Row(
+      children: [
+        if (docked)
+          SizedBox(
+            key: const ValueKey('toc-pane'),
+            width: panelWidth,
+            child: Material(
+              color: Theme.of(context).colorScheme.surface,
+              child: _buildPanel(
+                onClose: () => setState(() => _panelPreference = false),
               ),
             ),
           ),
-        ],
-      ),
-      drawer: _chapters.isNotEmpty
-          ? GlossyDrawer(
-              child: Column(
+        if (docked)
+          hingeSplit
+              ? SizedBox(
+                  key: const ValueKey('hinge-gap'),
+                  width: fold.bounds.width,
+                )
+              : const VerticalDivider(key: ValueKey('toc-divider'), width: 1),
+        Expanded(
+          key: const ValueKey('reader-pane'),
+          child: _buildReader(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReader(BuildContext context) {
+    final theme = _settings.theme;
+    final overall = _displayOverall;
+    final status = _docLoading
+        ? ''
+        : '${_page + 1}/$_pages · ${(overall * 100).round()}%';
+    final prev = _adjacent(_spine, -1);
+    final next = _adjacent(_spine, 1);
+
+    return Focus(
+      focusNode: _focus,
+      autofocus: true,
+      onKeyEvent: _onKey,
+      child: ColoredBox(
+        color: theme.background,
+        child: Column(
+          children: [
+            Expanded(
+              child: Stack(
                 children: [
-                  DrawerHeader(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).primaryColor,
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text(
-                            _book?.Title ?? "Book",
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            maxLines: 2,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _book?.Author ?? "Unknown Author",
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 14,
+                  Positioned.fill(child: _buildWebView()),
+                  if (_docLoading)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: theme.background,
+                        child: Center(
+                          child: SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: theme.foreground.withValues(alpha: 0.6),
                             ),
                           ),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: DefaultTabController(
-                      length: 2,
-                      child: Column(
-                        children: [
-                          const TabBar(
-                            tabs: [
-                              Tab(text: "Index"),
-                              Tab(text: "Bookmarks"),
-                            ],
-                          ),
-                          Expanded(
-                            child: TabBarView(
-                              children: [
-                                // Tab 1: Index
-                                ListView.builder(
-                                  itemCount: _chapters.length,
-                                  itemBuilder: (context, i) => ListTile(
-                                    leading: CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: i == _currentChapterIndex
-                                          ? Theme.of(context).primaryColor
-                                          : Colors.grey.shade300,
-                                      child: Text(
-                                        '${i + 1}',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: i == _currentChapterIndex
-                                              ? Colors.white
-                                              : Colors.black54,
+                  if (_docError != null)
+                    Positioned.fill(child: _buildDocError(theme, prev, next)),
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 8,
+                    child: IgnorePointer(
+                      ignoring: !_controlsVisible,
+                      child: AnimatedSlide(
+                        offset: _controlsVisible
+                            ? Offset.zero
+                            : const Offset(0, 0.25),
+                        duration: const Duration(milliseconds: 180),
+                        child: AnimatedOpacity(
+                          opacity: _controlsVisible ? 1 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 640),
+                              child: ReaderControlsPanel(
+                                theme: theme,
+                                title: _chapterTitle,
+                                detail: _docLoading
+                                    ? 'Loading…'
+                                    : 'Page ${_page + 1} of $_pages in this '
+                                        'section · ${(overall * 100).round()}% '
+                                        'of book',
+                                value: _scrubValue ?? overall,
+                                labelFor: (v) {
+                                  final (s, _) = _fromOverall(v);
+                                  return '${(v * 100).round()}% · '
+                                      '${_titleForSpine(s)}';
+                                },
+                                onChanged: (v) =>
+                                    setState(() => _scrubValue = v),
+                                onChangeEnd: (v) {
+                                  setState(() => _scrubValue = null);
+                                  final (s, f) = _fromOverall(v);
+                                  _goToPosition(s, f);
+                                },
+                                onPrevChapter: prev == null
+                                    ? null
+                                    : () => _openSpine(
+                                          prev,
+                                          const {'type': 'start'},
                                         ),
-                                      ),
-                                    ),
-                                    title: Text(
-                                      _chapters[i].Title ?? "Chapter ${i + 1}",
-                                      style: TextStyle(
-                                        fontWeight: i == _currentChapterIndex
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
-                                        color: i == _currentChapterIndex
-                                            ? Theme.of(context).primaryColor
-                                            : null,
-                                      ),
-                                    ),
-                                    selected: i == _currentChapterIndex,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      _loadChapter(i);
-                                    },
-                                  ),
-                                ),
-                                // Tab 2: Bookmarks
-                                _bookmarks.isEmpty
-                                    ? const Center(child: Text("No bookmarks"))
-                                    : ListView.builder(
-                                        itemCount: _bookmarks.length,
-                                        itemBuilder: (context, index) {
-                                          final bookmark = _bookmarks[index];
-                                          return ListTile(
-                                            title: Text(bookmark.label),
-                                            subtitle: Text(
-                                              "${bookmark.createdAt.year}-${bookmark.createdAt.month}-${bookmark.createdAt.day}",
-                                            ),
-                                            trailing: IconButton(
-                                              icon: const Icon(
-                                                Icons.delete,
-                                                color: Colors.red,
-                                              ),
-                                              onPressed: () async {
-                                                await _bookmarkService
-                                                    .removeBookmark(
-                                                      widget.epubFile.path,
-                                                      bookmark.id,
-                                                    );
-                                                _loadBookmarks();
-                                              },
-                                            ),
-                                            onTap: () {
-                                              Navigator.pop(context);
-                                              _loadChapter(
-                                                bookmark.position as int,
-                                              );
-                                            },
-                                          );
-                                        },
-                                      ),
-                              ],
+                                onNextChapter: next == null
+                                    ? null
+                                    : () => _openSpine(
+                                          next,
+                                          const {'type': 'start'},
+                                        ),
+                              ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-            )
-          : null,
-      body: _buildBody(),
-      floatingActionButton: _chapters.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: () => Scaffold.of(context).openDrawer(),
-              child: const Icon(Icons.menu_book),
-              tooltip: 'Table of Contents',
-            )
+            ),
+            ReaderFooter(theme: theme, title: _chapterTitle, status: status),
+            SizedBox(height: MediaQuery.paddingOf(context).bottom),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebView() {
+    return InAppWebView(
+      key: ValueKey('ebook-webview-$_webGeneration'),
+      gestureRecognizers: {
+        Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+      },
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        useShouldOverrideUrlLoading: true,
+        transparentBackground: true,
+        supportZoom: false,
+        builtInZoomControls: false,
+        displayZoomControls: false,
+        useWideViewPort: false,
+        loadWithOverviewMode: false,
+        textZoom: 100,
+        verticalScrollBarEnabled: false,
+        horizontalScrollBarEnabled: false,
+        overScrollMode: OverScrollMode.NEVER,
+        disallowOverScroll: true,
+        allowsLinkPreview: false,
+        allowsBackForwardNavigationGestures: false,
+        supportMultipleWindows: false,
+        javaScriptCanOpenWindowsAutomatically: false,
+        mediaPlaybackRequiresUserGesture: true,
+        algorithmicDarkeningAllowed: false,
+        cacheEnabled: false,
+        isInspectable: kDebugMode,
+      ),
+      onWebViewCreated: (controller) {
+        _web = controller;
+        controller.addJavaScriptHandler(
+          handlerName: 'er',
+          callback: _onJsMessage,
+        );
+        final start = _pendingStart;
+        _pendingStart = null;
+        if (start != null) {
+          _openSpine(start.spine, {'type': 'fraction', 'value': start.progress});
+        } else {
+          _openSpine(_spine, {'type': 'fraction', 'value': _fraction});
+        }
+      },
+      shouldOverrideUrlLoading: _shouldOverride,
+      onLoadStop: _onLoadStop,
+      onReceivedError: (controller, request, error) {
+        if (request.isForMainFrame != true || !mounted) return;
+        final url = request.url.toString();
+        final expected = _expectedUrl;
+        if (expected == null || _stripFragment(url) != _stripFragment(expected)) {
+          return;
+        }
+        debugPrint('EPUB reader: load error ${error.type}: ${error.description}');
+        setState(() {
+          _docLoading = false;
+          _docError = 'This section could not be loaded.';
+        });
+      },
+      onRenderProcessGone: (controller, detail) => _recreateWebView(),
+      onWebContentProcessDidTerminate: (controller) => _recreateWebView(),
+      onConsoleMessage: kDebugMode
+          ? (controller, message) =>
+              debugPrint('EPUB reader console: ${message.message}')
           : null,
     );
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Loading EPUB...'),
-          ],
-        ),
-      );
-    }
+  void _recreateWebView() {
+    if (!mounted) return;
+    setState(() {
+      _webGeneration++;
+      _web = null;
+      _pendingStart = ReaderPosition(_spine, _fraction);
+      _docLoading = true;
+    });
+  }
 
-    if (_error != null) {
-      return Center(
+  Widget _buildDocError(ReaderTheme theme, int? prev, int? next) {
+    final fg = theme.foreground;
+    return ColoredBox(
+      color: theme.background,
+      child: Center(
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 64),
-              const SizedBox(height: 16),
+              Icon(Icons.report_gmailerrorred, size: 48, color: fg.withValues(alpha: 0.6)),
+              const SizedBox(height: 12),
               Text(
-                _error!,
-                style: const TextStyle(fontSize: 16, color: Colors.red),
+                _docError ?? '',
                 textAlign: TextAlign.center,
+                style: TextStyle(color: fg),
               ),
               const SizedBox(height: 16),
-              ElevatedButton(onPressed: _loadBook, child: const Text('Retry')),
+              Wrap(
+                spacing: 12,
+                children: [
+                  if (prev != null)
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.chevron_left),
+                      label: const Text('Previous section'),
+                      onPressed: () => _openSpine(prev, const {'type': 'end'}),
+                    ),
+                  if (next != null)
+                    FilledButton.icon(
+                      icon: const Icon(Icons.chevron_right),
+                      label: const Text('Next section'),
+                      onPressed: () => _openSpine(next, const {'type': 'start'}),
+                    ),
+                ],
+              ),
             ],
           ),
         ),
-      );
-    }
-
-    if (_currentHtml.isEmpty) {
-      return const Center(child: Text('No content to display'));
-    }
-
-    return InAppWebView(
-      initialData: InAppWebViewInitialData(
-        data: _currentHtml,
-        encoding: 'utf-8',
       ),
-      initialSettings: InAppWebViewSettings(
-        useShouldOverrideUrlLoading: true,
-        mediaPlaybackRequiresUserGesture: false,
-        useOnDownloadStart: true,
-        javaScriptEnabled: true,
-      ),
-      onWebViewCreated: (controller) {
-        _webViewController = controller;
-        _webViewController?.addJavaScriptHandler(
-          handlerName: 'nextChapter',
-          callback: (args) {
-            _nextChapter();
-            return null;
-          },
-        );
-        _webViewController?.addJavaScriptHandler(
-          handlerName: 'previousChapter',
-          callback: (args) {
-            _previousChapter();
-            return null;
-          },
-        );
-      },
-      onLoadStop: (controller, url) async {
-        await controller.evaluateJavascript(
-          source: '''
-          let startX = 0;
-          let startY = 0;
-          
-          document.addEventListener('touchstart', function(e) {
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-          });
-          
-          document.addEventListener('touchend', function(e) {
-            let endX = e.changedTouches[0].clientX;
-            let endY = e.changedTouches[0].clientY;
-            
-            let deltaX = endX - startX;
-            let deltaY = endY - startY;
-            
-            if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-              if (deltaX > 0) {
-                window.flutter_inappwebview.callHandler('previousChapter');
-              } else {
-                window.flutter_inappwebview.callHandler('nextChapter');
-              }
-            }
-          });
-        ''',
-        );
-      },
-      onConsoleMessage: (controller, consoleMessage) {
-        debugPrint("Console: ${consoleMessage.message}");
-      },
     );
   }
 }
 
-// Helper functions
-Uint8List? getImageBytes(EpubBook book, String imagePath) {
-  final imageFile = book.Content?.Images?[imagePath];
-  if (imageFile != null && imageFile.Content != null) {
-    return Uint8List.fromList(imageFile.Content!);
-  }
-  return null;
-}
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({required this.message, this.onRetry});
 
-String fixImagePaths(EpubBook book, String htmlContent) {
-  final regex = RegExp(r'src="([^"]+)"');
-  return htmlContent.replaceAllMapped(regex, (match) {
-    final path = match.group(1)!;
-    final bytes = getImageBytes(book, path);
-    if (bytes != null) {
-      final base64Image = base64Encode(bytes);
-      final extension = path.split('.').last.toLowerCase();
-      return 'src="data:image/$extension;base64,$base64Image"';
-    }
-    return match.group(0)!;
-  });
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ReadableWidth(
+          maxWidth: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.menu_book_outlined,
+                size: 64,
+                color: theme.colorScheme.error,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                spacing: 12,
+                alignment: WrapAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.maybePop(context),
+                    child: const Text('Close'),
+                  ),
+                  if (onRetry != null)
+                    FilledButton(
+                      onPressed: onRetry,
+                      child: const Text('Try again'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

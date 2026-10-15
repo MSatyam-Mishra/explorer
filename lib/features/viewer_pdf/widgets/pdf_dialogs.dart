@@ -116,8 +116,9 @@ class _PasswordDialogState extends State<_PasswordDialog> {
               controller: _password,
               autofocus: true,
               obscureText: _obscure,
-              textInputAction:
-                  widget.confirm ? TextInputAction.next : TextInputAction.done,
+              textInputAction: widget.confirm
+                  ? TextInputAction.next
+                  : TextInputAction.done,
               onSubmitted: widget.confirm ? null : (_) => _submit(),
               decoration: InputDecoration(
                 labelText: 'Password',
@@ -181,9 +182,8 @@ class _GoToPageDialog extends StatefulWidget {
 }
 
 class _GoToPageDialogState extends State<_GoToPageDialog> {
-  late final _controller = TextEditingController(
-    text: '${widget.currentPage}',
-  )..selection = TextSelection(
+  late final _controller = TextEditingController(text: '${widget.currentPage}')
+    ..selection = TextSelection(
       baseOffset: 0,
       extentOffset: '${widget.currentPage}'.length,
     );
@@ -290,8 +290,9 @@ class _TextInputDialogState extends State<_TextInputDialog> {
           autofocus: true,
           minLines: widget.multiline ? 3 : 1,
           maxLines: widget.multiline ? 8 : 1,
-          keyboardType:
-              widget.multiline ? TextInputType.multiline : TextInputType.text,
+          keyboardType: widget.multiline
+              ? TextInputType.multiline
+              : TextInputType.text,
           onSubmitted: widget.multiline
               ? null
               : (value) => Navigator.pop(context, value.trim()),

@@ -338,3 +338,48 @@ String? sniffImageExtension(Uint8List b) {
 /// Whether Flutter's engine can decode the image natively.
 bool isDisplayableImage(String? ext) =>
     const {'png', 'jpeg', 'jpg', 'gif', 'bmp', 'webp'}.contains(ext);
+
+/// Pixel dimensions from PNG/JPEG/GIF/BMP headers, or null.
+(int, int)? imagePixelSize(Uint8List b) {
+  try {
+    final ext = sniffImageExtension(b);
+    final bd = ByteData.sublistView(b);
+    switch (ext) {
+      case 'png':
+        if (b.length < 24) return null;
+        return (bd.getUint32(16), bd.getUint32(20));
+      case 'gif':
+        if (b.length < 10) return null;
+        return (bd.getUint16(6, Endian.little), bd.getUint16(8, Endian.little));
+      case 'bmp':
+        if (b.length < 26) return null;
+        return (
+          bd.getInt32(18, Endian.little).abs(),
+          bd.getInt32(22, Endian.little).abs()
+        );
+      case 'jpeg':
+        var i = 2;
+        while (i + 9 < b.length) {
+          if (b[i] != 0xFF) {
+            i++;
+            continue;
+          }
+          final marker = b[i + 1];
+          if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+            i += 2;
+            continue;
+          }
+          final len = bd.getUint16(i + 2);
+          if ((marker >= 0xC0 && marker <= 0xC3) ||
+              (marker >= 0xC5 && marker <= 0xC7) ||
+              (marker >= 0xC9 && marker <= 0xCB) ||
+              (marker >= 0xCD && marker <= 0xCF)) {
+            return (bd.getUint16(i + 7), bd.getUint16(i + 5));
+          }
+          i += 2 + len;
+        }
+        return null;
+    }
+  } catch (_) {}
+  return null;
+}

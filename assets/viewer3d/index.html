@@ -133,6 +133,15 @@
 <script type="module" src="./viewer.js"></script>
 </head>
 <body class="bg-dark">
+  <script>
+    // Apply the requested background before first paint (no flash).
+    (function () {
+      var bg = new URLSearchParams(location.search).get('bg');
+      if (['dark', 'light', 'gradient', 'transparent'].indexOf(bg) >= 0) {
+        document.body.className = 'bg-' + bg;
+      }
+    })();
+  </script>
   <div id="stage"></div>
   <div id="status">Loading…</div>
 </body>

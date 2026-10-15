@@ -29,10 +29,21 @@ abstract final class HtmlText {
       RegExp(r'<(script|style)\b[^>]*/>', caseSensitive: false);
   static final _tag = RegExp(r'<[^>]*>');
 
+  static final _blockTag = RegExp(
+    r'</?(p|div|h[1-6]|li|ul|ol|dl|dt|dd|br|hr|tr|td|th|table|section|'
+    r'article|aside|header|footer|blockquote|pre|figure|figcaption|nav)\b[^>]*>',
+    caseSensitive: false,
+  );
+
+  /// Marks block boundaries in [bodyText] output (for snippets only); the
+  /// marker is skipped when matching, so indices follow the DOM text.
+  static const blockMarker = '\uE000';
+
   /// The body's text as the browser exposes it through its text nodes
   /// (script/style excluded, entities decoded, tags removed without adding
-  /// separators). Must stay in sync with the reader JS' text walker.
-  static String bodyText(String markup) {
+  /// separators). Must stay in sync with the reader JS' text walker. With
+  /// [markBlocks], block-level tags become [blockMarker] instead.
+  static String bodyText(String markup, {bool markBlocks = false}) {
     var s = markup;
     final open = _bodyOpen.firstMatch(s);
     if (open != null) {
@@ -44,12 +55,13 @@ abstract final class HtmlText {
     final close = s.toLowerCase().lastIndexOf('</body');
     if (close >= 0) s = s.substring(0, close);
     s = s
+        .replaceAll(blockMarker, '')
         .replaceAll(_comment, '')
         .replaceAll(_cdata, '')
         .replaceAll(_selfClosingScript, '')
-        .replaceAll(_scriptStyle, '')
-        .replaceAll(_tag, '');
-    return decodeEntities(s);
+        .replaceAll(_scriptStyle, '');
+    if (markBlocks) s = s.replaceAll(_blockTag, blockMarker);
+    return decodeEntities(s.replaceAll(_tag, ''));
   }
 
   /// Plain text with collapsed whitespace, for titles and labels.
@@ -73,50 +85,45 @@ abstract final class HtmlText {
       c == 0x3000 ||
       c == 0xFEFF;
 
+  static int _lowerUnit(int c) {
+    if (c >= 0x41 && c <= 0x5A) return c + 32;
+    if (c < 0x80) return c;
+    final lower = String.fromCharCode(c).toLowerCase();
+    return lower.length == 1 ? lower.codeUnitAt(0) : c;
+  }
+
   /// Lower-cases [text] char by char (keeping length) and collapses runs of
-  /// whitespace to one space. Mirrors `normalize()` in the reader JS.
-  static String normalizeForSearch(String text) {
+  /// whitespace to one space; [blockMarker]s are skipped. Mirrors
+  /// `normalize()` in the reader JS. When [map] is given it receives, for
+  /// every output char, its index in [text].
+  static String normalizeForSearch(String text, [List<int>? map]) {
     final out = StringBuffer();
+    final marker = blockMarker.codeUnitAt(0);
     var prevSpace = false;
     for (var i = 0; i < text.length; i++) {
       final c = text.codeUnitAt(i);
+      if (c == marker) continue;
       if (_isSpace(c)) {
         if (prevSpace) continue;
         prevSpace = true;
         out.writeCharCode(0x20);
+        map?.add(i);
         continue;
       }
       prevSpace = false;
-      if (c >= 0x41 && c <= 0x5A) {
-        out.writeCharCode(c + 32);
-      } else if (c < 0x80) {
-        out.writeCharCode(c);
-      } else {
-        final ch = String.fromCharCode(c);
-        final lower = ch.toLowerCase();
-        out.write(lower.length == 1 ? lower : ch);
-      }
+      out.writeCharCode(_lowerUnit(c));
+      map?.add(i);
     }
     return out.toString();
   }
 
-  /// Same as [normalizeForSearch] but keeps the original case (for
-  /// snippets), so indices line up.
-  static String collapseKeepCase(String text) {
-    final out = StringBuffer();
-    var prevSpace = false;
-    for (var i = 0; i < text.length; i++) {
-      final c = text.codeUnitAt(i);
-      if (_isSpace(c)) {
-        if (prevSpace) continue;
-        prevSpace = true;
-        out.writeCharCode(0x20);
-        continue;
-      }
-      prevSpace = false;
-      out.writeCharCode(c);
-    }
-    return out.toString();
+  static String _display(String marked, int start, int end) {
+    final s = math.max(0, math.min(start, marked.length));
+    final e = math.max(s, math.min(end, marked.length));
+    return marked
+        .substring(s, e)
+        .replaceAll(blockMarker, ' ')
+        .replaceAll(RegExp(r'\s+'), ' ');
   }
 
   /// Finds [query] in one document's markup.
@@ -128,25 +135,23 @@ abstract final class HtmlText {
   }) {
     final q = normalizeForSearch(query.trim());
     if (q.isEmpty) return const [];
-    final raw = bodyText(markup);
-    final lower = normalizeForSearch(raw);
-    final display = collapseKeepCase(raw);
+    final marked = bodyText(markup, markBlocks: true);
+    final map = <int>[];
+    final lower = normalizeForSearch(marked, map);
     final hits = <SearchHit>[];
     var from = 0;
     var occurrence = 0;
     while (hits.length < maxHits) {
       final idx = lower.indexOf(q, from);
       if (idx < 0) break;
-      final end = idx + q.length;
+      final start = map[idx];
+      final end = map[idx + q.length - 1] + 1;
       hits.add(SearchHit(
         spineIndex: spineIndex,
         occurrence: occurrence,
-        before: _trimStart(display.substring(math.max(0, idx - 70), idx)),
-        match: display.substring(idx, math.min(display.length, end)),
-        after: _trimEnd(
-          display.substring(math.min(display.length, end),
-              math.min(display.length, end + 90)),
-        ),
+        before: _trimStart(_display(marked, start - 80, start)),
+        match: _display(marked, start, end),
+        after: _trimEnd(_display(marked, end, end + 100)),
       ));
       occurrence++;
       from = idx + 1;
@@ -155,17 +160,15 @@ abstract final class HtmlText {
   }
 
   static String _trimStart(String s) {
+    if (s.length < 70) return s.trimLeft();
     final space = s.indexOf(' ');
-    if (s.length >= 70 && space >= 0 && space < 20) {
-      return '…${s.substring(space + 1)}';
-    }
-    return s.trimLeft();
+    return space >= 0 && space < 20 ? '…${s.substring(space + 1)}' : '…$s';
   }
 
   static String _trimEnd(String s) {
+    if (s.length < 90) return s.trimRight();
     final space = s.lastIndexOf(' ');
-    if (s.length >= 90 && space > 60) return '${s.substring(0, space)}…';
-    return s.trimRight();
+    return space > 50 ? '${s.substring(0, space)}…' : '$s…';
   }
 
   /// First `<title>` / heading text of a document, for spine fallbacks.

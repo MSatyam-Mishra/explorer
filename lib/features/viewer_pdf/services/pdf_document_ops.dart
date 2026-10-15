@@ -40,54 +40,62 @@ abstract final class PdfDocumentOps {
     Uint8List bytes,
     Set<int> indices,
     int quarterTurns,
-  ) =>
-      Isolate.run(() => _edit(bytes, (doc) {
-            final pages = [for (final i in indices) doc.pages[i]];
-            for (final page in pages) {
-              _rotate(page, quarterTurns);
-            }
-          }));
+  ) => Isolate.run(
+    () => _edit(bytes, (doc) {
+      final pages = [for (final i in indices) doc.pages[i]];
+      for (final page in pages) {
+        _rotate(page, quarterTurns);
+      }
+    }),
+  );
 
   static Future<Uint8List> deletePages(Uint8List bytes, Set<int> indices) =>
-      Isolate.run(() => _edit(bytes, (doc) {
-            final sorted = indices.toList()..sort((a, b) => b.compareTo(a));
-            if (sorted.length >= doc.pages.count) {
-              throw StateError('A PDF needs at least one page');
-            }
-            for (final i in sorted) {
-              doc.pages.removeAt(i);
-            }
-          }));
+      Isolate.run(
+        () => _edit(bytes, (doc) {
+          final sorted = indices.toList()..sort((a, b) => b.compareTo(a));
+          if (sorted.length >= doc.pages.count) {
+            throw StateError('A PDF needs at least one page');
+          }
+          for (final i in sorted) {
+            doc.pages.removeAt(i);
+          }
+        }),
+      );
 
   /// Inserts a blank page at [index], sized like its neighbour.
   static Future<Uint8List> insertBlankPage(Uint8List bytes, int index) =>
-      Isolate.run(() => _edit(bytes, (doc) {
-            final count = doc.pages.count;
-            final at = index.clamp(0, count);
-            final reference = count == 0 ? null : doc.pages[math.min(at, count - 1)];
-            final size = reference == null
-                ? PdfPageSize.a4
-                : _metaOf(reference).displaySize;
-            doc.pages.insert(at, size, _noMargins());
-          }));
+      Isolate.run(
+        () => _edit(bytes, (doc) {
+          final count = doc.pages.count;
+          final at = index.clamp(0, count);
+          final reference = count == 0
+              ? null
+              : doc.pages[math.min(at, count - 1)];
+          final size = reference == null
+              ? PdfPageSize.a4
+              : _metaOf(reference).displaySize;
+          doc.pages.insert(at, size, _noMargins());
+        }),
+      );
 
   /// Applies a page-manager plan (reorder, rotate, delete and insert blank
   /// pages) in one pass.
   static Future<Uint8List> applyPagePlan(
     Uint8List bytes,
     List<PagePlanEntry> plan,
-  ) =>
-      Isolate.run(() => _applyPagePlan(bytes, plan));
+  ) => Isolate.run(() => _applyPagePlan(bytes, plan));
 
   /// Returns a new PDF made of the pages at [indices] (kept in document
   /// order), with their annotations and links.
   static Future<Uint8List> extractPages(Uint8List bytes, Set<int> indices) =>
-      Isolate.run(() => _edit(bytes, (doc) {
-            final count = doc.pages.count;
-            for (var i = count - 1; i >= 0; i--) {
-              if (!indices.contains(i)) doc.pages.removeAt(i);
-            }
-          }));
+      Isolate.run(
+        () => _edit(bytes, (doc) {
+          final count = doc.pages.count;
+          for (var i = count - 1; i >= 0; i--) {
+            if (!indices.contains(i)) doc.pages.removeAt(i);
+          }
+        }),
+      );
 
   /// Inserts the pages of [other] at [index] (end of document when null).
   ///
@@ -98,16 +106,14 @@ abstract final class PdfDocumentOps {
     Uint8List other, {
     String? otherPassword,
     int? index,
-  }) =>
-      Isolate.run(() => _insertPdf(bytes, other, otherPassword, index));
+  }) => Isolate.run(() => _insertPdf(bytes, other, otherPassword, index));
 
   /// Draws [marks] permanently onto the page at [pageIndex].
   static Future<Uint8List> drawOnPage(
     Uint8List bytes,
     int pageIndex,
     List<PageMark> marks,
-  ) =>
-      Isolate.run(() => _drawOnPage(bytes, pageIndex, marks));
+  ) => Isolate.run(() => _drawOnPage(bytes, pageIndex, marks));
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +165,7 @@ Uint8List _encrypt(Uint8List bytes, String password) {
 List<PdfPageMeta> _pageMetas(Uint8List bytes) {
   final doc = PdfDocument(inputBytes: bytes);
   try {
-    return [
-      for (var i = 0; i < doc.pages.count; i++) _metaOf(doc.pages[i]),
-    ];
+    return [for (var i = 0; i < doc.pages.count; i++) _metaOf(doc.pages[i])];
   } finally {
     doc.dispose();
   }
@@ -242,7 +246,11 @@ Uint8List _applyPagePlan(Uint8List bytes, List<PagePlanEntry> plan) {
     current = _edit(current, (doc) {
       final positions = blanks.keys.toList()..sort();
       for (final at in positions) {
-        doc.pages.insert(math.min(at, doc.pages.count), blanks[at]!, _noMargins());
+        doc.pages.insert(
+          math.min(at, doc.pages.count),
+          blanks[at]!,
+          _noMargins(),
+        );
       }
     });
   }
@@ -325,10 +333,10 @@ Uint8List _drawOnPage(Uint8List bytes, int pageIndex, List<PageMark> marks) {
 }
 
 PdfColor _pdfColor(Color color) => PdfColor(
-      (color.r * 255).round(),
-      (color.g * 255).round(),
-      (color.b * 255).round(),
-    );
+  (color.r * 255).round(),
+  (color.g * 255).round(),
+  (color.b * 255).round(),
+);
 
 void _drawInk(PdfGraphics graphics, InkMark mark) {
   if (mark.points.isEmpty) return;
@@ -439,16 +447,32 @@ void _drawImage(PdfGraphics graphics, ImageMark mark) {
   graphics.drawImage(PdfBitmap(encoded), mark.rect);
 }
 
-/// PdfBitmap reads PNG and JPEG; anything else is re-encoded as PNG.
+/// PdfBitmap reads PNG and JPEG. Other formats are re-encoded, and big
+/// photos are scaled down so a stamp doesn't add megabytes to the file.
 Uint8List _pdfFriendlyImage(Uint8List bytes) {
-  final isPng = bytes.length > 8 &&
+  const maxSide = 2400;
+  final isPng =
+      bytes.length > 8 &&
       bytes[0] == 0x89 &&
       bytes[1] == 0x50 &&
       bytes[2] == 0x4E &&
       bytes[3] == 0x47;
   final isJpeg = bytes.length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8;
-  if (isPng || isJpeg) return bytes;
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) throw const FormatException('Unsupported image');
-  return img.encodePng(decoded);
+  if ((isPng || isJpeg) && bytes.length <= 1536 * 1024) return bytes;
+
+  var decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    if (isPng || isJpeg) return bytes;
+    throw const FormatException('Unsupported image');
+  }
+  if (math.max(decoded.width, decoded.height) > maxSide) {
+    decoded = decoded.width >= decoded.height
+        ? img.copyResize(decoded, width: maxSide)
+        : img.copyResize(decoded, height: maxSide);
+  } else if (isPng || isJpeg) {
+    return bytes;
+  }
+  return decoded.hasAlpha
+      ? img.encodePng(decoded)
+      : img.encodeJpg(decoded, quality: 88);
 }

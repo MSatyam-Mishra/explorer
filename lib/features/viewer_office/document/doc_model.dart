@@ -101,7 +101,7 @@ sealed class DocInline {}
 
 /// A run of text. Tabs are `\t`, soft line breaks are `\n`.
 class DocText extends DocInline {
-  DocText(this.text, this.style, {this.link, this.raw, this.field});
+  DocText(this.text, this.style, {this.link, this.raw, this.field, this.origin});
 
   String text;
   DocRunStyle style;
@@ -115,6 +115,10 @@ class DocText extends DocInline {
 
   /// Field the text is the cached result of (`PAGE`, `NUMPAGES`).
   String? field;
+
+  /// Formatting as originally parsed (set after editing) so writers only
+  /// rewrite properties that changed.
+  DocRunStyle? origin;
 }
 
 /// An inline picture.
@@ -258,6 +262,10 @@ class DocParagraph extends DocBlock {
   /// DOCX: original `<w:pPr>` markup.
   String? raw;
 
+  /// The paragraph this one was derived from while editing (null when it
+  /// was parsed directly or created from scratch).
+  DocParagraph? origin;
+
   String get plainText {
     final sb = StringBuffer();
     for (final i in inlines) {
@@ -265,7 +273,7 @@ class DocParagraph extends DocBlock {
         case DocText():
           sb.write(i.text);
         case DocImage():
-          sb.write('￼');
+          sb.write('\uFFFC');
         case DocObject():
           sb.write(i.displayText ?? '');
       }
@@ -525,7 +533,7 @@ class DocModel {
       if (p.list != null && p.list!.label.isNotEmpty) {
         sb.write('${p.list!.label} ');
       }
-      sb.writeln(p.plainText.replaceAll('￼', ''));
+      sb.writeln(p.plainText.replaceAll('\uFFFC', ''));
     }
     return sb.toString();
   }
@@ -536,6 +544,7 @@ class DocModel {
 /// [keepExisting] are left untouched.
 void renumberLists(List<DocBlock> blocks, {bool keepExisting = false}) {
   final counters = <int>[];
+  final kinds = <bool?>[];
   var lastWasList = false;
   for (final b in blocks) {
     if (b is DocTable) {
@@ -555,14 +564,24 @@ void renumberLists(List<DocBlock> blocks, {bool keepExisting = false}) {
       }
       continue;
     }
-    if (!lastWasList) counters.clear();
+    if (!lastWasList) {
+      counters.clear();
+      kinds.clear();
+    }
     lastWasList = true;
     while (counters.length <= l.level) {
       counters.add(0);
+      kinds.add(null);
     }
+    // A switch between bullets and numbers starts a new list.
+    if (kinds[l.level] != null && kinds[l.level] != l.ordered) {
+      counters[l.level] = 0;
+    }
+    kinds[l.level] = l.ordered;
     counters[l.level]++;
     for (var i = l.level + 1; i < counters.length; i++) {
       counters[i] = 0;
+      kinds[i] = null;
     }
     if (keepExisting && l.label.isNotEmpty) continue;
     if (!l.ordered) {
@@ -658,7 +677,7 @@ class DocStats {
         } else if (b is DocFrame) {
           countBlocks(b.blocks);
         } else if (b is DocParagraph) {
-          final t = b.plainText.replaceAll('￼', '');
+          final t = b.plainText.replaceAll('\uFFFC', '');
           for (final i in b.inlines) {
             if (i is DocImage) images++;
           }
