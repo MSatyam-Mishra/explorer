@@ -1,10 +1,15 @@
-import 'dart:convert';
 import 'dart:io';
+
+import 'package:explorer/core/services/local_content_server.dart';
+import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as p;
 
+/// Renders an HTML page (with its relative CSS/JS/images) and lets the user
+/// edit the source.
 class HtmlViewerScreen extends StatefulWidget {
   final File file;
   const HtmlViewerScreen({super.key, required this.file});
@@ -14,178 +19,135 @@ class HtmlViewerScreen extends StatefulWidget {
 }
 
 class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
-  // 0 = Rendered, 1 = Source
-  int _viewMode = 0;
-  bool _isEditing = false;
-  String? _fileContent;
-  late TextEditingController _textEditingController;
+  final _editorKey = GlobalKey<TextEditorPaneState>();
+  bool _showSource = false;
+  bool _dirty = false;
+  Uri? _base;
+  int _renderToken = 0;
 
   @override
   void initState() {
     super.initState();
-    _textEditingController = TextEditingController();
-    _loadFileContent();
+    // Served over loopback HTTP: Android blocks file:// access in WebViews
+    // by default, and relative resources then resolve like on a web server.
+    LocalContentServer.instance.mountDirectory(widget.file.parent.path).then((base) {
+      if (!mounted) {
+        LocalContentServer.instance.unmount(base);
+        return;
+      }
+      setState(() => _base = base);
+    });
   }
 
   @override
   void dispose() {
-    _textEditingController.dispose();
+    final base = _base;
+    if (base != null) LocalContentServer.instance.unmount(base);
     super.dispose();
   }
 
-  Future<void> _loadFileContent() async {
-    try {
-      final content = await widget.file.readAsString();
-      setState(() {
-        _fileContent = content;
-        _textEditingController.text = content;
-      });
-    } catch (e) {
-      // Handle error
+  Future<void> _save() async {
+    final ok = await _editorKey.currentState?.save() ?? false;
+    if (ok && mounted) {
+      setState(() => _renderToken++);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved')),
+      );
     }
-  }
-
-  Future<void> _saveFile() async {
-    try {
-      await widget.file.writeAsString(_textEditingController.text);
-      setState(() {
-        _fileContent = _textEditingController.text;
-        _isEditing = false;
-      });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('File saved successfully')));
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error saving file: $e')));
-    }
-  }
-
-  String _generateSourceHtml(String content) {
-    // Escaping HTML entities for the source view
-    final escaped = const HtmlEscape().convert(content);
-
-    // A dark theme syntax highlighting template
-    return '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <style>
-    body { margin: 0; padding: 0; background: #282c34; }
-    pre { margin: 0; padding: 16px; }
-    code { font-family: 'Fira Code', monospace; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <pre><code class="language-html">$escaped</code></pre>
-  <script>hljs.highlightAll();</script>
-</body>
-</html>
-    ''';
   }
 
   @override
   Widget build(BuildContext context) {
-    return ExplorerScaffold(
-      title: p.basename(widget.file.path),
-      trailing: Padding(
-        padding: const EdgeInsets.only(right: 4),
-        child: SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(
-              value: 0,
-              label: Text('Render'),
-              icon: Icon(Icons.web, size: 18),
-            ),
-            ButtonSegment(
-              value: 1,
-              label: Text('Source'),
-              icon: Icon(Icons.code, size: 18),
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final discard = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Discard unsaved changes?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        );
+        if (discard == true && context.mounted) Navigator.pop(context);
+      },
+      child: ExplorerScaffold(
+        title: p.basename(widget.file.path),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_showSource && _dirty)
+              IconButton(
+                icon: const Icon(Icons.save_outlined),
+                tooltip: 'Save',
+                onPressed: _save,
+              ),
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    icon: Icon(Icons.web, size: 18),
+                    tooltip: 'Rendered page',
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.code, size: 18),
+                    tooltip: 'Source',
+                  ),
+                ],
+                selected: {_showSource},
+                onSelectionChanged: (s) => setState(() => _showSource = s.first),
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
             ),
           ],
-          selected: {_viewMode},
-          onSelectionChanged: (newSelection) {
-            if (_isEditing) {
-              setState(() => _isEditing = false);
-            }
-            setState(() {
-              _viewMode = newSelection.first;
-            });
-          },
-          showSelectedIcon: false,
-          style: ButtonStyle(
-            visualDensity: VisualDensity.compact,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        body: Padding(
+          padding: EdgeInsets.only(top: DockedGlossyTopBar.contentTopInset(context)),
+          child: IndexedStack(
+            index: _showSource ? 1 : 0,
+            children: [
+              _buildRendered(),
+              TextEditorPane(
+                key: _editorKey,
+                file: widget.file,
+                onDirtyChanged: (dirty) => setState(() => _dirty = dirty),
+              ),
+            ],
           ),
         ),
       ),
-      body: _buildBody(),
-      floatingActionButton: _viewMode == 1
-          ? FloatingActionButton(
-              onPressed: () {
-                if (_isEditing) {
-                  _saveFile();
-                } else {
-                  setState(() {
-                    _isEditing = true;
-                  });
-                }
-              },
-              child: Icon(_isEditing ? Icons.save : Icons.edit),
-            )
-          : null,
     );
   }
 
-  Widget _buildBody() {
-    if (_viewMode == 0) {
-      // RENDERED VIEW
-      return InAppWebView(
-        key: const ValueKey('rendered'),
-        initialUrlRequest: URLRequest(
-          url: WebUri("file://${widget.file.path}"),
-        ),
-        initialSettings: InAppWebViewSettings(
-          useShouldOverrideUrlLoading: true,
-          // ignoreSSLErrors: true,
-          javaScriptEnabled: true,
-        ),
-      );
-    } else {
-      // SOURCE VIEW
-      if (_fileContent == null) {
-        return const Center(child: CircularProgressIndicator());
-      }
-
-      if (_isEditing) {
-        return Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: TextField(
-            controller: _textEditingController,
-            maxLines: null,
-            expands: true,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'Enter HTML code...',
-            ),
-          ),
-        );
-      }
-
-      return InAppWebView(
-        key: const ValueKey('source'),
-        initialData: InAppWebViewInitialData(
-          data: _generateSourceHtml(_fileContent!),
-          mimeType: 'text/html',
-          encoding: 'utf-8',
-        ),
-        initialSettings: InAppWebViewSettings(javaScriptEnabled: true),
-      );
-    }
+  Widget _buildRendered() {
+    final base = _base;
+    if (base == null) return const Center(child: CircularProgressIndicator());
+    final url = base.resolve(Uri.encodeComponent(p.basename(widget.file.path)));
+    return InAppWebView(
+      key: ValueKey(_renderToken),
+      initialUrlRequest: URLRequest(url: WebUri.uri(url)),
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        supportZoom: true,
+        builtInZoomControls: true,
+        displayZoomControls: false,
+      ),
+    );
   }
 }

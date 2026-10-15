@@ -1,5 +1,8 @@
 import 'dart:io';
+import 'package:explorer/core/files/file_types.dart';
+import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import 'file_type_icon.dart';
@@ -27,7 +30,6 @@ class FileListItem extends StatelessWidget {
     final rawTitle = displayName ?? p.basename(entity.path);
     final title = rawTitle.isEmpty ? entity.path : rawTitle;
     final isDirectory = entity is Directory;
-    const subtitle = '10 KB Aug 07, 2025'; // Placeholder
 
     return InkWell(
       onTap: onTap,
@@ -53,11 +55,11 @@ class FileListItem extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    subtitle,
+                  _EntitySubtitle(
+                    entity: entity,
                     style: TextStyle(
                       fontSize: 13,
-                      color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6),
+                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                     ),
                   ),
                 ],
@@ -74,6 +76,54 @@ class FileListItem extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "1.2 MB · PDF document · Mar 4, 2026" for files, date only for folders.
+class _EntitySubtitle extends StatefulWidget {
+  const _EntitySubtitle({required this.entity, this.style});
+
+  final FileSystemEntity entity;
+  final TextStyle? style;
+
+  @override
+  State<_EntitySubtitle> createState() => _EntitySubtitleState();
+}
+
+class _EntitySubtitleState extends State<_EntitySubtitle> {
+  static final _date = DateFormat.yMMMd();
+  late Future<FileStat> _stat = widget.entity.stat();
+
+  @override
+  void didUpdateWidget(_EntitySubtitle oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entity.path != widget.entity.path) {
+      _stat = widget.entity.stat();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<FileStat>(
+      future: _stat,
+      builder: (context, snapshot) {
+        final stat = snapshot.data;
+        String text = ' ';
+        if (stat != null && stat.type != FileSystemEntityType.notFound) {
+          final date = _date.format(stat.modified);
+          text = widget.entity is Directory
+              ? date
+              : '${filesize(stat.size)} · '
+                  '${FileTypes.describe(FileTypes.kindOf(widget.entity.path))} · $date';
+        }
+        return Text(
+          text,
+          style: widget.style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:explorer/shared/widgets/main_drawer.dart';
 import 'package:disk_space_plus/disk_space_plus.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
@@ -86,7 +87,7 @@ class _StorageDrawerItemState extends State<StorageDrawerItem> {
                 ],
               ),
         onTap: () {
-          Navigator.pop(context);
+          dismissDrawer(context);
           context.read<FileExplorerBloc>().add(LoadDirectory(widget.path));
         },
       ),

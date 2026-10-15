@@ -21,6 +21,8 @@ import 'package:explorer/features/file_explorere/widgets/gradient_folder_icon.da
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 
 import 'package:explorer/features/tasks/bloc/task_progress_bloc.dart';
+import 'package:explorer/shared/layout/adaptive_layout.dart';
+import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/main_drawer.dart';
 import 'package:explorer/shared/widgets/progress_card.dart';
 import 'package:flutter/material.dart';
@@ -122,6 +124,19 @@ class _FileExplorerUI extends StatelessWidget {
     final bool isSelectionMode = fileExplorerState is FileExplorerLoaded
         ? fileExplorerState.isSelectionMode
         : false;
+    // Tablets, unfolded foldables and desktops keep navigation docked.
+    final bool docked = AdaptiveSplitView.isSplit(context);
+    final content = Stack(
+      children: [
+        _buildFileList(context, fileExplorerState),
+        if (taskState is TaskInProgress)
+          ProgressCard(
+            title: taskState.title,
+            message: taskState.message,
+            progress: taskState.progress,
+          ),
+      ],
+    );
     // final int selectionCount = fileExplorerState is FileExplorerLoaded
     //     ? fileExplorerState.selectedItems.length
     //     : 0;
@@ -139,23 +154,32 @@ class _FileExplorerUI extends StatelessWidget {
         }
       },
       child: DockedTopBarScaffold(
-        drawer: const MainDrawer(),
+        drawer: docked ? null : const MainDrawer(),
         topBarBuilder: (scaffoldContext) => _buildDockedTopBar(
           scaffoldContext,
           fileExplorerState: fileExplorerState,
           isSelectionMode: isSelectionMode,
+          docked: docked,
         ),
-        body: Stack(
-          children: [
-            _buildFileList(context, fileExplorerState),
-            if (taskState is TaskInProgress)
-              ProgressCard(
-                title: taskState.title,
-                message: taskState.message,
-                progress: taskState.progress,
-              ),
-          ],
-        ),
+        body: docked
+            ? AdaptiveSplitView(
+                divider: false,
+                secondaryWidth: 300,
+                primary: content,
+                secondary: ClearGlassPanel(
+                  borderRadius: 24,
+                  margin: EdgeInsets.fromLTRB(
+                    12,
+                    DockedGlossyTopBar.contentTopInset(context),
+                    0,
+                    12 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                  child: const MainDrawerContent(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                  ),
+                ),
+              )
+            : content,
         floatingActionButton: (clipboardState is ClipboardReadyToPaste)
             ? FloatingActionButton.extended(
                 onPressed: () {
@@ -177,6 +201,7 @@ class _FileExplorerUI extends StatelessWidget {
     BuildContext context, {
     required FileExplorerState fileExplorerState,
     required bool isSelectionMode,
+    required bool docked,
   }) {
     final title = fileExplorerState is FileExplorerLoaded
         ? ExplorerPaths.titleForPath(fileExplorerState.path)
@@ -197,6 +222,18 @@ class _FileExplorerUI extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (fileExplorerState.selectedItems.length == 1)
+              IconButton(
+                icon: AppIcons.optionsMenu(),
+                tooltip: 'More actions',
+                onPressed: () {
+                  final entity = fileExplorerState.selectedItems.first;
+                  context.read<FileExplorerBloc>().add(
+                        ToggleSelectionMode(enable: false),
+                      );
+                  fileActionsService.showFileOptionsMenu(context, entity);
+                },
+              ),
             IconButton(
               icon: AppIcons.archive(),
               tooltip: 'Compress',
@@ -226,6 +263,7 @@ class _FileExplorerUI extends StatelessWidget {
 
     return DockedGlossyTopBar(
       title: title,
+      leading: docked ? const SizedBox(width: 12) : null,
       onMenuPressed: () => Scaffold.of(context).openDrawer(),
       onMorePressed: fileExplorerState is FileExplorerLoaded
           ? () {
@@ -266,8 +304,9 @@ class _FileExplorerUI extends StatelessWidget {
           state.viewMode == ViewMode.gallery) {
         return GridView.builder(
           physics: const BouncingScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
+          // Column count follows the window width (phones ≈3, tablets 6+).
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 128,
             childAspectRatio: 0.8,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,

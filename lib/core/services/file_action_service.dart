@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'package:explorer/core/repositories/file_repository.dart';
+import 'package:explorer/core/router/file_opener.dart';
 
 class FileActionsService {
   final FileRepository repository;
@@ -28,6 +29,15 @@ class FileActionsService {
       builder: (sheetContext) {
         return Wrap(
           children: <Widget>[
+            if (entity is File)
+              ListTile(
+                leading: const Icon(BootstrapIcons.box_arrow_up_right),
+                title: const Text('Open with…'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  FileOpener.showOpenWith(context, entity);
+                },
+              ),
             ListTile(
               leading: const Icon(BootstrapIcons.share_fill),
               title: const Text('Share'),

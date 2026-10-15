@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:chewie/chewie.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
@@ -17,6 +19,7 @@ class VideoPlayerScreen extends StatefulWidget {
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late VideoPlayerController _videoPlayerController;
   ChewieController? _chewieController;
+  String? _error;
 
   @override
   void initState() {
@@ -51,9 +54,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     } catch (e) {
       debugPrint('Error initializing video player: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        setState(() => _error =
+            "This video's format or codec isn't supported by the built-in player.");
       }
     }
   }
@@ -70,12 +72,37 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     return ExplorerScaffold(
       backgroundColor: Colors.black,
       title: p.basename(widget.videoFile.path),
-      body: Center(
-        child:
-            _chewieController != null &&
-                _chewieController!.videoPlayerController.value.isInitialized
-            ? Chewie(controller: _chewieController!)
-            : const CircularProgressIndicator(),
+      body: Padding(
+        padding: EdgeInsets.only(
+          top: DockedGlossyTopBar.contentTopInset(context),
+          bottom: MediaQuery.paddingOf(context).bottom,
+        ),
+        child: Center(
+          child: _error != null
+              ? Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.open_in_new),
+                        label: const Text('Open with another app'),
+                        onPressed: () => OpenFilex.open(widget.videoFile.path),
+                      ),
+                    ],
+                  ),
+                )
+              : _chewieController != null &&
+                      _chewieController!.videoPlayerController.value.isInitialized
+                  ? Chewie(controller: _chewieController!)
+                  : const CircularProgressIndicator(),
+        ),
       ),
     );
   }

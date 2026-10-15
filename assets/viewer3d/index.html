@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>3D Viewer</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  body { transition: background 0.25s ease; }
+  body.bg-dark { background: radial-gradient(ellipse at 50% 40%, #33363f 0%, #1c1e24 55%, #111216 100%); }
+  body.bg-light { background: radial-gradient(ellipse at 50% 40%, #ffffff 0%, #eceff4 55%, #d6dbe3 100%); }
+  body.bg-gradient { background: linear-gradient(170deg, #3a4a6b 0%, #2a2f45 45%, #15161d 100%); }
+  body.bg-transparent { background: radial-gradient(ellipse at 50% 45%, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.22) 100%); }
+  #stage { position: fixed; inset: 0; touch-action: none; }
+  #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+  /* Only shown when the page runs outside the app (no Flutter bridge). */
+  #status {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font: 14px/1.4 system-ui, sans-serif; color: #c8ccd4; text-align: center;
+    max-width: 80%; display: none; pointer-events: none;
+  }
+  body.standalone #status { display: block; }
+</style>
+<script>
+  // Classic (non-module) bootstrap: bridge to Flutter + capability checks.
+  // Runs even on WebViews too old for ES modules/import maps so the app can
+  // show a friendly error instead of a blank page.
+  (function () {
+    var queue = [];
+    var ready = false;
+
+    function bridge() {
+      return window.flutter_inappwebview && window.flutter_inappwebview.callHandler
+        ? window.flutter_inappwebview : null;
+    }
+
+    function flush() {
+      var b = bridge();
+      if (!b) return;
+      ready = true;
+      if (document.body) document.body.classList.remove('standalone');
+      while (queue.length) {
+        var m = queue.shift();
+        try { b.callHandler('viewer3d', m); } catch (e) { /* ignore */ }
+      }
+    }
+
+    // Posts {type, ...payload} to the Flutter side (queued until ready).
+    window.__v3dPost = function (type, payload) {
+      var msg = payload || {};
+      msg.type = type;
+      if (ready && bridge()) {
+        try { bridge().callHandler('viewer3d', msg); } catch (e) { /* ignore */ }
+      } else {
+        queue.push(msg);
+      }
+      if (document.body && document.body.classList.contains('standalone')) {
+        var s = document.getElementById('status');
+        if (s && (type === 'error' || type === 'progress' || type === 'loaded')) {
+          s.textContent = type === 'error' ? msg.message
+            : type === 'loaded' ? '' : (msg.label || 'Loading…');
+        }
+      }
+    };
+
+    if (bridge() && window.flutter_inappwebview._platformReady) flush();
+    window.addEventListener('flutterInAppWebViewPlatformReady', flush);
+
+    window.addEventListener('error', function (e) {
+      window.__v3dPost('log', { level: 'error', message: String(e.message || e) });
+    });
+
+    function fail(code, message) {
+      window.__v3dFailed = true;
+      window.__v3dPost('error', { code: code, message: message });
+    }
+
+    var supportsImportMap = typeof HTMLScriptElement !== 'undefined' &&
+      typeof HTMLScriptElement.supports === 'function' &&
+      HTMLScriptElement.supports('importmap');
+    if (!supportsImportMap) {
+      fail('webview_outdated', 'The system WebView is too old to run the 3D viewer. ' +
+        'Update "Android System WebView" (or Chrome) and try again.');
+      return;
+    }
+
+    try {
+      var probe = document.createElement('canvas');
+      var gl = probe.getContext('webgl2');
+      if (!gl) {
+        fail('no_webgl2', 'This device\'s WebView doesn\'t provide WebGL 2, which the 3D viewer needs.');
+        return;
+      }
+      var lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+    } catch (e) {
+      fail('no_webgl2', 'WebGL is unavailable: ' + e.message);
+      return;
+    }
+
+    // If the module graph fails to load (missing asset, parse error), report it.
+    setTimeout(function () {
+      if (!window.__v3dStarted && !window.__v3dFailed) {
+        fail('startup', 'The 3D viewer failed to start.');
+      }
+    }, 15000);
+
+    document.addEventListener('DOMContentLoaded', function () {
+      if (!bridge()) document.body.classList.add('standalone');
+    });
+  })();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./three/build/three.module.min.js",
+    "three/addons/": "./three/jsm/"
+  }
+}
+</script>
+<script type="module" src="./viewer.js"></script>
+</head>
+<body class="bg-dark">
+  <div id="stage"></div>
+  <div id="status">Loading…</div>
+</body>
+</html>

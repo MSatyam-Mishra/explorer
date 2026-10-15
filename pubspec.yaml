@@ -35,7 +35,6 @@ dependencies:
   liquid_glass_renderer: ^0.1.1-dev.10
   rive: ^0.14.1 # Check if newer exists, otherwise might need 0.14.4+ or similar if available
   flutter_animate: ^4.5.2
-  epubx: ^4.0.0
   flutter_inappwebview: ^6.1.5
   archive: ^3.6.1 # Avoid 4.0.0 for now unless necessary as it's a major bump
   share_plus: ^12.0.1
@@ -63,6 +62,12 @@ dependencies:
   xml: ^6.5.0
   hugeicons: ^1.1.7
   liquid_glass_easy: 1.1.1
+  syncfusion_flutter_pdfviewer: ^33.2.13
+  syncfusion_flutter_pdf: ^33.2.13
+  image: ^4.2.0
+  markdown: ^7.3.1
+  two_dimensional_scrollables: ^0.5.5
+  path: ^1.9.1
   # quick_usb: ^0.4.0
 
 dev_dependencies:
@@ -79,3 +84,18 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    # Offline three.js 3D viewer (lib/features/viewer_3d)
+    - assets/viewer3d/
+    - assets/viewer3d/three/
+    - assets/viewer3d/three/build/
+    - assets/viewer3d/three/jsm/controls/
+    - assets/viewer3d/three/jsm/curves/
+    - assets/viewer3d/three/jsm/environments/
+    - assets/viewer3d/three/jsm/libs/
+    - assets/viewer3d/three/jsm/libs/basis/
+    - assets/viewer3d/three/jsm/libs/draco/
+    - assets/viewer3d/three/jsm/loaders/
+    - assets/viewer3d/three/jsm/loaders/lwo/
+    - assets/viewer3d/three/jsm/loaders/usd/
+    - assets/viewer3d/three/jsm/math/
+    - assets/viewer3d/three/jsm/utils/
