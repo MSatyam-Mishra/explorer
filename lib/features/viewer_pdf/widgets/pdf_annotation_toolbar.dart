@@ -63,11 +63,15 @@ class PdfAnnotationToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final hint = hintFor(mode, selected);
+    final density = MediaQuery.sizeOf(context).width < 480
+        ? VisualDensity.compact
+        : VisualDensity.standard;
 
     Widget tool(PdfAnnotationMode value, IconData icon, String tooltip) {
       final active = mode == value;
       return IconButton(
         tooltip: tooltip,
+        visualDensity: density,
         isSelected: active,
         onPressed: enabled
             ? () => onModeChanged(active ? PdfAnnotationMode.none : value)
@@ -85,6 +89,7 @@ class PdfAnnotationToolbar extends StatelessWidget {
     Widget action(IconData icon, String tooltip, VoidCallback? onPressed) {
       return IconButton(
         tooltip: tooltip,
+        visualDensity: density,
         onPressed: enabled ? onPressed : null,
         icon: Icon(icon),
       );
@@ -96,6 +101,22 @@ class PdfAnnotationToolbar extends StatelessWidget {
     );
 
     final selection = selected;
+    final colorButton = IconButton(
+      tooltip: selection != null ? 'Annotation colour' : 'Colour',
+      visualDensity: density,
+      onPressed: enabled && (selection == null || !selection.isLocked)
+          ? onPickColor
+          : null,
+      icon: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: scheme.outline),
+        ),
+      ),
+    );
     final children = <Widget>[
       tool(
         PdfAnnotationMode.none,
@@ -125,21 +146,12 @@ class PdfAnnotationToolbar extends StatelessWidget {
       action(Icons.add_photo_alternate_outlined, 'Add image or stamp', onImage),
       action(Icons.draw_outlined, 'Add signature', onSignature),
       divider,
-      IconButton(
-        tooltip: selection != null ? 'Annotation colour' : 'Colour',
-        onPressed: enabled && (selection == null || !selection.isLocked)
-            ? onPickColor
-            : null,
-        icon: Container(
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            border: Border.all(color: scheme.outline),
-          ),
-        ),
-      ),
+      if (selection == null) colorButton,
+    ];
+
+    // Always visible on the right, even when the tools scroll.
+    final pinned = <Widget>[
+      if (selection != null) colorButton,
       if (selection is StickyNoteAnnotation)
         action(
           Icons.edit_note,
@@ -185,10 +197,24 @@ class PdfAnnotationToolbar extends StatelessWidget {
           color: scheme.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(28),
           clipBehavior: Clip.antiAlias,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            child: Row(mainAxisSize: MainAxisSize.min, children: children),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: children,
+                    ),
+                  ),
+                ),
+                divider,
+                ...pinned,
+              ],
+            ),
           ),
         ),
       ],

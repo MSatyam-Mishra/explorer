@@ -229,10 +229,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _open() async {
-    setState(() {
-      _loadState = _LoadState.loading;
-      _errorMessage = null;
-    });
+    if (_loadState != _LoadState.loading) {
+      setState(() {
+        _loadState = _LoadState.loading;
+        _errorMessage = null;
+      });
+    }
     try {
       _sourceBytes ??= await widget.pdfFile.readAsBytes();
     } catch (e) {
@@ -884,11 +886,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     final color = await showPdfColorPicker(context, _toolbarColor);
     if (color == null || !mounted) return;
     final selected = _selectedAnnotation;
+    if (selected != null) {
+      // Goes through the viewer's undo history and onAnnotationEdited.
+      selected.color = color;
+      setState(() {});
+      return;
+    }
     setState(() {
-      if (selected != null) {
-        selected.color = color;
-        _markViewerChange();
-      } else if (_markupColors.containsKey(_annotationMode)) {
+      if (_markupColors.containsKey(_annotationMode)) {
         _markupColors[_annotationMode] = color;
         _configureController(_controller);
       } else {
@@ -983,14 +988,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       return;
     }
     final page = _currentPage.value;
-    await _bookmarkService.addBookmark(_bookmarkKey, page - 1, 'Page $page');
-    await _loadBookmarks();
-    _showMessage('Bookmarked page $page');
+    try {
+      await _bookmarkService.addBookmark(_bookmarkKey, page - 1, 'Page $page');
+      await _loadBookmarks();
+      _showMessage('Bookmarked page $page');
+    } catch (e) {
+      _showError('Could not add the bookmark', e);
+    }
   }
 
   Future<void> _removeBookmark(Bookmark bookmark) async {
-    await _bookmarkService.removeBookmark(_bookmarkKey, bookmark.id);
-    await _loadBookmarks();
+    try {
+      await _bookmarkService.removeBookmark(_bookmarkKey, bookmark.id);
+      await _loadBookmarks();
+    } catch (e) {
+      _showError('Could not remove the bookmark', e);
+    }
   }
 
   void _openSearch() {

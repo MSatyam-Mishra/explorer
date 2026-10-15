@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:explorer/features/viewer_pdf/models/pdf_edit_models.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_page_rasterizer.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_page_thumbnail.dart';
@@ -335,6 +337,15 @@ class _PdfPageManagerState extends State<PdfPageManager> {
             ? metas[source]
             : null;
         final selected = _selected.contains(item.id);
+        final displaySize =
+            meta?.displaySize ?? entry.blankSize ?? const Size(595, 842);
+        final aspect = displaySize.isEmpty
+            ? 0.7
+            : displaySize.width / displaySize.height;
+        // Keep a turned page inside the thumbnail column.
+        final thumbWidth = entry.quarterTurns.isOdd
+            ? math.min(56.0, 72 * aspect)
+            : 56.0;
         final notes = <String>[
           if (entry.isBlank) 'New blank page',
           if (source != null && source != index) 'Was page ${source + 1}',
@@ -370,11 +381,8 @@ class _PdfPageManagerState extends State<PdfPageManager> {
                         builder: (context, current, _) => PdfPageThumbnail(
                           rasterizer: widget.rasterizer,
                           pageNumber: source == null ? null : source + 1,
-                          displaySize:
-                              meta?.displaySize ??
-                              entry.blankSize ??
-                              const Size(595, 842),
-                          width: 56,
+                          displaySize: displaySize,
+                          width: thumbWidth,
                           quarterTurns: entry.quarterTurns,
                           highlighted: source != null && current == source + 1,
                         ),

@@ -889,74 +889,95 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
       color: scheme.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(28),
       clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Row(
           children: [
-            tool(PageCanvasTool.hand, Icons.pan_tool_outlined, 'Move and zoom'),
-            tool(PageCanvasTool.select, Icons.near_me_outlined, 'Select'),
-            tool(PageCanvasTool.pen, Icons.edit_outlined, 'Pen'),
-            tool(PageCanvasTool.highlighter, Icons.highlight, 'Highlighter'),
-            tool(
-              PageCanvasTool.eraser,
-              Icons.auto_fix_normal_outlined,
-              'Eraser',
-            ),
-            tool(PageCanvasTool.text, Icons.text_fields, 'Text'),
-            divider,
-            IconButton(
-              tooltip: 'Add image or stamp',
-              onPressed: _addImage,
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-            ),
-            IconButton(
-              tooltip: 'Add signature',
-              onPressed: _addSignature,
-              icon: const Icon(Icons.draw_outlined),
-            ),
-            divider,
-            IconButton(
-              tooltip: 'Colour',
-              onPressed: _pickColor,
-              icon: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: _color,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: scheme.outline),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    tool(
+                      PageCanvasTool.hand,
+                      Icons.pan_tool_outlined,
+                      'Move and zoom',
+                    ),
+                    tool(
+                      PageCanvasTool.select,
+                      Icons.near_me_outlined,
+                      'Select',
+                    ),
+                    tool(PageCanvasTool.pen, Icons.edit_outlined, 'Pen'),
+                    tool(
+                      PageCanvasTool.highlighter,
+                      Icons.highlight,
+                      'Highlighter',
+                    ),
+                    tool(
+                      PageCanvasTool.eraser,
+                      Icons.auto_fix_normal_outlined,
+                      'Eraser',
+                    ),
+                    tool(PageCanvasTool.text, Icons.text_fields, 'Text'),
+                    divider,
+                    IconButton(
+                      tooltip: 'Add image or stamp',
+                      onPressed: _addImage,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Add signature',
+                      onPressed: _addSignature,
+                      icon: const Icon(Icons.draw_outlined),
+                    ),
+                    divider,
+                    IconButton(
+                      tooltip: 'Colour',
+                      onPressed: _pickColor,
+                      icon: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: _color,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: scheme.outline),
+                        ),
+                      ),
+                    ),
+                    PopupMenuButton<double>(
+                      tooltip: _tool == PageCanvasTool.text
+                          ? 'Text size'
+                          : 'Line width',
+                      icon: const Icon(Icons.line_weight),
+                      initialValue: currentSize,
+                      onSelected: (value) => setState(() {
+                        switch (_tool) {
+                          case PageCanvasTool.highlighter:
+                            _highlighterWidth = value;
+                          case PageCanvasTool.text:
+                            _fontSize = value;
+                          default:
+                            _penWidth = value;
+                        }
+                      }),
+                      itemBuilder: (context) => [
+                        for (final size in sizeOptions)
+                          PopupMenuItem(
+                            value: size,
+                            child: Text(
+                              _tool == PageCanvasTool.text
+                                  ? '${size.round()} pt text'
+                                  : '${size % 1 == 0 ? size.round() : size} pt line',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
-            PopupMenuButton<double>(
-              tooltip: _tool == PageCanvasTool.text
-                  ? 'Text size'
-                  : 'Line width',
-              icon: const Icon(Icons.line_weight),
-              initialValue: currentSize,
-              onSelected: (value) => setState(() {
-                switch (_tool) {
-                  case PageCanvasTool.highlighter:
-                    _highlighterWidth = value;
-                  case PageCanvasTool.text:
-                    _fontSize = value;
-                  default:
-                    _penWidth = value;
-                }
-              }),
-              itemBuilder: (context) => [
-                for (final size in sizeOptions)
-                  PopupMenuItem(
-                    value: size,
-                    child: Text(
-                      _tool == PageCanvasTool.text
-                          ? '${size.round()} pt text'
-                          : '${size % 1 == 0 ? size.round() : size} pt line',
-                    ),
-                  ),
-              ],
-            ),
+            divider,
             if (selected is _TextItem)
               IconButton(
                 tooltip: 'Edit text',

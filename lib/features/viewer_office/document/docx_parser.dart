@@ -797,7 +797,7 @@ class DocxParser {
       numId: numId,
       format: lvl.numFmt,
       label: label,
-      labelStyle: bullet ? labelStyle.copyWith(fontFamily: null) : labelStyle,
+      labelStyle: bullet ? labelStyle.copyWith(fontFamily: markStyle.fontFamily) : labelStyle,
     );
   }
 
@@ -1035,7 +1035,10 @@ class DocxParser {
             width: size.$1,
             height: size.$2,
             raw: raw,
-            description: descr));
+            description: descr,
+            float: holder.name.local == 'anchor'
+                ? _anchorFloat(holder, Ox.firstDescendant(gd, 'blip'))
+                : null));
         return;
       }
     }
@@ -1100,22 +1103,25 @@ class DocxParser {
         Ox.firstDescendant(pict, 'rect') ??
         Ox.firstDescendant(pict, 'roundrect');
     double w = 0, h = 0;
-    final css = Ox.attr(shape, 'style') ?? '';
-    for (final part in css.split(';')) {
-      final kv = part.split(':');
-      if (kv.length != 2) continue;
-      final v = Units.length(kv[1].trim());
-      if (v == null) continue;
-      if (kv[0].trim() == 'width') w = v;
-      if (kv[0].trim() == 'height') h = v;
+    final css = <String, String>{};
+    for (final part in (Ox.attr(shape, 'style') ?? '').split(';')) {
+      final i = part.indexOf(':');
+      if (i <= 0) continue;
+      css[part.substring(0, i).trim()] = part.substring(i + 1).trim();
     }
+    w = Units.length(css['width']) ?? 0;
+    h = Units.length(css['height']) ?? 0;
     if (imageData != null) {
       final rid = Ox.attrQ(imageData, 'r:id') ?? Ox.attr(imageData, 'id');
       final id = _imageFromRel(rid, ctx);
       if (id != null) {
         final size = _sizeOr(id, w, h);
         sink.add(DocImage(
-            imageId: id, width: size.$1, height: size.$2, raw: raw));
+            imageId: id,
+            width: size.$1,
+            height: size.$2,
+            raw: raw,
+            float: _vmlFloat(css, Ox.firstDescendant(pict, 'wrap'), imageData)));
         return;
       }
     }
@@ -1137,6 +1143,98 @@ class DocxParser {
       content: content,
     ));
     if (content.isNotEmpty) frames.add(DocFrame(blocks: content));
+  }
+
+  /// Float placement for a `wp:anchor` that doesn't wrap text (pictures
+  /// that wrap are kept in the flow, which never hides text).
+  DocFloat? _anchorFloat(XmlElement anchor, XmlElement? blip) {
+    if (Ox.child(anchor, 'wrapNone') == null) return null;
+    final behind = ['1', 'true', 'on'].contains(Ox.attr(anchor, 'behindDoc'));
+    final ph = Ox.child(anchor, 'positionH');
+    final pv = Ox.child(anchor, 'positionV');
+    double? off(XmlElement? e) {
+      final t = Ox.child(e, 'posOffset');
+      return t == null ? null : Units.emu(double.tryParse(t.innerText.trim()) ?? 0);
+    }
+
+    var opacity = 1.0;
+    final alpha = Ox.intAttr(Ox.firstDescendant(blip, 'alphaModFix'), 'amt');
+    if (alpha != null) opacity = (alpha / 100000).clamp(0.05, 1.0);
+    final lum = Ox.firstDescendant(blip, 'lum');
+    if ((Ox.intAttr(lum, 'bright') ?? 0) > 0) opacity = opacity.clamp(0, 0.4);
+    if (['1', 'true'].contains(Ox.attr(anchor, 'simplePos'))) {
+      final sp = Ox.child(anchor, 'simplePos');
+      return DocFloat(
+        hRelative: 'page',
+        hOffset: Units.emu(Ox.doubleAttr(sp, 'x') ?? 0),
+        vRelative: 'page',
+        vOffset: Units.emu(Ox.doubleAttr(sp, 'y') ?? 0),
+        behindText: behind,
+        opacity: opacity,
+      );
+    }
+    return DocFloat(
+      hRelative: Ox.attr(ph, 'relativeFrom') ?? 'column',
+      hAlign: Ox.child(ph, 'align')?.innerText.trim(),
+      hOffset: off(ph) ?? 0,
+      vRelative: Ox.attr(pv, 'relativeFrom') ?? 'paragraph',
+      vAlign: Ox.child(pv, 'align')?.innerText.trim(),
+      vOffset: off(pv) ?? 0,
+      behindText: behind,
+      opacity: opacity,
+    );
+  }
+
+  /// Float placement for an absolutely positioned VML picture (classic
+  /// watermarks and floating pictures in older documents).
+  DocFloat? _vmlFloat(Map<String, String> css, XmlElement? wrap, XmlElement? imageData) {
+    if (css['position'] != 'absolute') return null;
+    final wrapType = Ox.attr(wrap, 'type');
+    if (wrapType != null && wrapType != 'none') return null;
+    String rel(String? v, {required bool horizontal}) {
+      switch (v) {
+        case 'page':
+          return 'page';
+        case 'margin':
+          return 'margin';
+        case 'char':
+          return 'character';
+        case 'line':
+          return 'line';
+        case 'left-margin-area':
+          return 'leftMargin';
+        case 'right-margin-area':
+          return 'rightMargin';
+        case 'top-margin-area':
+          return 'topMargin';
+        case 'bottom-margin-area':
+          return 'bottomMargin';
+        default:
+          return horizontal ? 'column' : 'paragraph';
+      }
+    }
+
+    String? align(String? v) => v == null || v == 'absolute' ? null : v;
+    final gainText = Ox.attr(imageData, 'gain');
+    var opacity = 1.0;
+    if (gainText != null) {
+      final g = double.tryParse(gainText.replaceAll('f', ''));
+      if (g != null) {
+        final gain = gainText.endsWith('f') ? g / 65536 : g;
+        if (gain < 0.9) opacity = 0.35;
+      }
+    }
+    final z = int.tryParse(css['z-index'] ?? '') ?? 0;
+    return DocFloat(
+      hRelative: rel(css['mso-position-horizontal-relative'], horizontal: true),
+      hAlign: align(css['mso-position-horizontal']),
+      hOffset: Units.length(css['margin-left'] ?? css['left']) ?? 0,
+      vRelative: rel(css['mso-position-vertical-relative'], horizontal: false),
+      vAlign: align(css['mso-position-vertical']),
+      vOffset: Units.length(css['margin-top'] ?? css['top']) ?? 0,
+      behindText: z < 0,
+      opacity: opacity,
+    );
   }
 
   /// Explicit size, or the image's pixel size (at 96 dpi) when missing.

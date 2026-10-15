@@ -342,7 +342,10 @@ class SpreadsheetController extends ChangeNotifier {
     editOrigin = origin;
     _editOriginal = cellEditText(activeCell, date1904: workbook.date1904);
     final t = initial ?? _editOriginal;
-    editText.value = TextEditingValue(text: t, selection: TextSelection.collapsed(offset: t.length));
+    // Keep the caret where the user tapped when the text is unchanged.
+    if (!(initial == null && editText.text == t && editText.selection.isValid)) {
+      editText.value = TextEditingValue(text: t, selection: TextSelection.collapsed(offset: t.length));
+    }
     _pointStart = null;
     _notify();
     onRevealCell?.call(selRow, selCol);
@@ -705,6 +708,23 @@ class SpreadsheetController extends ChangeNotifier {
     ));
     dirty = true;
     layoutVersion++;
+    _notify();
+  }
+
+  /// Recalculates every formula (volatile functions like TODAY included).
+  void recalculate() {
+    if (editing) commitEdit();
+    try {
+      engine.recalcAll();
+    } catch (_) {}
+    contentVersion++;
+    _syncEditText();
+    _notify();
+  }
+
+  /// Marks the workbook as saved.
+  void markSaved() {
+    dirty = false;
     _notify();
   }
 

@@ -121,6 +121,37 @@ class DocText extends DocInline {
   DocRunStyle? origin;
 }
 
+/// Placement of a picture that floats over/behind the text instead of
+/// flowing with it.
+class DocFloat {
+  const DocFloat({
+    this.hRelative = 'column',
+    this.hAlign,
+    this.hOffset = 0,
+    this.vRelative = 'paragraph',
+    this.vAlign,
+    this.vOffset = 0,
+    this.behindText = false,
+    this.opacity = 1,
+  });
+
+  /// `page`, `margin`, `column`, `character`, `leftMargin`, `rightMargin`.
+  final String hRelative;
+
+  /// `left`, `center`, `right` (overrides [hOffset]).
+  final String? hAlign;
+  final double hOffset;
+
+  /// `page`, `margin`, `paragraph`, `line`, `topMargin`, `bottomMargin`.
+  final String vRelative;
+
+  /// `top`, `center`, `bottom` (overrides [vOffset]).
+  final String? vAlign;
+  final double vOffset;
+  final bool behindText;
+  final double opacity;
+}
+
 /// An inline picture.
 class DocImage extends DocInline {
   DocImage({
@@ -129,7 +160,11 @@ class DocImage extends DocInline {
     required this.height,
     this.raw,
     this.description,
+    this.float,
   });
+
+  /// Non-null for pictures positioned independently of the text.
+  final DocFloat? float;
 
   /// Key into [DocModel.images].
   final String imageId;

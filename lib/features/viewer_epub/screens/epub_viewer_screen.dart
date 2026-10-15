@@ -109,22 +109,22 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
 
   // ------------------------------------------------------------ opening
 
-  Future<void> _open() async {
+  Future<void> _open({bool retry = false}) async {
     if (!_platformSupported) {
-      setState(() {
-        _opening = false;
-        _error = "The e-book reader isn't available on this platform.";
-        _retryable = false;
-      });
+      _opening = false;
+      _error = "The e-book reader isn't available on this platform.";
+      _retryable = false;
+      if (retry) setState(() {});
       return;
     }
-    _session?.dispose();
-    final old = _source;
-    if (old != null) unawaited(old.dispose());
-    _session = null;
-    _source = null;
-    _web = null;
-    if (mounted) {
+    if (retry) {
+      _session?.dispose();
+      final old = _source;
+      if (old != null) unawaited(old.dispose());
+      _session = null;
+      _source = null;
+      _web = null;
+      _loadId++;
       setState(() {
         _opening = true;
         _error = null;
@@ -431,6 +431,10 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       case 'link':
         final href = data['href'];
         if (href is String) _onLink(href);
+      case 'parseError':
+        if (_session?.forceHtml(_spine) ?? false) {
+          _openSpine(_spine, _lastTarget);
+        }
     }
     return null;
   }
@@ -698,11 +702,11 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       } else {
         final label =
             '$_chapterTitle · ${(_displayOverall * 100).round()}%';
-        await _bookmarkService.addBookmark(
-          _path,
-          ReaderPosition(_spine, _fraction).toJson(),
-          label,
-        );
+        final position = ReaderPosition(_spine, _fraction).toJson();
+        // Saving first guarantees BookmarkService has a growable record
+        // (a brand-new book starts with an unmodifiable empty list).
+        await _bookmarkService.saveLastReadPosition(_path, position);
+        await _bookmarkService.addBookmark(_path, position, label);
         if (mounted) _snack('Bookmarked "$label"');
       }
     } catch (e) {
@@ -966,7 +970,7 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
     if (error != null || _info == null) {
       return _ErrorView(
         message: error ?? 'Unknown error',
-        onRetry: _retryable ? _open : null,
+        onRetry: _retryable ? () => _open(retry: true) : null,
       );
     }
 

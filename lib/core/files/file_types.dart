@@ -66,7 +66,7 @@ abstract final class FileTypes {
 
   static const pdf = {'pdf'};
   static const epub = {'epub'};
-  static const ebook = {'fb2', 'mobi', 'azw', 'azw3', 'prc'};
+  static const ebook = {'fb2', 'fbz', 'mobi', 'azw', 'azw3', 'prc'};
   static const comic = {'cbz', 'cbr', 'cb7', 'cbt'};
 
   static const word = {'docx', 'docm', 'dotx', 'dotm'};
@@ -184,6 +184,7 @@ abstract final class FileTypes {
   }
 
   static FileKind kindOf(String path) {
+    if (path.toLowerCase().endsWith('.fb2.zip')) return FileKind.ebook;
     final ext = extensionOf(path);
     if (ext.isEmpty) {
       final name = p.basename(path).toLowerCase();

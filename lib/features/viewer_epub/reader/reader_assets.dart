@@ -87,6 +87,32 @@ html.er-paginated embed {
   page-break-inside: avoid;
 }
 html.er-paginated img { height: auto; object-fit: contain; }
+/* Fixed-width containers (style="width: 550px") must not spill into the
+   next column/page. */
+html.er-paginated body div, html.er-scrolled body div,
+html.er-paginated body p, html.er-scrolled body p,
+html.er-paginated body figure, html.er-scrolled body figure,
+html.er-paginated body section, html.er-scrolled body section,
+html.er-paginated body article, html.er-scrolled body article,
+html.er-paginated body aside, html.er-scrolled body aside,
+html.er-paginated body header, html.er-scrolled body header,
+html.er-paginated body footer, html.er-scrolled body footer,
+html.er-paginated body nav, html.er-scrolled body nav,
+html.er-paginated body blockquote, html.er-scrolled body blockquote,
+html.er-paginated body table, html.er-scrolled body table,
+html.er-paginated body ul, html.er-scrolled body ul,
+html.er-paginated body ol, html.er-scrolled body ol,
+html.er-paginated body dl, html.er-scrolled body dl,
+html.er-paginated body pre, html.er-scrolled body pre,
+html.er-paginated body hr, html.er-scrolled body hr,
+html.er-paginated body h1, html.er-scrolled body h1,
+html.er-paginated body h2, html.er-scrolled body h2,
+html.er-paginated body h3, html.er-scrolled body h3,
+html.er-paginated body h4, html.er-scrolled body h4,
+html.er-paginated body h5, html.er-scrolled body h5,
+html.er-paginated body h6, html.er-scrolled body h6 {
+  max-width: 100% !important;
+}
 html.er-scrolled img, html.er-scrolled svg, html.er-scrolled video {
   max-width: 100% !important;
   box-sizing: border-box;
@@ -599,11 +625,12 @@ const String kReaderJs = r'''
     var el = findTarget(id);
     return el ? goToElement(el) : false;
   }
-  function goToRange(range) {
+  // [reveal]: keep the range away from the top edge (search results).
+  function goToRange(range, reveal) {
     var r = rangeRect(range);
     if (!r) return false;
     if (st.paginated) goToPage(pageOfRect(r));
-    else scrollToXY(0, Math.max(0, r.top + window.scrollY - st.H * 0.3));
+    else scrollToXY(0, Math.max(0, r.top + window.scrollY - (reveal ? st.H * 0.3 : 2)));
     return true;
   }
 
@@ -672,7 +699,7 @@ const String kReaderJs = r'''
     if (!st.anchor && !force) captureAnchor();
     var anchor = st.anchor;
     layout();
-    if (st.focusRange) goToRange(st.focusRange);
+    if (st.focusRange) goToRange(st.focusRange, true);
     else if (st.pending && st.pending.type === 'fragment') goToFragment(st.pending.id);
     else if (st.stickEnd) goToEnd();
     else if (anchor && anchor.startContainer && doc.contains(anchor.startContainer)) goToRange(anchor);
@@ -848,7 +875,7 @@ const String kReaderJs = r'''
     } catch (err) { return false; }
     var shown = highlight(range);
     st.focusRange = shown;
-    goToRange(shown);
+    goToRange(shown, true);
     return true;
   }
 
@@ -959,8 +986,10 @@ const String kReaderJs = r'''
         }
         return;
       }
-      if (Date.now() - st.progScroll > 400) userMoved();
-      st.anchor = null;
+      if (Date.now() - st.progScroll > 400) {
+        userMoved();
+        st.anchor = null;
+      }
       relocated();
     }, 160);
   }, { passive: true });
@@ -971,6 +1000,10 @@ const String kReaderJs = r'''
   function init() {
     if (st.inited || !doc.body) return;
     st.inited = true;
+    if (doc.getElementsByTagName('parsererror').length) {
+      // The browser's XML parser rejected the document: ask for HTML mode.
+      post('parseError', {});
+    }
     detectDirection();
     captureBaseFont();
     applyTheme();

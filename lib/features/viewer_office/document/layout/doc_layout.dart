@@ -80,6 +80,12 @@ class LaidParagraph extends LaidBlock {
   @override
   bool get keepWithNext => paragraph.keepNext;
 
+  /// Pictures anchored to this paragraph that float over/behind the text.
+  List<DocImage> get floats => [
+        for (final i in paragraph.inlines)
+          if (i is DocImage && i.float != null) i,
+      ];
+
   /// Vertical position (within the block) of the caret at [offset].
   double caretY(DocRenderContext ctx, int offset) {
     final span = buildParagraphSpan(paragraph, ctx, maxWidth: textWidth, measure: true);
@@ -612,10 +618,52 @@ class DocPageSlice {
   final double y;
 }
 
+/// A floating picture on a page; [anchorY] is the anchoring paragraph's top
+/// in page coordinates.
+class DocPageFloat {
+  DocPageFloat(this.image, this.anchorY);
+  final DocImage image;
+  final double anchorY;
+
+  /// Rectangle on a page with [s] (page coordinates).
+  Rect rectOn(DocPageSetup s) {
+    final f = image.float!;
+    final w = image.width <= 0 ? 144.0 : image.width;
+    final h = image.height <= 0 ? 108.0 : image.height;
+    final (double l, double r) = switch (f.hRelative) {
+      'page' => (0.0, s.width),
+      'leftMargin' || 'insideMargin' => (0.0, s.marginLeft),
+      'rightMargin' || 'outsideMargin' => (s.width - s.marginRight, s.width),
+      _ => (s.marginLeft, s.width - s.marginRight),
+    };
+    final (double t, double b) = switch (f.vRelative) {
+      'page' => (0.0, s.height),
+      'margin' => (s.marginTop, s.height - s.marginBottom),
+      'topMargin' => (0.0, s.marginTop),
+      'bottomMargin' => (s.height - s.marginBottom, s.height),
+      _ => (anchorY, anchorY + h),
+    };
+    final x = switch (f.hAlign) {
+      'center' => l + (r - l - w) / 2,
+      'right' || 'outside' => r - w,
+      'left' || 'inside' => l,
+      _ => l + f.hOffset,
+    };
+    final y = switch (f.vAlign) {
+      'center' => t + (b - t - h) / 2,
+      'bottom' || 'outside' => b - h,
+      'top' || 'inside' => t,
+      _ => t + f.vOffset,
+    };
+    return Rect.fromLTWH(x, y, w, h);
+  }
+}
+
 class DocPageLayout {
   DocPageLayout(this.setup);
   final DocPageSetup setup;
   final List<DocPageSlice> slices = [];
+  final List<DocPageFloat> floats = [];
 }
 
 class DocLayoutResult {
@@ -624,12 +672,17 @@ class DocLayoutResult {
     required this.pages,
     required this.header,
     required this.footer,
+    this.headerFloats = const [],
   });
 
   final List<LaidBlock> blocks;
   final List<DocPageLayout> pages;
   final List<LaidBlock> header;
   final List<LaidBlock> footer;
+
+  /// Floating pictures from the header/footer, repeated on every page
+  /// (e.g. picture watermarks).
+  final List<DocPageFloat> headerFloats;
 
   /// Page index and y (within the page content) for [blockIndex] at
   /// [yInBlock].
@@ -722,6 +775,11 @@ Future<DocLayoutResult> layoutDocument(
       h = page.setup.contentHeight;
       final remaining = lb.height - off;
       final space = h - y;
+      if (off == 0 && lb is LaidParagraph) {
+        for (final f in lb.floats) {
+          page.floats.add(DocPageFloat(f, page.setup.marginTop + y));
+        }
+      }
       if (remaining <= space + 0.5 || lb.contentEnd - off <= space + 0.5) {
         final take = math.min(remaining, math.max(space, lb.contentEnd - off));
         page.slices.add(DocPageSlice(i, off, take, y));
@@ -753,11 +811,35 @@ Future<DocLayoutResult> layoutDocument(
   if (pages.length > 1 && pages.last.slices.isEmpty) pages.removeLast();
 
   final hw = model.page.contentWidth;
+  final header = engine.layoutBlocks(model.header, hw);
+  final footer = engine.layoutBlocks(model.footer, hw);
+  final floats = <DocPageFloat>[];
+  var hy = model.page.headerDistance;
+  for (final b in header) {
+    if (b is LaidParagraph) {
+      for (final f in b.floats) {
+        floats.add(DocPageFloat(f, hy));
+      }
+    }
+    hy += b.height;
+  }
+  final footerTop = model.page.height - model.page.footerDistance -
+      footer.fold<double>(0, (a, b) => a + b.height);
+  var fy = footerTop;
+  for (final b in footer) {
+    if (b is LaidParagraph) {
+      for (final f in b.floats) {
+        floats.add(DocPageFloat(f, fy));
+      }
+    }
+    fy += b.height;
+  }
   return DocLayoutResult(
     blocks: laid,
     pages: pages,
-    header: engine.layoutBlocks(model.header, hw),
-    footer: engine.layoutBlocks(model.footer, hw),
+    header: header,
+    footer: footer,
+    headerFloats: floats,
   );
 }
 
@@ -780,6 +862,19 @@ class DocPageView extends StatelessWidget {
     final s = page.setup;
     final pctx = ctx.forPage(pageIndex + 1, result.pages.length);
     final children = <Widget>[];
+    final front = <Widget>[];
+    for (final f in [...result.headerFloats, ...page.floats]) {
+      final rect = f.rectOn(s);
+      final w = Positioned.fromRect(
+        rect: rect,
+        child: Opacity(
+          opacity: f.image.float!.opacity,
+          child: DocImageBox(
+              id: f.image.imageId, width: rect.width, height: rect.height, ctx: pctx),
+        ),
+      );
+      (f.image.float!.behindText ? children : front).add(w);
+    }
 
     // Header from the header distance; footer ending at the footer distance.
     if (result.header.isNotEmpty) {
@@ -838,6 +933,7 @@ class DocPageView extends StatelessWidget {
         ),
       ));
     }
+    children.addAll(front);
     return Container(
       width: s.width,
       height: s.height,

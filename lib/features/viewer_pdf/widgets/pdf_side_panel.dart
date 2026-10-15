@@ -102,8 +102,11 @@ class _PdfSidePanelState extends State<PdfSidePanel>
   /// the page manager only loads its data when it is actually opened.
   late final Set<int> _visited = {_tabs.index};
 
+  bool _syncingFromWidget = false;
+
   void _onTab() {
     _visited.add(_tabs.index);
+    if (_syncingFromWidget) return;
     setState(() {});
     if (_tabs.index != widget.tabIndex) widget.onTabChanged(_tabs.index);
   }
@@ -116,7 +119,9 @@ class _PdfSidePanelState extends State<PdfSidePanel>
     final index = widget.tabIndex.clamp(0, 2);
     if (widget.tabIndex != oldWidget.tabIndex && index != _tabs.index) {
       _visited.add(index);
+      _syncingFromWidget = true;
       _tabs.index = index;
+      _syncingFromWidget = false;
     }
     if (!identical(oldWidget.outline, widget.outline)) _expanded.clear();
   }

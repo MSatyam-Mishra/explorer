@@ -34,7 +34,9 @@ class BookData {
   dynamic lastReadPosition;
   List<Bookmark> bookmarks;
 
-  BookData({this.lastReadPosition, this.bookmarks = const []});
+  // Growable copy: a const default list would make the first add() throw.
+  BookData({this.lastReadPosition, List<Bookmark>? bookmarks})
+    : bookmarks = [...?bookmarks];
 
   Map<String, dynamic> toJson() => {
     'lastReadPosition': lastReadPosition,

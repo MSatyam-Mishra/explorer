@@ -437,11 +437,23 @@ const _structureSafe = {
   'drawing', 'legacyDrawing', 'legacyDrawingHF', 'drawingHF', 'picture',
 };
 
+/// Output of [XlsxWriter.writePackage].
+class XlsxWriteResult {
+  const XlsxWriteResult(this.bytes, this.sheetPaths);
+  final Uint8List bytes;
+
+  /// Worksheet part path used for each sheet, in workbook order.
+  final List<String> sheetPaths;
+}
+
 /// Writes .xlsx packages. When [original] package bytes are given, every
 /// part this app doesn't understand (themes, drawings, VBA, pivot caches...)
 /// is copied over unchanged.
 abstract final class XlsxWriter {
-  static Uint8List write(Workbook wb, {Uint8List? original, SpreadsheetFormat? target}) {
+  static Uint8List write(Workbook wb, {Uint8List? original, SpreadsheetFormat? target}) =>
+      writePackage(wb, original: original, target: target).bytes;
+
+  static XlsxWriteResult writePackage(Workbook wb, {Uint8List? original, SpreadsheetFormat? target}) {
     final fmt = target ?? (wb.format.isXlsxFamily ? wb.format : SpreadsheetFormat.xlsx);
     XlsxPackage? orig;
     if (original != null) {
@@ -841,7 +853,7 @@ abstract final class XlsxWriter {
     }
     final out = ZipEncoder().encode(archive);
     if (out == null) throw StateError('Zip encoding failed');
-    return Uint8List.fromList(out);
+    return XlsxWriteResult(Uint8List.fromList(out), [for (final p in plans) p.$2]);
   }
 
   static Uint8List _utf8(String s) => Uint8List.fromList(utf8.encode(s));

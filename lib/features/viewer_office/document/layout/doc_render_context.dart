@@ -286,6 +286,11 @@ DocSpan buildParagraphSpan(
         }
         offset += originalLength;
       case DocImage():
+        if (inline.float != null) {
+          // Floating pictures are painted by the page, not the text flow.
+          offset += 1;
+          continue;
+        }
         var w = inline.width <= 0 ? 144.0 : inline.width;
         var h = inline.height <= 0 ? 108.0 : inline.height;
         if (w > maxWidth && maxWidth > 0) {
