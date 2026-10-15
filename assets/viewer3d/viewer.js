@@ -120,7 +120,6 @@ controls.screenSpacePanning = true;
 controls.autoRotateSpeed = 2.0;
 controls.listenToKeyEvents(window);
 controls.addEventListener('change', requestRender);
-controls.addEventListener('start', () => post('interaction', {}));
 
 // Model hierarchy: scene > modelRoot (centering offset) > orient (up axis) > model
 const modelRoot = new THREE.Group();
@@ -513,33 +512,40 @@ const FORMAT_LOADERS = {
     const loader = new OBJLoader(manager);
 
     // Material libraries referenced with `mtllib` (or a same-named sibling).
-    const libs = [];
-    for (const m of text.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)) {
-      const raw = m[1].trim();
-      if (lookupFile(raw.replace(/\\/g, '/')) || !/\s/.test(raw)) libs.push(raw);
-      else libs.push(...raw.split(/\s+/));
-    }
+    const libLines = [];
+    for (const m of text.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)) libLines.push(m[1].trim());
     let implicit = false;
-    if (!libs.length) {
-      const stem = NAME.replace(/\.[^.]+$/, '');
-      const sibling = lookupFile(`${stem}.mtl`);
-      if (sibling && fileIndex.has(`${stem}.mtl`.toLowerCase())) {
-        libs.push(sibling);
+    if (!libLines.length) {
+      const sibling = fileIndex.get(`${NAME.replace(/\.[^.]+$/, '')}.mtl`.toLowerCase());
+      if (sibling) {
+        libLines.push(sibling);
         implicit = true;
       }
     }
 
+    const fetchMtl = (name) =>
+      fetchText(resolveResourceUrl(MODEL_BASE + encodePath(name.replace(/\\/g, '/'))), { optional: true });
+
     let materialsLoaded = false;
-    if (libs.length) {
+    if (libLines.length) {
       postProgress('resources', null, 'Loading materials', true);
       const texts = [];
-      for (const lib of [...new Set(libs)]) {
-        const url = resolveResourceUrl(MODEL_BASE + encodePath(lib.replace(/\\/g, '/')));
-        const mtl = await fetchText(url, { optional: true });
-        if (mtl == null) {
-          if (!implicit) warnings.push(`Material library "${lib}" not found — showing the model without its materials.`);
-        } else {
+      for (const line of [...new Set(libLines)]) {
+        // A line holds either one name containing spaces or several names.
+        let mtl = await fetchMtl(line);
+        if (mtl != null) {
           texts.push(mtl);
+          continue;
+        }
+        let anyFound = false;
+        for (const part of /\s/.test(line) ? line.split(/\s+/) : []) {
+          mtl = await fetchMtl(part);
+          if (mtl == null) continue;
+          texts.push(mtl);
+          anyFound = true;
+        }
+        if (!anyFound && !implicit) {
+          warnings.push(`Material library "${line}" not found — showing the model without its materials.`);
         }
       }
       if (texts.length) {
@@ -688,10 +694,11 @@ const FORMAT_LOADERS = {
       throw new ViewerError('unsupported_version', 'VRML 1.0 files aren\'t supported. Only VRML 2.0 (VRML97) can be shown.');
     }
     const vrmlScene = new VRMLLoader(manager).parse(text, MODEL_BASE);
-    // VRML scenes may set a background; the viewer controls that instead.
-    vrmlScene.background = null;
+    // Drop the Background node's sky/ground spheres (renderOrder -Infinity):
+    // the viewer controls the background and they'd break auto-framing.
     const group = new THREE.Group();
-    group.add(...vrmlScene.children);
+    const children = vrmlScene.children.filter((c) => c.renderOrder !== -Infinity);
+    if (children.length) group.add(...children);
     return { object: group };
   },
 
@@ -813,23 +820,23 @@ function parseOFF(text) {
 
   let line = nextLine();
   if (line == null) throw new ViewerError('parse_failed', 'This OFF file is empty.');
-  let keyword = '';
+  let prefix = '';
   let tokens = line.split(/\s+/);
   if (/OFF$/i.test(tokens[0])) {
-    keyword = tokens[0].toUpperCase();
+    prefix = tokens[0].slice(0, -3);
     if (tokens[1] && /BINARY/i.test(tokens[1])) {
       throw new ViewerError('unsupported_format', 'Binary OFF files aren\'t supported.');
     }
     tokens = tokens.slice(1);
     if (!tokens.length) tokens = (nextLine() || '').split(/\s+/);
   }
-  if (keyword.includes('4') || keyword.startsWith('N') && keyword.includes('NDIM')) {
+  // "4OFF" (homogeneous) and "nOFF" (n-dimensional) aren't plain 3D meshes.
+  if (prefix.includes('4') || prefix.endsWith('n')) {
     throw new ViewerError('unsupported_format', 'Higher-dimensional OFF files aren\'t supported.');
   }
-  const prefix = keyword.replace(/OFF$/, '');
-  const hasTexCoords = prefix.includes('ST');
-  const hasColors = prefix.replace('ST', '').includes('C');
-  const hasNormals = prefix.replace('ST', '').includes('N');
+  const flags = prefix.toUpperCase().replace('ST', '');
+  const hasColors = flags.includes('C');
+  const hasNormals = flags.includes('N');
 
   const nv = parseInt(tokens[0], 10);
   const nf = parseInt(tokens[1], 10) || 0;
@@ -854,7 +861,6 @@ function parseOFF(text) {
         vColors[i * 3 + c] = v;
       }
     }
-    void hasTexCoords;
   }
 
   const tris = [];
@@ -944,7 +950,7 @@ function prepareModel(object) {
       const g = o.geometry;
       if (g && g.attributes && g.attributes.position && !g.attributes.normal) {
         const needsNormals = materialsOf(o.material).some((m) => m && !m.isMeshBasicMaterial && !m.isShaderMaterial);
-        if (needsNormals && g.index !== undefined) g.computeVertexNormals();
+        if (needsNormals) g.computeVertexNormals();
       }
       originalMaterials.set(o, o.material);
     } else if (o.isPoints) {
