@@ -23,7 +23,8 @@ DocModel parseAnyDocument(Uint8List bytes, String extension) {
   if (OfficePackage.isZip(bytes)) {
     final pkg = OfficePackage.decode(bytes);
     final mime = pkg.text('mimetype')?.trim() ?? '';
-    if (mime.contains('opendocument') || (pkg.has('content.xml') && !pkg.has('[Content_Types].xml'))) {
+    if (mime.contains('opendocument') ||
+        (pkg.has('content.xml') && !pkg.has('[Content_Types].xml'))) {
       return parseOdtBytes(bytes);
     }
     return DocxParser(pkg).parse();
@@ -47,8 +48,13 @@ DocModel parseAnyDocument(Uint8List bytes, String extension) {
       // Not flat ODF; show as text below.
     }
   }
-  return plainTextModel(decodeTextBytes(bytes), _formatForExt(ext),
-      html: head.toLowerCase().startsWith('<html') || head.toLowerCase().startsWith('<!doctype html'));
+  return plainTextModel(
+    decodeTextBytes(bytes),
+    _formatForExt(ext),
+    html:
+        head.toLowerCase().startsWith('<html') ||
+        head.toLowerCase().startsWith('<!doctype html'),
+  );
 }
 
 String _formatForExt(String ext) {
@@ -79,9 +85,19 @@ DocModel plainTextModel(String text, String format, {bool html = false}) {
   var t = text;
   if (html) {
     t = t
-        .replaceAll(RegExp(r'<(script|style)[^>]*>.*?</\1>', caseSensitive: false, dotAll: true), '')
+        .replaceAll(
+          RegExp(
+            r'<(script|style)[^>]*>.*?</\1>',
+            caseSensitive: false,
+            dotAll: true,
+          ),
+          '',
+        )
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-        .replaceAll(RegExp(r'</(p|div|h[1-6]|li|tr)>', caseSensitive: false), '\n')
+        .replaceAll(
+          RegExp(r'</(p|div|h[1-6]|li|tr)>', caseSensitive: false),
+          '\n',
+        )
         .replaceAll(RegExp(r'<[^>]+>'), '')
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&amp;', '&')
@@ -138,7 +154,8 @@ String _printableRuns(String s) {
   }
 
   for (final c in s.runes) {
-    final ok = c == 0x09 ||
+    final ok =
+        c == 0x09 ||
         (c >= 0x20 && c < 0x7F) ||
         (c >= 0xA0 && c < 0xD800) ||
         (c >= 0xE000 && c < 0xFFF0 && c != 0xFFFD);

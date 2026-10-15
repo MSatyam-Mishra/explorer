@@ -24,7 +24,11 @@ abstract class LaidBlock {
 
   /// Builds the block. [from]/[to] is the visible vertical range, which lets
   /// big tables skip rows that are clipped away.
-  Widget build(DocRenderContext ctx, {double from = 0, double to = double.infinity});
+  Widget build(
+    DocRenderContext ctx, {
+    double from = 0,
+    double to = double.infinity,
+  });
 }
 
 enum LaidMarkerKind { pageBreak, sectionBreak }
@@ -40,8 +44,11 @@ class LaidMarker extends LaidBlock {
   @override
   double get width => 0;
   @override
-  Widget build(DocRenderContext ctx, {double from = 0, double to = double.infinity}) =>
-      const SizedBox.shrink();
+  Widget build(
+    DocRenderContext ctx, {
+    double from = 0,
+    double to = double.infinity,
+  }) => const SizedBox.shrink();
 }
 
 class LaidParagraph extends LaidBlock {
@@ -82,13 +89,18 @@ class LaidParagraph extends LaidBlock {
 
   /// Pictures anchored to this paragraph that float over/behind the text.
   List<DocImage> get floats => [
-        for (final i in paragraph.inlines)
-          if (i is DocImage && i.float != null) i,
-      ];
+    for (final i in paragraph.inlines)
+      if (i is DocImage && i.float != null) i,
+  ];
 
   /// Vertical position (within the block) of the caret at [offset].
   double caretY(DocRenderContext ctx, int offset) {
-    final span = buildParagraphSpan(paragraph, ctx, maxWidth: textWidth, measure: true);
+    final span = buildParagraphSpan(
+      paragraph,
+      ctx,
+      maxWidth: textWidth,
+      measure: true,
+    );
     final tp = TextPainter(
       text: span.span,
       textAlign: paragraphAlign(paragraph),
@@ -100,14 +112,19 @@ class LaidParagraph extends LaidBlock {
     tp.layout(maxWidth: textWidth);
     final lead = paragraph.firstLine > 0 && paragraph.list == null ? 1 : 0;
     final o = tp.getOffsetForCaret(
-        TextPosition(offset: offset + lead), Rect.zero);
+      TextPosition(offset: offset + lead),
+      Rect.zero,
+    );
     tp.dispose();
     return textY + o.dy;
   }
 
   @override
-  Widget build(DocRenderContext ctx, {double from = 0, double to = double.infinity}) =>
-      _ParagraphView(laid: this, ctx: ctx);
+  Widget build(
+    DocRenderContext ctx, {
+    double from = 0,
+    double to = double.infinity,
+  }) => _ParagraphView(laid: this, ctx: ctx);
 }
 
 class _ParagraphView extends StatefulWidget {
@@ -141,68 +158,82 @@ class _ParagraphViewState extends State<_ParagraphView> {
     final l = widget.laid;
     final p = l.paragraph;
     final ctx = widget.ctx;
-    final span = buildParagraphSpan(p, ctx,
-        maxWidth: l.textWidth, recognizers: _recognizers);
+    final span = buildParagraphSpan(
+      p,
+      ctx,
+      maxWidth: l.textWidth,
+      recognizers: _recognizers,
+    );
     final rtl = p.rtl;
     final children = <Widget>[];
     final innerTop = l.spaceBefore;
     final innerBottom = l.contentEnd;
     if (p.shading != null) {
-      children.add(Positioned(
-        left: math.max(0, p.indentLeft - 2),
-        right: math.max(0, p.indentRight - 2),
-        top: innerTop,
-        height: math.max(0, innerBottom - innerTop),
-        child: ColoredBox(color: ctx.fillColor(p.shading!)),
-      ));
+      children.add(
+        Positioned(
+          left: math.max(0, p.indentLeft - 2),
+          right: math.max(0, p.indentRight - 2),
+          top: innerTop,
+          height: math.max(0, innerBottom - innerTop),
+          child: ColoredBox(color: ctx.fillColor(p.shading!)),
+        ),
+      );
     }
     if (p.borderTop != null) {
-      children.add(Positioned(
-        left: p.indentLeft,
-        right: p.indentRight,
-        top: innerTop,
-        height: p.borderTop!.width,
-        child: ColoredBox(color: ctx.textColor(p.borderTop!.color)),
-      ));
+      children.add(
+        Positioned(
+          left: p.indentLeft,
+          right: p.indentRight,
+          top: innerTop,
+          height: p.borderTop!.width,
+          child: ColoredBox(color: ctx.textColor(p.borderTop!.color)),
+        ),
+      );
     }
     if (p.borderBottom != null) {
-      children.add(Positioned(
-        left: p.indentLeft,
-        right: p.indentRight,
-        top: innerBottom - p.borderBottom!.width,
-        height: p.borderBottom!.width,
-        child: ColoredBox(color: ctx.textColor(p.borderBottom!.color)),
-      ));
+      children.add(
+        Positioned(
+          left: p.indentLeft,
+          right: p.indentRight,
+          top: innerBottom - p.borderBottom!.width,
+          height: p.borderBottom!.width,
+          child: ColoredBox(color: ctx.textColor(p.borderBottom!.color)),
+        ),
+      );
     }
     final list = p.list;
     if (list != null && list.label.isNotEmpty) {
       final labelStyle = docTextStyle(list.labelStyle ?? p.markStyle, ctx);
-      children.add(Positioned(
-        left: rtl ? null : l.labelX,
-        right: rtl ? l.labelX : null,
+      children.add(
+        Positioned(
+          left: rtl ? null : l.labelX,
+          right: rtl ? l.labelX : null,
+          top: l.textY,
+          child: RichText(
+            text: TextSpan(text: list.label, style: labelStyle),
+            textScaler: TextScaler.noScaling,
+            maxLines: 1,
+            softWrap: false,
+            strutStyle: paragraphStrut(p),
+          ),
+        ),
+      );
+    }
+    children.add(
+      Positioned(
+        left: rtl ? null : l.textX,
+        right: rtl ? l.textX : null,
         top: l.textY,
+        width: l.textWidth,
         child: RichText(
-          text: TextSpan(text: list.label, style: labelStyle),
+          text: span.span,
+          textAlign: paragraphAlign(p),
+          textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
           textScaler: TextScaler.noScaling,
-          maxLines: 1,
-          softWrap: false,
           strutStyle: paragraphStrut(p),
         ),
-      ));
-    }
-    children.add(Positioned(
-      left: rtl ? null : l.textX,
-      right: rtl ? l.textX : null,
-      top: l.textY,
-      width: l.textWidth,
-      child: RichText(
-        text: span.span,
-        textAlign: paragraphAlign(p),
-        textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
-        textScaler: TextScaler.noScaling,
-        strutStyle: paragraphStrut(p),
       ),
-    ));
+    );
     return SizedBox(
       width: l.width,
       height: l.height,
@@ -270,7 +301,11 @@ class LaidTable extends LaidBlock {
   }
 
   @override
-  Widget build(DocRenderContext ctx, {double from = 0, double to = double.infinity}) {
+  Widget build(
+    DocRenderContext ctx, {
+    double from = 0,
+    double to = double.infinity,
+  }) {
     final border = table.borders
         ? Border.all(color: ctx.textColor(table.borderColor), width: 0.5)
         : null;
@@ -284,46 +319,57 @@ class LaidTable extends LaidBlock {
         DocCellVAlign.center => math.max(0.0, free / 2),
         DocCellVAlign.bottom => math.max(0.0, free),
       };
-      children.add(Positioned.fromRect(
-        rect: c.rect,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: c.cell.shading == null ? null : ctx.fillColor(c.cell.shading!),
-            border: border,
-          ),
-          child: ClipRect(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(padding, vPad + dy, padding, 0),
-              child: OverflowBox(
-                alignment: Alignment.topLeft,
-                minHeight: 0,
-                maxHeight: double.infinity,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final b in c.blocks)
-                      SizedBox(width: innerW, height: b.height, child: b.build(ctx)),
-                  ],
+      children.add(
+        Positioned.fromRect(
+          rect: c.rect,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: c.cell.shading == null
+                  ? null
+                  : ctx.fillColor(c.cell.shading!),
+              border: border,
+            ),
+            child: ClipRect(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(padding, vPad + dy, padding, 0),
+                child: OverflowBox(
+                  alignment: Alignment.topLeft,
+                  minHeight: 0,
+                  maxHeight: double.infinity,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final b in c.blocks)
+                        SizedBox(
+                          width: innerW,
+                          height: b.height,
+                          child: b.build(ctx),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ));
+      );
     }
     return SizedBox(
       width: width,
       height: height,
-      child: Stack(clipBehavior: Clip.none, children: [
-        Positioned(
-          left: x,
-          top: 0,
-          width: tableWidth,
-          height: height,
-          child: Stack(clipBehavior: Clip.none, children: children),
-        ),
-      ]),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: x,
+            top: 0,
+            width: tableWidth,
+            height: height,
+            child: Stack(clipBehavior: Clip.none, children: children),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -357,7 +403,11 @@ class LaidFrame extends LaidBlock {
   }
 
   @override
-  Widget build(DocRenderContext ctx, {double from = 0, double to = double.infinity}) {
+  Widget build(
+    DocRenderContext ctx, {
+    double from = 0,
+    double to = double.infinity,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: margin),
       child: Container(
@@ -365,7 +415,9 @@ class LaidFrame extends LaidBlock {
         padding: const EdgeInsets.all(pad),
         decoration: BoxDecoration(
           border: Border.all(
-              color: ctx.borderColor.withValues(alpha: 0.35), width: 0.75),
+            color: ctx.borderColor.withValues(alpha: 0.35),
+            width: 0.75,
+          ),
           borderRadius: BorderRadius.circular(3),
         ),
         child: Column(
@@ -373,9 +425,10 @@ class LaidFrame extends LaidBlock {
           children: [
             for (final c in children)
               SizedBox(
-                  width: width - pad * 2 - 1.5,
-                  height: c.height,
-                  child: c.build(ctx)),
+                width: width - pad * 2 - 1.5,
+                height: c.height,
+                child: c.build(ctx),
+              ),
           ],
         ),
       ),
@@ -422,8 +475,12 @@ class DocLayoutEngine {
   LaidBlock layoutBlock(DocBlock b, double width, {(double, double)? spacing}) {
     switch (b) {
       case DocParagraph():
-        return layoutParagraph(b, width,
-            spaceBefore: spacing?.$1, spaceAfter: spacing?.$2);
+        return layoutParagraph(
+          b,
+          width,
+          spaceBefore: spacing?.$1,
+          spaceAfter: spacing?.$2,
+        );
       case DocTable():
         return layoutTable(b, width);
       case DocFrame():
@@ -439,13 +496,20 @@ class DocLayoutEngine {
     }
   }
 
-  LaidParagraph layoutParagraph(DocParagraph p, double width,
-      {double? spaceBefore, double? spaceAfter}) {
+  LaidParagraph layoutParagraph(
+    DocParagraph p,
+    double width, {
+    double? spaceBefore,
+    double? spaceAfter,
+  }) {
     final sb = spaceBefore ?? p.spaceBefore;
     final sa = spaceAfter ?? p.spaceAfter;
-    final topBorder = p.borderTop == null ? 0.0 : p.borderTop!.width + p.borderTop!.space;
-    final bottomBorder =
-        p.borderBottom == null ? 0.0 : p.borderBottom!.width + p.borderBottom!.space;
+    final topBorder = p.borderTop == null
+        ? 0.0
+        : p.borderTop!.width + p.borderTop!.space;
+    final bottomBorder = p.borderBottom == null
+        ? 0.0
+        : p.borderBottom!.width + p.borderBottom!.space;
 
     var textX = math.max(0.0, p.indentLeft);
     var labelX = textX;
@@ -455,8 +519,9 @@ class DocLayoutEngine {
       final hanging = p.firstLine < 0 ? -p.firstLine : 0.0;
       final tp = TextPainter(
         text: TextSpan(
-            text: list.label,
-            style: docTextStyle(list.labelStyle ?? p.markStyle, ctx)),
+          text: list.label,
+          style: docTextStyle(list.labelStyle ?? p.markStyle, ctx),
+        ),
         textDirection: TextDirection.ltr,
         textScaler: TextScaler.noScaling,
         maxLines: 1,
@@ -519,8 +584,12 @@ class DocLayoutEngine {
     if (t.columnWidths.length >= n) {
       widths = t.columnWidths.sublist(0, n);
     } else if (t.columnWidths.isNotEmpty) {
-      final avg = t.columnWidths.reduce((a, b) => a + b) / t.columnWidths.length;
-      widths = [...t.columnWidths, ...List.filled(n - t.columnWidths.length, avg)];
+      final avg =
+          t.columnWidths.reduce((a, b) => a + b) / t.columnWidths.length;
+      widths = [
+        ...t.columnWidths,
+        ...List.filled(n - t.columnWidths.length, avg),
+      ];
     } else {
       final total = math.min(width, t.width ?? width);
       widths = List.filled(n, total / n);
@@ -570,7 +639,9 @@ class DocLayoutEngine {
       }
       final row = t.rows[r];
       if (row.height != null) {
-        rowH[r] = row.exactHeight ? row.height! : math.max(rowH[r], row.height!);
+        rowH[r] = row.exactHeight
+            ? row.height!
+            : math.max(rowH[r], row.height!);
       }
       if (rowH[r] <= 0) rowH[r] = 12;
     }
@@ -593,7 +664,12 @@ class DocLayoutEngine {
     for (final lc in cells) {
       final span = lc.cell.rowSpan < 1 ? 1 : lc.cell.rowSpan;
       final last = math.min<int>(t.rows.length, lc.row + span);
-      lc.rect = Rect.fromLTRB(lc.rect.left, rowY[lc.row], lc.rect.right, rowY[last]);
+      lc.rect = Rect.fromLTRB(
+        lc.rect.left,
+        rowY[lc.row],
+        lc.rect.right,
+        rowY[last],
+      );
     }
     return LaidTable(
       table: t,
@@ -692,7 +768,8 @@ class DocLayoutResult {
       for (final s in pages[p].slices) {
         if (s.blockIndex != blockIndex) continue;
         first ??= (p, s.y);
-        if (yInBlock >= s.offset - 0.5 && yInBlock <= s.offset + s.height + 0.5) {
+        if (yInBlock >= s.offset - 0.5 &&
+            yInBlock <= s.offset + s.height + 0.5) {
           return (p, s.y + (yInBlock - s.offset));
         }
       }
@@ -726,8 +803,13 @@ Future<DocLayoutResult> layoutDocument(
   final laid = <LaidBlock>[];
   final sw = Stopwatch()..start();
   for (var i = 0; i < blocks.length; i++) {
-    laid.add(engine.layoutBlock(blocks[i], setups[i].contentWidth,
-        spacing: spacing[i]));
+    laid.add(
+      engine.layoutBlock(
+        blocks[i],
+        setups[i].contentWidth,
+        spacing: spacing[i],
+      ),
+    );
     if (sw.elapsedMilliseconds > 12) {
       onProgress?.call(i / blocks.length);
       await Future<void>.delayed(Duration.zero);
@@ -823,7 +905,9 @@ Future<DocLayoutResult> layoutDocument(
     }
     hy += b.height;
   }
-  final footerTop = model.page.height - model.page.footerDistance -
+  final footerTop =
+      model.page.height -
+      model.page.footerDistance -
       footer.fold<double>(0, (a, b) => a + b.height);
   var fy = footerTop;
   for (final b in footer) {
@@ -870,7 +954,11 @@ class DocPageView extends StatelessWidget {
         child: Opacity(
           opacity: f.image.float!.opacity,
           child: DocImageBox(
-              id: f.image.imageId, width: rect.width, height: rect.height, ctx: pctx),
+            id: f.image.imageId,
+            width: rect.width,
+            height: rect.height,
+            ctx: pctx,
+          ),
         ),
       );
       (f.image.float!.behindText ? children : front).add(w);
@@ -881,57 +969,87 @@ class DocPageView extends StatelessWidget {
       var y = s.headerDistance;
       final hc = <Widget>[];
       for (final b in result.header) {
-        hc.add(Positioned(
-            left: 0, top: y - s.headerDistance, width: b.width, height: b.height,
-            child: b.build(pctx)));
+        hc.add(
+          Positioned(
+            left: 0,
+            top: y - s.headerDistance,
+            width: b.width,
+            height: b.height,
+            child: b.build(pctx),
+          ),
+        );
         y += b.height;
       }
-      children.add(Positioned(
-        left: s.marginLeft,
-        top: s.headerDistance,
-        width: s.contentWidth,
-        height: math.max(0, s.height / 3),
-        child: ClipRect(child: Stack(clipBehavior: Clip.none, children: hc)),
-      ));
+      children.add(
+        Positioned(
+          left: s.marginLeft,
+          top: s.headerDistance,
+          width: s.contentWidth,
+          height: math.max(0, s.height / 3),
+          child: ClipRect(
+            child: Stack(clipBehavior: Clip.none, children: hc),
+          ),
+        ),
+      );
     }
     if (result.footer.isNotEmpty) {
       final total = result.footer.fold<double>(0, (a, b) => a + b.height);
       var y = 0.0;
       final fc = <Widget>[];
       for (final b in result.footer) {
-        fc.add(Positioned(
-            left: 0, top: y, width: b.width, height: b.height, child: b.build(pctx)));
+        fc.add(
+          Positioned(
+            left: 0,
+            top: y,
+            width: b.width,
+            height: b.height,
+            child: b.build(pctx),
+          ),
+        );
         y += b.height;
       }
       final top = math.max(s.height * 0.6, s.height - s.footerDistance - total);
-      children.add(Positioned(
-        left: s.marginLeft,
-        top: top,
-        width: s.contentWidth,
-        height: math.max(0, s.height - top),
-        child: ClipRect(child: Stack(clipBehavior: Clip.none, children: fc)),
-      ));
+      children.add(
+        Positioned(
+          left: s.marginLeft,
+          top: top,
+          width: s.contentWidth,
+          height: math.max(0, s.height - top),
+          child: ClipRect(
+            child: Stack(clipBehavior: Clip.none, children: fc),
+          ),
+        ),
+      );
     }
 
     for (final slice in page.slices) {
       final b = result.blocks[slice.blockIndex];
-      children.add(Positioned(
-        left: s.marginLeft,
-        top: s.marginTop + slice.y,
-        width: s.contentWidth,
-        height: math.max(0.0, slice.height),
-        child: ClipRect(
-          child: Stack(clipBehavior: Clip.none, children: [
-            Positioned(
-              left: 0,
-              top: -slice.offset,
-              width: b.width,
-              height: b.height,
-              child: b.build(pctx, from: slice.offset, to: slice.offset + slice.height),
+      children.add(
+        Positioned(
+          left: s.marginLeft,
+          top: s.marginTop + slice.y,
+          width: s.contentWidth,
+          height: math.max(0.0, slice.height),
+          child: ClipRect(
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  left: 0,
+                  top: -slice.offset,
+                  width: b.width,
+                  height: b.height,
+                  child: b.build(
+                    pctx,
+                    from: slice.offset,
+                    to: slice.offset + slice.height,
+                  ),
+                ),
+              ],
             ),
-          ]),
+          ),
         ),
-      ));
+      );
     }
     children.addAll(front);
     return Container(

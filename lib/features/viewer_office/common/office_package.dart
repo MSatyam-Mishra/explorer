@@ -67,8 +67,7 @@ class OfficePackage {
 
   factory OfficePackage.empty() => OfficePackage._([], {});
 
-  OfficePackage clone() =>
-      OfficePackage._(List.of(order), Map.of(parts));
+  OfficePackage clone() => OfficePackage._(List.of(order), Map.of(parts));
 
   bool has(String name) => parts.containsKey(name);
 
@@ -129,8 +128,7 @@ class OfficePackage {
 
   /// Relationships of [partName] (empty string for the package rels).
   List<OfficeRel> rels(String partName) {
-    final path =
-        partName.isEmpty ? '_rels/.rels' : relsPathFor(partName);
+    final path = partName.isEmpty ? '_rels/.rels' : relsPathFor(partName);
     final doc = xml(path);
     if (doc == null) return const [];
     final out = <OfficeRel>[];
@@ -139,18 +137,22 @@ class OfficePackage {
       final id = Ox.attr(r, 'Id');
       final target = Ox.attr(r, 'Target');
       if (id == null || target == null) continue;
-      out.add(OfficeRel(
-        id: id,
-        type: Ox.attr(r, 'Type') ?? '',
-        target: target,
-        external: (Ox.attr(r, 'TargetMode') ?? '').toLowerCase() == 'external',
-      ));
+      out.add(
+        OfficeRel(
+          id: id,
+          type: Ox.attr(r, 'Type') ?? '',
+          target: target,
+          external:
+              (Ox.attr(r, 'TargetMode') ?? '').toLowerCase() == 'external',
+        ),
+      );
     }
     return out;
   }
 
-  Map<String, OfficeRel> relMap(String partName) =>
-      {for (final r in rels(partName)) r.id: r};
+  Map<String, OfficeRel> relMap(String partName) => {
+    for (final r in rels(partName)) r.id: r,
+  };
 
   /// Resolves a relationship target relative to its source part.
   static String resolve(String sourcePart, String target) {
@@ -281,10 +283,12 @@ abstract final class ContentTypes {
     for (final o in Ox.children(root, 'Override')) {
       if (Ox.attr(o, 'PartName') == pn) return;
     }
-    root.children.add(XmlElement(XmlName('Override'), [
-      XmlAttribute(XmlName('PartName'), pn),
-      XmlAttribute(XmlName('ContentType'), mime),
-    ]));
+    root.children.add(
+      XmlElement(XmlName('Override'), [
+        XmlAttribute(XmlName('PartName'), pn),
+        XmlAttribute(XmlName('ContentType'), mime),
+      ]),
+    );
     pkg.putText(path, doc.toXmlString());
   }
 
@@ -293,7 +297,11 @@ abstract final class ContentTypes {
     if (doc == null) return;
     final pn = '/$partName';
     doc.rootElement.children.removeWhere(
-        (n) => n is XmlElement && n.name.local == 'Override' && Ox.attr(n, 'PartName') == pn);
+      (n) =>
+          n is XmlElement &&
+          n.name.local == 'Override' &&
+          Ox.attr(n, 'PartName') == pn,
+    );
     pkg.putText(path, doc.toXmlString());
   }
 
@@ -311,7 +319,9 @@ abstract final class ContentTypes {
 /// Sniffed image type from magic bytes.
 String? sniffImageExtension(Uint8List b) {
   if (b.length < 4) return null;
-  if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return 'png';
+  if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+    return 'png';
+  }
   if (b[0] == 0xFF && b[1] == 0xD8) return 'jpeg';
   if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) return 'gif';
   if (b[0] == 0x42 && b[1] == 0x4D) return 'bmp';
@@ -330,8 +340,12 @@ String? sniffImageExtension(Uint8List b) {
       (b[0] == 0x4D && b[1] == 0x4D && b[3] == 0x2A)) {
     return 'tiff';
   }
-  if (b[0] == 0x01 && b[1] == 0x00 && b[2] == 0x00 && b[3] == 0x00) return 'emf';
-  if (b[0] == 0xD7 && b[1] == 0xCD && b[2] == 0xC6 && b[3] == 0x9A) return 'wmf';
+  if (b[0] == 0x01 && b[1] == 0x00 && b[2] == 0x00 && b[3] == 0x00) {
+    return 'emf';
+  }
+  if (b[0] == 0xD7 && b[1] == 0xCD && b[2] == 0xC6 && b[3] == 0x9A) {
+    return 'wmf';
+  }
   return null;
 }
 
@@ -355,7 +369,7 @@ bool isDisplayableImage(String? ext) =>
         if (b.length < 26) return null;
         return (
           bd.getInt32(18, Endian.little).abs(),
-          bd.getInt32(22, Endian.little).abs()
+          bd.getInt32(22, Endian.little).abs(),
         );
       case 'jpeg':
         var i = 2;
@@ -365,7 +379,9 @@ bool isDisplayableImage(String? ext) =>
             continue;
           }
           final marker = b[i + 1];
-          if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+          if (marker == 0xD8 ||
+              marker == 0x01 ||
+              (marker >= 0xD0 && marker <= 0xD7)) {
             i += 2;
             continue;
           }

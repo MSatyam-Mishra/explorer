@@ -28,7 +28,8 @@ Future<DocModel> _parseInBackground(Uint8List bytes, String ext) =>
 Future<Uint8List> _docxInBackground(DocModel model, Uint8List? original) =>
     Isolate.run(() => writeDocx(model, original: original));
 
-Future<Uint8List> _rtfInBackground(DocModel model) => Isolate.run(() => writeRtf(model));
+Future<Uint8List> _rtfInBackground(DocModel model) =>
+    Isolate.run(() => writeRtf(model));
 
 enum _SaveKind { overwrite, copy, asDocx }
 
@@ -105,7 +106,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     super.dispose();
   }
 
-  String get _ext => p.extension(_file.path).toLowerCase().replaceFirst('.', '');
+  String get _ext =>
+      p.extension(_file.path).toLowerCase().replaceFirst('.', '');
 
   // ---------------------------------------------------------------------------
   // Loading & layout
@@ -119,15 +121,20 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       _saveFormat = _overwriteFormatFor(model.format, _ext);
       _setModel(model);
       if (model.warnings.contains('plainText') && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Showing the text only — formatting in this file isn\'t supported.'),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Showing the text only — formatting in this file isn\'t supported.',
+            ),
+          ),
+        );
       }
     } on DocumentEncryptedException {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'This document is password-protected. Open it in Word or another '
+        _error =
+            'This document is password-protected. Open it in Word or another '
             'app that can decrypt it.';
       });
     } on FormatException catch (e) {
@@ -165,7 +172,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       _matchIndex = -1;
       _highlights = const {};
     });
-    if (_searchOpen && _searchCtrl.text.isNotEmpty) _runSearch(_searchCtrl.text);
+    if (_searchOpen && _searchCtrl.text.isNotEmpty) {
+      _runSearch(_searchCtrl.text);
+    }
     _relayout();
   }
 
@@ -185,12 +194,12 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   }
 
   DocRenderContext _ctx() => DocRenderContext(
-        model: _model!,
-        images: _images!,
-        darkPage: _darkPage,
-        highlights: _highlights,
-        onLink: _openLink,
-      );
+    model: _model!,
+    images: _images!,
+    darkPage: _darkPage,
+    highlights: _highlights,
+    onLink: _openLink,
+  );
 
   Future<void> _relayout() async {
     final model = _model;
@@ -225,7 +234,10 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
 
   void _onSearchChanged(String q) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 250), () => _runSearch(q));
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 250),
+      () => _runSearch(q),
+    );
   }
 
   void _runSearch(String query) {
@@ -255,7 +267,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     final hl = <DocParagraph, List<DocHighlight>>{};
     for (var i = 0; i < matches.length; i++) {
       final m = matches[i];
-      (hl[m.paragraph] ??= []).add(DocHighlight(m.start, m.end, current: i == index));
+      (hl[m.paragraph] ??= []).add(
+        DocHighlight(m.start, m.end, current: i == index),
+      );
     }
     setState(() {
       _matches = matches;
@@ -300,10 +314,12 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       if (_saveFormat == null) 'Your edits will be saved as a new .docx file.',
     ];
     if (notes.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(notes.join(' ')),
-        duration: const Duration(seconds: 5),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(notes.join(' ')),
+          duration: const Duration(seconds: 5),
+        ),
+      );
     }
   }
 
@@ -311,11 +327,15 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     final session = _session;
     if (session == null) return;
     if (session.dirty) {
-      final choice = await askUnsavedChanges(context,
-          saveLabel: _saveFormat == null ? 'Save as .docx' : 'Save');
+      final choice = await askUnsavedChanges(
+        context,
+        saveLabel: _saveFormat == null ? 'Save as .docx' : 'Save',
+      );
       if (!mounted || choice == UnsavedChoice.cancel) return;
       if (choice == UnsavedChoice.save) {
-        await _save(_saveFormat == null ? _SaveKind.asDocx : _SaveKind.overwrite);
+        await _save(
+          _saveFormat == null ? _SaveKind.asDocx : _SaveKind.overwrite,
+        );
         if (!mounted || session.dirty) return;
       }
     }
@@ -340,12 +360,17 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final edited = session.snapshot();
-      final format = kind == _SaveKind.asDocx ? 'docx' : (_saveFormat ?? 'docx');
+      final format = kind == _SaveKind.asDocx
+          ? 'docx'
+          : (_saveFormat ?? 'docx');
       final Uint8List out;
       if (format == 'rtf') {
         out = await _rtfInBackground(edited);
       } else {
-        out = await _docxInBackground(edited, edited.docx != null ? _originalBytes : null);
+        out = await _docxInBackground(
+          edited,
+          edited.docx != null ? _originalBytes : null,
+        );
       }
       final File target;
       switch (kind) {
@@ -367,7 +392,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       }
       if (kind != _SaveKind.copy) _lastSaved = out;
       setState(() {});
-      messenger.showSnackBar(SnackBar(content: Text('Saved ${p.basename(target.path)}')));
+      messenger.showSnackBar(
+        SnackBar(content: Text('Saved ${p.basename(target.path)}')),
+      );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Couldn\'t save: $e')));
     } finally {
@@ -377,11 +404,15 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
 
   Future<void> _onPop() async {
     if (_dirty) {
-      final choice = await askUnsavedChanges(context,
-          saveLabel: _saveFormat == null ? 'Save as .docx' : 'Save');
+      final choice = await askUnsavedChanges(
+        context,
+        saveLabel: _saveFormat == null ? 'Save as .docx' : 'Save',
+      );
       if (!mounted || choice == UnsavedChoice.cancel) return;
       if (choice == UnsavedChoice.save) {
-        await _save(_saveFormat == null ? _SaveKind.asDocx : _SaveKind.overwrite);
+        await _save(
+          _saveFormat == null ? _SaveKind.asDocx : _SaveKind.overwrite,
+        );
         if (!mounted || _dirty) return;
       }
     }
@@ -396,11 +427,16 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     if (model == null) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final out = await _docxInBackground(model, model.docx != null ? _originalBytes : null);
+      final out = await _docxInBackground(
+        model,
+        model.docx != null ? _originalBytes : null,
+      );
       final target = await uniqueSibling(_file, 'docx');
       await writeFileSafely(target, out);
       _createdNewFile = true;
-      messenger.showSnackBar(SnackBar(content: Text('Saved ${p.basename(target.path)}')));
+      messenger.showSnackBar(
+        SnackBar(content: Text('Saved ${p.basename(target.path)}')),
+      );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Couldn\'t convert: $e')));
     }
@@ -430,47 +466,63 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     ExplorerLiquidGlassBottomSheet.show<void>(
       context,
       maxHeightFraction: 0.6,
-      child: Builder(builder: (context) {
-        final fg = ClearGlassForeground.primaryText(context);
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Document info',
-                style: ClearGlassForeground.title(context).copyWith(fontSize: 18)),
-            const SizedBox(height: 12),
-            for (final r in rows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 160,
-                      child: Text(r.$1,
-                          style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 14)),
-                    ),
-                    Expanded(
-                      child: Text(r.$2,
-                          style: TextStyle(
-                              color: fg, fontSize: 14, fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ),
+      child: Builder(
+        builder: (context) {
+          final fg = ClearGlassForeground.primaryText(context);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Document info',
+                style: ClearGlassForeground.title(
+                  context,
+                ).copyWith(fontSize: 18),
               ),
-          ],
-        );
-      }),
+              const SizedBox(height: 12),
+              for (final r in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 160,
+                        child: Text(
+                          r.$1,
+                          style: TextStyle(
+                            color: fg.withValues(alpha: 0.7),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          r.$2,
+                          style: TextStyle(
+                            color: fg,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 
   static String _formatLabel(String f) => switch (f) {
-        'docx' => 'Word document (.docx)',
-        'doc' => 'Word 97–2003 document (.doc)',
-        'rtf' => 'Rich Text Format (.rtf)',
-        'odt' => 'OpenDocument Text (.odt)',
-        'wps' => 'Works / WPS document',
-        _ => 'Plain text',
-      };
+    'docx' => 'Word document (.docx)',
+    'doc' => 'Word 97–2003 document (.doc)',
+    'rtf' => 'Rich Text Format (.rtf)',
+    'odt' => 'OpenDocument Text (.odt)',
+    'wps' => 'Works / WPS document',
+    _ => 'Plain text',
+  };
 
   List<(int, DocParagraph)> _headings() {
     final model = _model;
@@ -478,7 +530,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     final out = <(int, DocParagraph)>[];
     for (var i = 0; i < model.blocks.length; i++) {
       final b = model.blocks[i];
-      if (b is DocParagraph && b.headingLevel != null && b.plainText.trim().isNotEmpty) {
+      if (b is DocParagraph &&
+          b.headingLevel != null &&
+          b.plainText.trim().isNotEmpty) {
         out.add((i, b));
       }
     }
@@ -522,8 +576,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
         if (model == null) return;
         await Clipboard.setData(ClipboardData(text: model.plainText()));
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('Text copied')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Text copied')));
         }
       case 'share':
         await SharePlus.instance.share(ShareParams(files: [XFile(_file.path)]));
@@ -549,7 +604,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       },
       child: ExplorerScaffold(
         title: p.basename(_file.path) + (_dirty ? ' •' : ''),
-        trailing: editing ? _editActions(context) : _viewActions(context, compact),
+        trailing: editing
+            ? _editActions(context)
+            : _viewActions(context, compact),
         body: _body(context),
       ),
     );
@@ -564,7 +621,10 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       if (ready)
         ExplorerTopBar.iconButton(
           context: context,
-          icon: Icon(_searchOpen ? Icons.search_off : Icons.search, color: color),
+          icon: Icon(
+            _searchOpen ? Icons.search_off : Icons.search,
+            color: color,
+          ),
           tooltip: 'Find',
           onPressed: _toggleSearch,
         ),
@@ -581,16 +641,60 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
           icon: Icon(Icons.more_vert, color: color),
           onSelected: _onMenu,
           itemBuilder: (context) => [
-            const PopupMenuItem(value: 'info', child: ListTile(leading: Icon(Icons.info_outline), title: Text('Document info'))),
+            const PopupMenuItem(
+              value: 'info',
+              child: ListTile(
+                leading: Icon(Icons.info_outline),
+                title: Text('Document info'),
+              ),
+            ),
             if (!split && _headings().isNotEmpty)
-              const PopupMenuItem(value: 'outline', child: ListTile(leading: Icon(Icons.toc), title: Text('Outline'))),
-            CheckedPopupMenuItem(value: 'layout', checked: _printLayout ?? true, child: const Text('Print layout')),
-            CheckedPopupMenuItem(value: 'dark', checked: _darkPage, child: const Text('Dark page')),
-            const PopupMenuItem(value: 'copy', child: ListTile(leading: Icon(Icons.copy_all_outlined), title: Text('Copy text'))),
-            const PopupMenuItem(value: 'share', child: ListTile(leading: Icon(Icons.share_outlined), title: Text('Share'))),
+              const PopupMenuItem(
+                value: 'outline',
+                child: ListTile(
+                  leading: Icon(Icons.toc),
+                  title: Text('Outline'),
+                ),
+              ),
+            CheckedPopupMenuItem(
+              value: 'layout',
+              checked: _printLayout ?? true,
+              child: const Text('Print layout'),
+            ),
+            CheckedPopupMenuItem(
+              value: 'dark',
+              checked: _darkPage,
+              child: const Text('Dark page'),
+            ),
+            const PopupMenuItem(
+              value: 'copy',
+              child: ListTile(
+                leading: Icon(Icons.copy_all_outlined),
+                title: Text('Copy text'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'share',
+              child: ListTile(
+                leading: Icon(Icons.share_outlined),
+                title: Text('Share'),
+              ),
+            ),
             if (model.format != 'docx')
-              const PopupMenuItem(value: 'convert', child: ListTile(leading: Icon(Icons.save_as_outlined), title: Text('Save as .docx'))),
-            const PopupMenuItem(value: 'open', child: ListTile(leading: Icon(Icons.open_in_new), title: Text('Open with…'))),
+              const PopupMenuItem(
+                value: 'convert',
+                child: ListTile(
+                  leading: Icon(Icons.save_as_outlined),
+                  title: Text('Save as .docx'),
+                ),
+              ),
+            const PopupMenuItem(
+              value: 'open',
+              child: ListTile(
+                leading: Icon(Icons.open_in_new),
+                title: Text('Open with…'),
+              ),
+            ),
           ],
         ),
     ]);
@@ -625,7 +729,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
           icon: saveIcon,
           onSelected: _save,
           itemBuilder: (context) => [
-            for (final o in options) PopupMenuItem(value: o.$1, child: Text(o.$2)),
+            for (final o in options)
+              PopupMenuItem(value: o.$1, child: Text(o.$2)),
           ],
         ),
       ExplorerTopBar.iconButton(
@@ -645,7 +750,10 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     if (_error != null) {
       return Padding(
         padding: EdgeInsets.only(top: top),
-        child: _ErrorView(message: _error!, onOpenWith: () => OpenFilex.open(_file.path)),
+        child: _ErrorView(
+          message: _error!,
+          onOpenWith: () => OpenFilex.open(_file.path),
+        ),
       );
     }
     final session = _session;
@@ -680,26 +788,28 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       );
     }
 
-    final content = Stack(children: [
-      Positioned.fill(child: view),
-      if (_searchOpen)
-        Positioned(
-          top: top,
-          left: 8,
-          right: 8,
-          child: _SearchBar(
-            controller: _searchCtrl,
-            focusNode: _searchFocus,
-            onChanged: _onSearchChanged,
-            onSubmitted: (_) => _step(1),
-            count: _matches.length,
-            index: _matchIndex,
-            onPrev: () => _step(-1),
-            onNext: () => _step(1),
-            onClose: _toggleSearch,
+    final content = Stack(
+      children: [
+        Positioned.fill(child: view),
+        if (_searchOpen)
+          Positioned(
+            top: top,
+            left: 8,
+            right: 8,
+            child: _SearchBar(
+              controller: _searchCtrl,
+              focusNode: _searchFocus,
+              onChanged: _onSearchChanged,
+              onSubmitted: (_) => _step(1),
+              count: _matches.length,
+              index: _matchIndex,
+              onPrev: () => _step(-1),
+              onNext: () => _step(1),
+              onClose: _toggleSearch,
+            ),
           ),
-        ),
-    ]);
+      ],
+    );
 
     final headings = _headings();
     if (headings.isEmpty || !AdaptiveSplitView.isSplit(context)) return content;
@@ -724,14 +834,22 @@ class _LayoutProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(
-          width: 160,
-          child: LinearProgressIndicator(value: progress > 0 ? progress : null),
-        ),
-        const SizedBox(height: 12),
-        Text('Laying out pages…', style: Theme.of(context).textTheme.bodyMedium),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 160,
+            child: LinearProgressIndicator(
+              value: progress > 0 ? progress : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Laying out pages…',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -746,17 +864,28 @@ class _ErrorView extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.description_outlined, size: 56, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(height: 16),
-          Text(message, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyLarge),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: onOpenWith,
-            icon: const Icon(Icons.open_in_new),
-            label: const Text('Open with another app'),
-          ),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.description_outlined,
+              size: 56,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onOpenWith,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open with another app'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -794,57 +923,65 @@ class _SearchBar extends StatelessWidget {
       borderRadius: BorderRadius.circular(28),
       child: SizedBox(
         height: 52,
-        child: Row(children: [
-          const SizedBox(width: 12),
-          Icon(Icons.search, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              focusNode: focusNode,
-              onChanged: onChanged,
-              onSubmitted: onSubmitted,
-              textInputAction: TextInputAction.search,
-              decoration: const InputDecoration(
-                hintText: 'Find in document',
-                border: InputBorder.none,
-                isDense: true,
+        child: Row(
+          children: [
+            const SizedBox(width: 12),
+            Icon(Icons.search, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                focusNode: focusNode,
+                onChanged: onChanged,
+                onSubmitted: onSubmitted,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  hintText: 'Find in document',
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
               ),
             ),
-          ),
-          if (controller.text.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(count == 0 ? '0/0' : '${index + 1}/$count',
-                  style: Theme.of(context).textTheme.labelMedium),
+            if (controller.text.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  count == 0 ? '0/0' : '${index + 1}/$count',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            IconButton(
+              tooltip: 'Previous',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.keyboard_arrow_up),
+              onPressed: count == 0 ? null : onPrev,
             ),
-          IconButton(
-            tooltip: 'Previous',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.keyboard_arrow_up),
-            onPressed: count == 0 ? null : onPrev,
-          ),
-          IconButton(
-            tooltip: 'Next',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.keyboard_arrow_down),
-            onPressed: count == 0 ? null : onNext,
-          ),
-          IconButton(
-            tooltip: 'Close',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.close),
-            onPressed: onClose,
-          ),
-          const SizedBox(width: 4),
-        ]),
+            IconButton(
+              tooltip: 'Next',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.keyboard_arrow_down),
+              onPressed: count == 0 ? null : onNext,
+            ),
+            IconButton(
+              tooltip: 'Close',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close),
+              onPressed: onClose,
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
       ),
     );
   }
 }
 
 class _OutlineList extends StatelessWidget {
-  const _OutlineList({required this.headings, required this.onTap, this.controller});
+  const _OutlineList({
+    required this.headings,
+    required this.onTap,
+    this.controller,
+  });
   final List<(int, DocParagraph)> headings;
   final void Function(int index, DocParagraph paragraph) onTap;
   final ScrollController? controller;
@@ -852,6 +989,10 @@ class _OutlineList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    return Material(type: MaterialType.transparency, child: _list(theme));
+  }
+
+  Widget _list(ThemeData theme) {
     return ListView.builder(
       controller: controller,
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -867,13 +1008,18 @@ class _OutlineList extends StatelessWidget {
         final level = para.headingLevel ?? 1;
         return ListTile(
           dense: true,
-          contentPadding: EdgeInsets.only(left: 16.0 + (level - 1) * 14, right: 12),
+          contentPadding: EdgeInsets.only(
+            left: 16.0 + (level - 1) * 14,
+            right: 12,
+          ),
           title: Text(
             para.plainText.replaceAll('\uFFFC', '').trim(),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: level == 1
-                ? theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)
+                ? theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  )
                 : theme.textTheme.bodyMedium,
           ),
           onTap: () => onTap(index, para),

@@ -24,7 +24,12 @@ class SlideGradientStop {
 }
 
 class SlideFill {
-  const SlideFill({this.color, this.imageId, this.gradient, this.gradientAngle = 90});
+  const SlideFill({
+    this.color,
+    this.imageId,
+    this.gradient,
+    this.gradientAngle = 90,
+  });
 
   final int? color;
   final String? imageId;
@@ -33,11 +38,20 @@ class SlideFill {
   /// Degrees, 0 = left→right, 90 = top→bottom.
   final double gradientAngle;
 
-  bool get isEmpty => color == null && imageId == null && (gradient == null || gradient!.isEmpty);
+  bool get isEmpty =>
+      color == null &&
+      imageId == null &&
+      (gradient == null || gradient!.isEmpty);
 }
 
 class SlideLine {
-  const SlideLine({required this.color, this.width = 0.75, this.dash, this.headArrow = false, this.tailArrow = false});
+  const SlideLine({
+    required this.color,
+    this.width = 0.75,
+    this.dash,
+    this.headArrow = false,
+    this.tailArrow = false,
+  });
   final int color;
   final double width;
 
@@ -80,7 +94,14 @@ class SlideRun {
 }
 
 class SlideBullet {
-  const SlideBullet({this.char, this.autoNumber, this.startAt = 1, this.color, this.sizePercent = 1, this.font});
+  const SlideBullet({
+    this.char,
+    this.autoNumber,
+    this.startAt = 1,
+    this.color,
+    this.sizePercent = 1,
+    this.font,
+  });
   final String? char;
 
   /// `arabicPeriod`, `alphaLcParenR`, … (DrawingML auto-number schemes).
@@ -195,7 +216,13 @@ class SlidePathCommand {
 }
 
 class SlideCustomPath {
-  const SlideCustomPath(this.width, this.height, this.commands, {this.fill = true, this.stroke = true});
+  const SlideCustomPath(
+    this.width,
+    this.height,
+    this.commands, {
+    this.fill = true,
+    this.stroke = true,
+  });
   final double width;
   final double height;
   final List<SlidePathCommand> commands;
@@ -339,7 +366,10 @@ class Slide {
       }
     }
     for (final s in shapes) {
-      if (s is SlideAutoShape && s.fromSlide && s.text != null && !s.text!.isEmpty) {
+      if (s is SlideAutoShape &&
+          s.fromSlide &&
+          s.text != null &&
+          !s.text!.isEmpty) {
         return s.text!.paragraphs.first.text.trim();
       }
     }
@@ -349,7 +379,12 @@ class Slide {
   /// Every text shape on the slide that belongs to the slide itself.
   Iterable<SlideAutoShape> get editableTextShapes sync* {
     for (final s in shapes) {
-      if (s is SlideAutoShape && s.fromSlide && s.text != null && s.id != null) yield s;
+      if (s is SlideAutoShape &&
+          s.fromSlide &&
+          s.text != null &&
+          s.id != null) {
+        yield s;
+      }
     }
   }
 }
@@ -362,8 +397,8 @@ class SlideDeck {
     required this.slides,
     Map<String, SlideImageData>? images,
     List<String>? warnings,
-  })  : images = images ?? {},
-        warnings = warnings ?? [];
+  }) : images = images ?? {},
+       warnings = warnings ?? [];
 
   /// `pptx`, `ppt`, `odp`.
   final String format;
@@ -386,7 +421,21 @@ String slideAutoNumber(String scheme, int n) {
   String roman(int v) {
     if (v <= 0 || v >= 4000) return '$v';
     const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
-    const syms = ['m', 'cm', 'd', 'cd', 'c', 'xc', 'l', 'xl', 'x', 'ix', 'v', 'iv', 'i'];
+    const syms = [
+      'm',
+      'cm',
+      'd',
+      'cd',
+      'c',
+      'xc',
+      'l',
+      'xl',
+      'x',
+      'ix',
+      'v',
+      'iv',
+      'i',
+    ];
     final sb = StringBuffer();
     var x = v;
     for (var i = 0; i < vals.length; i++) {

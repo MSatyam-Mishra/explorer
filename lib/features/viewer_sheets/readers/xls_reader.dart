@@ -544,8 +544,13 @@ class XlsReader {
               }
             }
           }
-          // fAlwaysCalc / fCalcOnLoad: the cached value may be stale.
-          if (formula != null && (_u16(d, 14) & 0x03) != 0 && value is! String) value = null;
+          // fAlwaysCalc / fCalcOnLoad or an empty-string result (what many
+          // non-Excel writers store): recompute instead of trusting it.
+          final emptyResult = d[12] == 0xFF && d[13] == 0xFF && d[6] == 3;
+          if (formula != null && (emptyResult || (_u16(d, 14) & 0x03) != 0)) {
+            value = null;
+            pendingString = null;
+          }
           put(r, c, Cell(value: value, formula: formula, style: style));
         case 0x0207: // STRING
           if (pendingString != null && d.length >= 2) {

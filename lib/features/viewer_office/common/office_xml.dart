@@ -165,8 +165,9 @@ abstract final class Units {
   /// Parses an ODF/CSS length (`2.5cm`, `10mm`, `1in`, `12pt`, `16px`) to pt.
   static double? length(String? v) {
     if (v == null) return null;
-    final m = RegExp(r'^\s*(-?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\s*([a-z%]*)\s*$')
-        .firstMatch(v);
+    final m = RegExp(
+      r'^\s*(-?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\s*([a-z%]*)\s*$',
+    ).firstMatch(v);
     if (m == null) return null;
     final n = double.tryParse(m.group(1)!);
     if (n == null) return null;

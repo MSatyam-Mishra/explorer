@@ -37,27 +37,34 @@ class _RtfWriter {
     });
     _out.write('}');
     _out.write(r'{\colortbl;');
-    final ordered = _colors.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
+    final ordered = _colors.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
     for (final e in ordered) {
       final c = e.key;
-      _out.write('\\red${(c >> 16) & 0xFF}\\green${(c >> 8) & 0xFF}\\blue${c & 0xFF};');
+      _out.write(
+        '\\red${(c >> 16) & 0xFF}\\green${(c >> 8) & 0xFF}\\blue${c & 0xFF};',
+      );
     }
     _out.write('}');
     _out.write(r'{\stylesheet{\s0 Normal;}');
     for (var l = 1; l <= 6; l++) {
       final h = model.headingStyles[l];
       final fs = ((h?.fontSize ?? 14) * 2).round();
-      _out.write('{\\s$l\\sbasedon0\\snext0${h?.bold ?? true ? '\\b' : ''}\\fs$fs heading $l;}');
+      _out.write(
+        '{\\s$l\\sbasedon0\\snext0${h?.bold ?? true ? '\\b' : ''}\\fs$fs heading $l;}',
+      );
     }
     _out.write('}');
     if (model.title != null) {
       _out.write('{\\info{\\title ${_escape(model.title!)}}}');
     }
     final p = model.page;
-    _out.write('\\paperw${_tw(p.width)}\\paperh${_tw(p.height)}'
-        '\\margl${_tw(p.marginLeft)}\\margr${_tw(p.marginRight)}'
-        '\\margt${_tw(p.marginTop)}\\margb${_tw(p.marginBottom)}'
-        '${p.width > p.height ? '\\landscape' : ''}\n');
+    _out.write(
+      '\\paperw${_tw(p.width)}\\paperh${_tw(p.height)}'
+      '\\margl${_tw(p.marginLeft)}\\margr${_tw(p.marginRight)}'
+      '\\margt${_tw(p.marginTop)}\\margb${_tw(p.marginBottom)}'
+      '${p.width > p.height ? '\\landscape' : ''}\n',
+    );
     final fs = ((model.baseStyle.fontSize ?? 11) * 2).round();
     _out.write('\\deftab720\\f0\\fs$fs\n');
     _out.write(body);
@@ -67,23 +74,41 @@ class _RtfWriter {
 
   static int _tw(double pt) => (pt * 20).round();
 
-  void _blocks(List<DocBlock> blocks, StringBuffer sb, {required bool inTable, bool lastEndsCell = false}) {
+  void _blocks(
+    List<DocBlock> blocks,
+    StringBuffer sb, {
+    required bool inTable,
+    bool lastEndsCell = false,
+  }) {
     for (var i = 0; i < blocks.length; i++) {
       final b = blocks[i];
       final isLast = i == blocks.length - 1;
       switch (b) {
         case DocParagraph():
-          _paragraph(b, sb, inTable: inTable, endCell: inTable && lastEndsCell && isLast);
+          _paragraph(
+            b,
+            sb,
+            inTable: inTable,
+            endCell: inTable && lastEndsCell && isLast,
+          );
         case DocTable():
           if (inTable) {
             // Nested tables are flattened to tab-separated rows.
             for (final r in b.rows) {
               final text = r.cells
                   .where((c) => !c.covered)
-                  .map((c) => DocModel.paragraphsIn(c.blocks).map((p) => p.plainText).join(' '))
+                  .map(
+                    (c) => DocModel.paragraphsIn(
+                      c.blocks,
+                    ).map((p) => p.plainText).join(' '),
+                  )
                   .join('\t');
-              _paragraph(DocParagraph(inlines: [DocText(text, model.baseStyle)]), sb,
-                  inTable: true, endCell: false);
+              _paragraph(
+                DocParagraph(inlines: [DocText(text, model.baseStyle)]),
+                sb,
+                inTable: true,
+                endCell: false,
+              );
             }
           } else {
             _table(b, sb);
@@ -96,12 +121,19 @@ class _RtfWriter {
           _blocks(b.blocks, sb, inTable: inTable);
       }
     }
-    if (inTable && lastEndsCell && (blocks.isEmpty || blocks.last is! DocParagraph)) {
+    if (inTable &&
+        lastEndsCell &&
+        (blocks.isEmpty || blocks.last is! DocParagraph)) {
       sb.write('\\pard\\intbl\\cell\n');
     }
   }
 
-  void _paragraph(DocParagraph p, StringBuffer sb, {required bool inTable, required bool endCell}) {
+  void _paragraph(
+    DocParagraph p,
+    StringBuffer sb, {
+    required bool inTable,
+    required bool endCell,
+  }) {
     sb.write('\\pard\\plain');
     if (inTable) sb.write('\\intbl');
     final h = p.headingLevel;
@@ -149,7 +181,9 @@ class _RtfWriter {
       if (l != link) {
         if (link != null) sb.write('}}}');
         if (l != null) {
-          sb.write('{\\field{\\*\\fldinst{HYPERLINK "${_escape(l)}"}}{\\fldrslt{');
+          sb.write(
+            '{\\field{\\*\\fldinst{HYPERLINK "${_escape(l)}"}}{\\fldrslt{',
+          );
         }
         link = l;
       }
@@ -160,7 +194,9 @@ class _RtfWriter {
           sb.write(_picture(i));
         case DocObject():
           final t = i.displayText ?? '';
-          if (t.isNotEmpty) sb.write('{${_charProps(i.style, base)} ${_escape(t)}}');
+          if (t.isNotEmpty) {
+            sb.write('{${_charProps(i.style, base)} ${_escape(t)}}');
+          }
       }
     }
     if (link != null) sb.write('}}}');
@@ -213,15 +249,19 @@ class _RtfWriter {
         final span = cell.colSpan.clamp(1, n);
         final right = edges[(col + span).clamp(0, n)];
         if (t.borders) {
-          def.write('\\clbrdrt\\brdrs\\brdrw10\\clbrdrl\\brdrs\\brdrw10'
-              '\\clbrdrb\\brdrs\\brdrw10\\clbrdrr\\brdrs\\brdrw10');
+          def.write(
+            '\\clbrdrt\\brdrs\\brdrw10\\clbrdrl\\brdrs\\brdrw10'
+            '\\clbrdrb\\brdrs\\brdrw10\\clbrdrr\\brdrs\\brdrw10',
+          );
         }
         if (cell.covered) {
           def.write('\\clvmrg');
         } else if (cell.rowSpan > 1) {
           def.write('\\clvmgf');
         }
-        if (cell.shading != null) def.write('\\clcbpat${_color(cell.shading!)}');
+        if (cell.shading != null) {
+          def.write('\\clcbpat${_color(cell.shading!)}');
+        }
         if (cell.vAlign == DocCellVAlign.center) def.write('\\clvertalc');
         if (cell.vAlign == DocCellVAlign.bottom) def.write('\\clvertalb');
         def.write('\\cellx${_tw(right)}');

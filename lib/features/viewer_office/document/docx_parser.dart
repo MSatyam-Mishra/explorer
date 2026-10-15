@@ -12,8 +12,17 @@ DocModel parseDocxBytes(Uint8List bytes) =>
     DocxParser(OfficePackage.decode(bytes)).parse();
 
 class _Style {
-  _Style(this.id, this.type, this.name, this.basedOn, this.pPr, this.rPr,
-      this.tblPr, this.tblStylePr, this.isDefault);
+  _Style(
+    this.id,
+    this.type,
+    this.name,
+    this.basedOn,
+    this.pPr,
+    this.rPr,
+    this.tblPr,
+    this.tblStylePr,
+    this.isDefault,
+  );
   final String id;
   final String type;
   final String? name;
@@ -147,8 +156,7 @@ class DocxParser {
       headingSet.add(s.id);
       final existing = headingIds[lvl];
       // Prefer the canonical built-in names.
-      if (existing == null ||
-          (s.name ?? '').toLowerCase() == 'heading $lvl') {
+      if (existing == null || (s.name ?? '').toLowerCase() == 'heading $lvl') {
         headingIds[lvl] = s.id;
       }
     }
@@ -226,7 +234,8 @@ class DocxParser {
       final id = Ox.attr(s, 'styleId');
       if (id == null) continue;
       final type = Ox.attr(s, 'type') ?? 'paragraph';
-      final isDefault = Ox.toggle(Ox.child(s, 'default')) == true ||
+      final isDefault =
+          Ox.toggle(Ox.child(s, 'default')) == true ||
           ['1', 'true', 'on'].contains(Ox.attr(s, 'default'));
       final style = _Style(
         id,
@@ -296,12 +305,12 @@ class DocxParser {
   }
 
   _Lvl _parseLvl(XmlElement l) => _Lvl(
-        Ox.attr(Ox.child(l, 'numFmt'), 'val') ?? 'decimal',
-        Ox.attr(Ox.child(l, 'lvlText'), 'val') ?? '',
-        Ox.intAttr(Ox.child(l, 'start'), 'val') ?? 1,
-        Ox.child(l, 'pPr'),
-        Ox.child(l, 'rPr'),
-      );
+    Ox.attr(Ox.child(l, 'numFmt'), 'val') ?? 'decimal',
+    Ox.attr(Ox.child(l, 'lvlText'), 'val') ?? '',
+    Ox.intAttr(Ox.child(l, 'start'), 'val') ?? 1,
+    Ox.child(l, 'pPr'),
+    Ox.child(l, 'rPr'),
+  );
 
   _Lvl? _lvl(String numId, int ilvl) {
     final num = _nums[numId];
@@ -512,9 +521,12 @@ class DocxParser {
           final v = Ox.doubleAttr(e, 'val');
           if (v != null && v > 0) out = out.copyWith(fontSize: v / 2);
         case 'rFonts':
-          final f = Ox.attr(e, 'ascii') ??
+          final f =
+              Ox.attr(e, 'ascii') ??
               Ox.attr(e, 'hAnsi') ??
-              _themeFont(Ox.attr(e, 'asciiTheme') ?? Ox.attr(e, 'hAnsiTheme')) ??
+              _themeFont(
+                Ox.attr(e, 'asciiTheme') ?? Ox.attr(e, 'hAnsiTheme'),
+              ) ??
               Ox.attr(e, 'cs') ??
               Ox.attr(e, 'eastAsia');
           if (f != null) out = out.copyWith(fontFamily: f);
@@ -524,14 +536,17 @@ class DocxParser {
             vertAlign: v == 'superscript'
                 ? DocVertAlign.superscript
                 : v == 'subscript'
-                    ? DocVertAlign.subscript
-                    : DocVertAlign.baseline,
+                ? DocVertAlign.subscript
+                : DocVertAlign.baseline,
           );
         case 'vanish':
           if (hidden != null && (Ox.toggle(e) ?? false)) hidden[0] = true;
       }
     }
-    if (!hasHighlight && shd != null && shd != 0xFFFFFFFF && out.highlight == null) {
+    if (!hasHighlight &&
+        shd != null &&
+        shd != 0xFFFFFFFF &&
+        out.highlight == null) {
       out = out.copyWith(highlight: shd);
     }
     return out;
@@ -623,8 +638,12 @@ class DocxParser {
     );
   }
 
-  List<DocBlock>? _headerFooterPart(XmlElement sectPr, String refName,
-      Map<String, OfficeRel> rels, String main) {
+  List<DocBlock>? _headerFooterPart(
+    XmlElement sectPr,
+    String refName,
+    Map<String, OfficeRel> rels,
+    String main,
+  ) {
     XmlElement? chosen;
     for (final r in Ox.children(sectPr, refName)) {
       final type = Ox.attr(r, 'type') ?? 'default';
@@ -639,8 +658,11 @@ class DocxParser {
     if (doc == null) return null;
     final saved = List.of(_fields);
     _fields.clear();
-    final blocks =
-        _parseBlocks(doc.rootElement, _PartCtx(part, pkg.relMap(part)), null);
+    final blocks = _parseBlocks(
+      doc.rootElement,
+      _PartCtx(part, pkg.relMap(part)),
+      null,
+    );
     _fields
       ..clear()
       ..addAll(saved);
@@ -650,7 +672,11 @@ class DocxParser {
   // -------------------------------------------------------------------------
   // Blocks
 
-  List<DocBlock> _parseBlocks(XmlElement container, _PartCtx ctx, _TableCtx? t) {
+  List<DocBlock> _parseBlocks(
+    XmlElement container,
+    _PartCtx ctx,
+    _TableCtx? t,
+  ) {
     final out = <DocBlock>[];
     for (final e in Ox.elements(container)) {
       switch (e.name.local) {
@@ -677,7 +703,11 @@ class DocxParser {
   }
 
   void _parseParagraph(
-      XmlElement p, _PartCtx ctx, _TableCtx? t, List<DocBlock> out) {
+    XmlElement p,
+    _PartCtx ctx,
+    _TableCtx? t,
+    List<DocBlock> out,
+  ) {
     final pPr = Ox.child(p, 'pPr');
     final styleId =
         Ox.attr(Ox.child(pPr, 'pStyle'), 'val') ?? _defaultParaStyle;
@@ -697,7 +727,8 @@ class DocxParser {
       if (sectPr != null) {
         final copy = pPr.copy();
         copy.children.removeWhere(
-            (n) => n is XmlElement && n.name.local == 'sectPr');
+          (n) => n is XmlElement && n.name.local == 'sectPr',
+        );
         raw = copy.toXmlString();
       } else {
         raw = pPr.toXmlString();
@@ -710,26 +741,26 @@ class DocxParser {
     }
 
     DocParagraph make() => DocParagraph(
-          styleId: styleId,
-          headingLevel: heading,
-          align: props.align,
-          indentLeft: props.left,
-          indentRight: props.right,
-          firstLine: props.firstLine,
-          spaceBefore: props.before,
-          spaceAfter: props.after,
-          lineSpacing: props.line,
-          lineExact: props.lineExact,
-          shading: props.shading,
-          borderTop: props.top,
-          borderBottom: props.bottom,
-          keepNext: props.keepNext,
-          pageBreakBefore: props.pageBreakBefore,
-          rtl: props.bidi,
-          contextualSpacing: props.contextual,
-          markStyle: markStyle,
-          raw: raw,
-        );
+      styleId: styleId,
+      headingLevel: heading,
+      align: props.align,
+      indentLeft: props.left,
+      indentRight: props.right,
+      firstLine: props.firstLine,
+      spaceBefore: props.before,
+      spaceAfter: props.after,
+      lineSpacing: props.line,
+      lineExact: props.lineExact,
+      shading: props.shading,
+      borderTop: props.top,
+      borderBottom: props.bottom,
+      keepNext: props.keepNext,
+      pageBreakBefore: props.pageBreakBefore,
+      rtl: props.bidi,
+      contextualSpacing: props.contextual,
+      markStyle: markStyle,
+      raw: raw,
+    );
 
     var cur = make()..list = list;
     final frames = <DocBlock>[];
@@ -749,12 +780,15 @@ class DocxParser {
     if (!(broke && cur.inlines.isEmpty)) out.add(cur);
     out.addAll(frames);
     if (sectPr != null) {
-      out.add(DocSectionBreak(
-        page: _pageSetup(sectPr),
-        newPage: (Ox.attr(Ox.child(sectPr, 'type'), 'val') ?? 'nextPage') !=
-            'continuous',
-        raw: sectPr.toXmlString(),
-      ));
+      out.add(
+        DocSectionBreak(
+          page: _pageSetup(sectPr),
+          newPage:
+              (Ox.attr(Ox.child(sectPr, 'type'), 'val') ?? 'nextPage') !=
+              'continuous',
+          raw: sectPr.toXmlString(),
+        ),
+      );
     }
   }
 
@@ -775,10 +809,13 @@ class DocxParser {
     }
     final bullet = lvl.numFmt == 'bullet';
     String label;
-    final labelStyle = _applyRPr(markStyle, lvl.rPr)
-        .copyWith(underline: false, highlight: null);
+    final labelStyle = _applyRPr(
+      markStyle,
+      lvl.rPr,
+    ).copyWith(underline: false, highlight: null);
     if (bullet) {
-      final font = Ox.attr(Ox.child(lvl.rPr, 'rFonts'), 'ascii') ??
+      final font =
+          Ox.attr(Ox.child(lvl.rPr, 'rFonts'), 'ascii') ??
           Ox.attr(Ox.child(lvl.rPr, 'rFonts'), 'hAnsi');
       label = _bulletText(lvl.lvlText, font);
     } else if (lvl.numFmt == 'none') {
@@ -797,7 +834,9 @@ class DocxParser {
       numId: numId,
       format: lvl.numFmt,
       label: label,
-      labelStyle: bullet ? labelStyle.copyWith(fontFamily: markStyle.fontFamily) : labelStyle,
+      labelStyle: bullet
+          ? labelStyle.copyWith(fontFamily: markStyle.fontFamily)
+          : labelStyle,
     );
   }
 
@@ -816,9 +855,14 @@ class DocxParser {
   // -------------------------------------------------------------------------
   // Inline content
 
-  void _parseInlines(XmlElement container, _PartCtx ctx, DocRunStyle base,
-      _InlineSink sink, List<DocBlock> frames,
-      {String? link}) {
+  void _parseInlines(
+    XmlElement container,
+    _PartCtx ctx,
+    DocRunStyle base,
+    _InlineSink sink,
+    List<DocBlock> frames, {
+    String? link,
+  }) {
     for (final e in Ox.elements(container)) {
       switch (e.name.local) {
         case 'r':
@@ -852,12 +896,14 @@ class DocxParser {
         case 'oMath':
         case 'oMathPara':
           final text = Ox.descendants(e, 't').map((t) => t.innerText).join();
-          sink.add(DocObject(
-            kind: 'Equation',
-            displayText: text,
-            raw: e.toXmlString(),
-            style: base.copyWith(italic: true),
-          ));
+          sink.add(
+            DocObject(
+              kind: 'Equation',
+              displayText: text,
+              raw: e.toXmlString(),
+              style: base.copyWith(italic: true),
+            ),
+          );
         case 'del':
         case 'moveFrom':
         case 'pPr':
@@ -895,7 +941,8 @@ class DocxParser {
     if (code == 'HYPERLINK') {
       final url = RegExp(r'"([^"]*)"').firstMatch(instr)?.group(1);
       final anchor = RegExp(r'\\l\s+"([^"]*)"').firstMatch(instr)?.group(1);
-      if (anchor != null && (url == null || instr.indexOf('\\l') < instr.indexOf('"'))) {
+      if (anchor != null &&
+          (url == null || instr.indexOf('\\l') < instr.indexOf('"'))) {
         f.link = '#$anchor';
       } else if (url != null) {
         f.link = anchor != null ? '$url#$anchor' : url;
@@ -905,8 +952,14 @@ class DocxParser {
     }
   }
 
-  void _parseRun(XmlElement r, _PartCtx ctx, DocRunStyle base,
-      _InlineSink sink, List<DocBlock> frames, String? link) {
+  void _parseRun(
+    XmlElement r,
+    _PartCtx ctx,
+    DocRunStyle base,
+    _InlineSink sink,
+    List<DocBlock> frames,
+    String? link,
+  ) {
     final rPr = Ox.child(r, 'rPr');
     var style = base;
     final rStyle = Ox.attr(Ox.child(rPr, 'rStyle'), 'val');
@@ -927,8 +980,15 @@ class DocxParser {
     void addText(String text) {
       if (text.isEmpty || hidden[0]) return;
       if (_inFieldInstruction) return;
-      sink.add(DocText(text, style,
-          link: _fieldLink ?? link, raw: rawRPr, field: _fieldCode));
+      sink.add(
+        DocText(
+          text,
+          style,
+          link: _fieldLink ?? link,
+          raw: rawRPr,
+          field: _fieldCode,
+        ),
+      );
     }
 
     for (final c in Ox.elements(r)) {
@@ -983,20 +1043,28 @@ class DocxParser {
         case 'endnoteReference':
           final foot = c.name.local == 'footnoteReference';
           final n = foot ? ++_footnoteNo : ++_endnoteNo;
-          sink.add(DocObject(
-            kind: foot ? 'Footnote' : 'Endnote',
-            displayText: foot ? '$n' : _romanLower(n),
-            raw: objectRaw(c),
-            style: style.copyWith(vertAlign: DocVertAlign.superscript),
-          ));
+          sink.add(
+            DocObject(
+              kind: foot ? 'Footnote' : 'Endnote',
+              displayText: foot ? '$n' : _romanLower(n),
+              raw: objectRaw(c),
+              style: style.copyWith(vertAlign: DocVertAlign.superscript),
+            ),
+          );
       }
     }
   }
 
   static String _romanLower(int n) => formatListNumber(n, 'lowerRoman');
 
-  void _parseAlternate(XmlElement ac, _PartCtx ctx, DocRunStyle style,
-      _InlineSink sink, List<DocBlock> frames, String raw) {
+  void _parseAlternate(
+    XmlElement ac,
+    _PartCtx ctx,
+    DocRunStyle style,
+    _InlineSink sink,
+    List<DocBlock> frames,
+    String raw,
+  ) {
     XmlElement? chosen;
     for (final ch in Ox.children(ac, 'Choice')) {
       if (Ox.firstDescendant(ch, 'drawing') != null) {
@@ -1015,8 +1083,14 @@ class DocxParser {
     if (pict != null) _parseVml(pict, ctx, style, sink, frames, raw);
   }
 
-  void _parseDrawing(XmlElement d, _PartCtx ctx, DocRunStyle style,
-      _InlineSink sink, List<DocBlock> frames, String raw) {
+  void _parseDrawing(
+    XmlElement d,
+    _PartCtx ctx,
+    DocRunStyle style,
+    _InlineSink sink,
+    List<DocBlock> frames,
+    String raw,
+  ) {
     final holder = Ox.child(d, 'inline') ?? Ox.child(d, 'anchor');
     if (holder == null) return;
     final ext = Ox.child(holder, 'extent');
@@ -1030,7 +1104,8 @@ class DocxParser {
       final id = _imageFromBlip(Ox.firstDescendant(gd, 'blip'), ctx);
       if (id != null) {
         final size = _sizeOr(id, w, h);
-        sink.add(DocImage(
+        sink.add(
+          DocImage(
             imageId: id,
             width: size.$1,
             height: size.$2,
@@ -1038,32 +1113,47 @@ class DocxParser {
             description: descr,
             float: holder.name.local == 'anchor'
                 ? _anchorFloat(holder, Ox.firstDescendant(gd, 'blip'))
-                : null));
+                : null,
+          ),
+        );
         return;
       }
     }
     if (uri.endsWith('/chart') || uri.contains('chart')) {
-      sink.add(DocObject(kind: 'Chart', displayText: '', raw: raw, style: style));
-      frames.add(DocFrame(blocks: [
-        DocParagraph(inlines: [DocText('Chart', style.copyWith(italic: true))])
-      ], label: 'Chart'));
+      sink.add(
+        DocObject(kind: 'Chart', displayText: '', raw: raw, style: style),
+      );
+      frames.add(
+        DocFrame(
+          blocks: [
+            DocParagraph(
+              inlines: [DocText('Chart', style.copyWith(italic: true))],
+            ),
+          ],
+          label: 'Chart',
+        ),
+      );
       return;
     }
     if (uri.contains('diagram')) {
-      sink.add(DocObject(kind: 'SmartArt', displayText: '', raw: raw, style: style));
+      sink.add(
+        DocObject(kind: 'SmartArt', displayText: '', raw: raw, style: style),
+      );
       return;
     }
 
     // Shapes, groups, canvases: collect pictures and text boxes.
     final content = <DocBlock>[];
     _collectShapeContent(gd, ctx, content);
-    sink.add(DocObject(
-      kind: content.isEmpty ? 'Shape' : 'Text box',
-      displayText: '',
-      raw: raw,
-      style: style,
-      content: content,
-    ));
+    sink.add(
+      DocObject(
+        kind: content.isEmpty ? 'Shape' : 'Text box',
+        displayText: '',
+        raw: raw,
+        style: style,
+        content: content,
+      ),
+    );
     if (content.isNotEmpty) frames.add(DocFrame(blocks: content));
   }
 
@@ -1082,13 +1172,17 @@ class DocxParser {
         final id = _imageFromBlip(Ox.firstDescendant(c, 'blip'), ctx);
         final ext = Ox.firstDescendant(c, 'ext');
         if (id != null) {
-          out.add(DocParagraph(inlines: [
-            DocImage(
-              imageId: id,
-              width: Units.emu(Ox.doubleAttr(ext, 'cx') ?? 0),
-              height: Units.emu(Ox.doubleAttr(ext, 'cy') ?? 0),
+          out.add(
+            DocParagraph(
+              inlines: [
+                DocImage(
+                  imageId: id,
+                  width: Units.emu(Ox.doubleAttr(ext, 'cx') ?? 0),
+                  height: Units.emu(Ox.doubleAttr(ext, 'cy') ?? 0),
+                ),
+              ],
             ),
-          ]));
+          );
         }
       } else {
         _collectShapeContent(c, ctx, out);
@@ -1096,10 +1190,17 @@ class DocxParser {
     }
   }
 
-  void _parseVml(XmlElement pict, _PartCtx ctx, DocRunStyle style,
-      _InlineSink sink, List<DocBlock> frames, String raw) {
+  void _parseVml(
+    XmlElement pict,
+    _PartCtx ctx,
+    DocRunStyle style,
+    _InlineSink sink,
+    List<DocBlock> frames,
+    String raw,
+  ) {
     final imageData = Ox.firstDescendant(pict, 'imagedata');
-    final shape = Ox.firstDescendant(pict, 'shape') ??
+    final shape =
+        Ox.firstDescendant(pict, 'shape') ??
         Ox.firstDescendant(pict, 'rect') ??
         Ox.firstDescendant(pict, 'roundrect');
     double w = 0, h = 0;
@@ -1116,12 +1217,15 @@ class DocxParser {
       final id = _imageFromRel(rid, ctx);
       if (id != null) {
         final size = _sizeOr(id, w, h);
-        sink.add(DocImage(
+        sink.add(
+          DocImage(
             imageId: id,
             width: size.$1,
             height: size.$2,
             raw: raw,
-            float: _vmlFloat(css, Ox.firstDescendant(pict, 'wrap'), imageData)));
+            float: _vmlFloat(css, Ox.firstDescendant(pict, 'wrap'), imageData),
+          ),
+        );
         return;
       }
     }
@@ -1135,13 +1239,15 @@ class DocxParser {
         ..clear()
         ..addAll(saved);
     }
-    sink.add(DocObject(
-      kind: content.isEmpty ? 'Object' : 'Text box',
-      displayText: '',
-      raw: raw,
-      style: style,
-      content: content,
-    ));
+    sink.add(
+      DocObject(
+        kind: content.isEmpty ? 'Object' : 'Text box',
+        displayText: '',
+        raw: raw,
+        style: style,
+        content: content,
+      ),
+    );
     if (content.isNotEmpty) frames.add(DocFrame(blocks: content));
   }
 
@@ -1154,7 +1260,9 @@ class DocxParser {
     final pv = Ox.child(anchor, 'positionV');
     double? off(XmlElement? e) {
       final t = Ox.child(e, 'posOffset');
-      return t == null ? null : Units.emu(double.tryParse(t.innerText.trim()) ?? 0);
+      return t == null
+          ? null
+          : Units.emu(double.tryParse(t.innerText.trim()) ?? 0);
     }
 
     var opacity = 1.0;
@@ -1187,7 +1295,11 @@ class DocxParser {
 
   /// Float placement for an absolutely positioned VML picture (classic
   /// watermarks and floating pictures in older documents).
-  DocFloat? _vmlFloat(Map<String, String> css, XmlElement? wrap, XmlElement? imageData) {
+  DocFloat? _vmlFloat(
+    Map<String, String> css,
+    XmlElement? wrap,
+    XmlElement? imageData,
+  ) {
     if (css['position'] != 'absolute') return null;
     final wrapType = Ox.attr(wrap, 'type');
     if (wrapType != null && wrapType != 'none') return null;
@@ -1286,7 +1398,8 @@ class DocxParser {
 
   DocTable? _parseTable(XmlElement tbl, _PartCtx ctx) {
     final tblPr = Ox.child(tbl, 'tblPr');
-    final styleId = Ox.attr(Ox.child(tblPr, 'tblStyle'), 'val') ?? _defaultTableStyle;
+    final styleId =
+        Ox.attr(Ox.child(tblPr, 'tblStyle'), 'val') ?? _defaultTableStyle;
 
     // Table style chain (pPr/rPr apply to content).
     final pPrs = <XmlElement>[];
@@ -1334,7 +1447,10 @@ class DocxParser {
         borders = any;
       }
       final mar = Ox.child(p, 'tblCellMar');
-      final l = Ox.doubleAttr(Ox.child(mar, 'left') ?? Ox.child(mar, 'start'), 'w');
+      final l = Ox.doubleAttr(
+        Ox.child(mar, 'left') ?? Ox.child(mar, 'start'),
+        'w',
+      );
       if (l != null) padding = Units.twips(l);
       final jc = Ox.attr(Ox.child(p, 'jc'), 'val');
       if (jc != null) align = _align(jc);
@@ -1353,12 +1469,15 @@ class DocxParser {
     ];
 
     final look = Ox.child(tblPr, 'tblLook');
-    final firstRowLook = Ox.attr(look, 'firstRow') == '1' ||
-        ((int.tryParse(Ox.attr(look, 'val') ?? '', radix: 16) ?? 0) & 0x20) != 0;
+    final firstRowLook =
+        Ox.attr(look, 'firstRow') == '1' ||
+        ((int.tryParse(Ox.attr(look, 'val') ?? '', radix: 16) ?? 0) & 0x20) !=
+            0;
     final firstRowStyle = firstRowLook ? stylePr['firstRow'] : null;
 
     final rows = <DocTableRow>[];
-    final vMerge = <List<String?>>[]; // per row, per grid col: restart/continue/null
+    final vMerge =
+        <List<String?>>[]; // per row, per grid col: restart/continue/null
     for (final tr in _rowsOf(tbl)) {
       final trPr = Ox.child(tr, 'trPr');
       final hEl = Ox.child(trPr, 'trHeight');
@@ -1377,19 +1496,29 @@ class DocxParser {
       final isFirst = rows.isEmpty;
       for (final tc in _cellsOf(tr)) {
         final tcPr = Ox.child(tc, 'tcPr');
-        final span = (Ox.intAttr(Ox.child(tcPr, 'gridSpan'), 'val') ?? 1).clamp(1, 64);
+        final span = (Ox.intAttr(Ox.child(tcPr, 'gridSpan'), 'val') ?? 1).clamp(
+          1,
+          64,
+        );
         final vm = Ox.child(tcPr, 'vMerge');
         String? vmState;
-        if (vm != null) vmState = Ox.attr(vm, 'val') == 'restart' ? 'restart' : 'continue';
+        if (vm != null) {
+          vmState = Ox.attr(vm, 'val') == 'restart' ? 'restart' : 'continue';
+        }
         var shading = Ox.hexColor(Ox.attr(Ox.child(tcPr, 'shd'), 'fill'));
         final va = Ox.attr(Ox.child(tcPr, 'vAlign'), 'val');
         var cellCtx = tctx;
         if (isFirst && firstRowStyle != null) {
           shading ??= Ox.hexColor(
-              Ox.attr(Ox.path(firstRowStyle, ['tcPr', 'shd']), 'fill'));
+            Ox.attr(Ox.path(firstRowStyle, ['tcPr', 'shd']), 'fill'),
+          );
           final frp = Ox.child(firstRowStyle, 'rPr');
           final fpp = Ox.child(firstRowStyle, 'pPr');
-          cellCtx = _TableCtx('${styleId}_firstRow', [...pPrs, ?fpp], [...rPrs, ?frp]);
+          cellCtx = _TableCtx(
+            '${styleId}_firstRow',
+            [...pPrs, ?fpp],
+            [...rPrs, ?frp],
+          );
         }
         final cell = DocTableCell(
           blocks: _parseBlocks(tc, ctx, cellCtx),
@@ -1398,8 +1527,8 @@ class DocxParser {
           vAlign: va == 'center'
               ? DocCellVAlign.center
               : va == 'bottom'
-                  ? DocCellVAlign.bottom
-                  : DocCellVAlign.top,
+              ? DocCellVAlign.bottom
+              : DocCellVAlign.top,
         );
         row.cells.add(cell);
         merges.add(vmState);
@@ -1499,8 +1628,11 @@ DocImageData loadImageData(Uint8List bytes, String path) {
     try {
       final decoded = img.decodeTiff(bytes);
       if (decoded != null) {
-        return DocImageData(Uint8List.fromList(img.encodePng(decoded)), 'png',
-            sourcePath: path);
+        return DocImageData(
+          Uint8List.fromList(img.encodePng(decoded)),
+          'png',
+          sourcePath: path,
+        );
       }
     } catch (_) {}
   }
@@ -1513,11 +1645,32 @@ String mapSymbolChar(int code, String? font) {
   final f = (font ?? '').toLowerCase();
   if (f.contains('wingdings')) {
     const m = {
-      0xA7: '▪', 0xA8: '◻', 0xD8: '➢', 0xFC: '✓', 0x76: '❖', 0x6C: '●',
-      0x6E: '■', 0x71: '❑', 0x75: '◆', 0xA1: '○', 0x9F: '•', 0xE0: '➔',
-      0xE8: '➔', 0xF0: '⇨', 0x77: '⬥', 0xFB: '✗', 0xFE: '☑', 0x6F: '☐',
-      0x4A: '☺', 0x4C: '☹', 0xAB: '★', 0x9E: '·', 0x3F: '✍', 0x46: '☞',
-      0xF8: '✘', 0xFD: '☒',
+      0xA7: '▪',
+      0xA8: '◻',
+      0xD8: '➢',
+      0xFC: '✓',
+      0x76: '❖',
+      0x6C: '●',
+      0x6E: '■',
+      0x71: '❑',
+      0x75: '◆',
+      0xA1: '○',
+      0x9F: '•',
+      0xE0: '➔',
+      0xE8: '➔',
+      0xF0: '⇨',
+      0x77: '⬥',
+      0xFB: '✗',
+      0xFE: '☑',
+      0x6F: '☐',
+      0x4A: '☺',
+      0x4C: '☹',
+      0xAB: '★',
+      0x9E: '·',
+      0x3F: '✍',
+      0x46: '☞',
+      0xF8: '✘',
+      0xFD: '☒',
     };
     return m[c] ?? '•';
   }
@@ -1527,17 +1680,54 @@ String mapSymbolChar(int code, String? font) {
     const lower = 'αβχδεφγηιϕκλμνοπθρστυϖωξψζ';
     if (c >= 0x61 && c <= 0x7A) return lower[c - 0x61];
     const m = {
-      0xB7: '•', 0xB0: '°', 0xB1: '±', 0xA3: '≤', 0xB3: '≥', 0xB9: '≠',
-      0xBB: '≈', 0xA5: '∞', 0xD6: '√', 0xE5: '∑', 0xD5: '∏', 0xF2: '∫',
-      0xAE: '→', 0xAC: '←', 0xAD: '↑', 0xAF: '↓', 0xDE: '⇒', 0xDC: '⇐',
-      0xDB: '⇔', 0xA2: '′', 0xB2: '″', 0xB4: '×', 0xB8: '÷', 0xD7: '⋅',
-      0x2D: '−', 0xE3: '©', 0xE2: '®', 0xE4: '™', 0xA7: '♣', 0xA8: '♦',
-      0xA9: '♥', 0xAA: '♠', 0x6F: 'ο', 0xC6: '∅', 0xCE: '∈', 0xCF: '∉',
-      0xC7: '∩', 0xC8: '∪', 0xD1: '∇', 0xB6: '∂', 0x22: '∀', 0x24: '∃',
+      0xB7: '•',
+      0xB0: '°',
+      0xB1: '±',
+      0xA3: '≤',
+      0xB3: '≥',
+      0xB9: '≠',
+      0xBB: '≈',
+      0xA5: '∞',
+      0xD6: '√',
+      0xE5: '∑',
+      0xD5: '∏',
+      0xF2: '∫',
+      0xAE: '→',
+      0xAC: '←',
+      0xAD: '↑',
+      0xAF: '↓',
+      0xDE: '⇒',
+      0xDC: '⇐',
+      0xDB: '⇔',
+      0xA2: '′',
+      0xB2: '″',
+      0xB4: '×',
+      0xB8: '÷',
+      0xD7: '⋅',
+      0x2D: '−',
+      0xE3: '©',
+      0xE2: '®',
+      0xE4: '™',
+      0xA7: '♣',
+      0xA8: '♦',
+      0xA9: '♥',
+      0xAA: '♠',
+      0x6F: 'ο',
+      0xC6: '∅',
+      0xCE: '∈',
+      0xCF: '∉',
+      0xC7: '∩',
+      0xC8: '∪',
+      0xD1: '∇',
+      0xB6: '∂',
+      0x22: '∀',
+      0x24: '∃',
     };
     final mapped = m[c];
     if (mapped != null) return mapped;
-    if (code >= 0xF000) return c >= 0x20 && c < 0x7F ? String.fromCharCode(c) : '•';
+    if (code >= 0xF000) {
+      return c >= 0x20 && c < 0x7F ? String.fromCharCode(c) : '•';
+    }
   }
   return String.fromCharCode(code);
 }

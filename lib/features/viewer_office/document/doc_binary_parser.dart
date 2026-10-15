@@ -31,9 +31,15 @@ class _Sprm {
   final int op;
   final Uint8List data;
   int get u8 => data.isEmpty ? 0 : data[0];
-  int get i16 => data.length < 2 ? 0 : ByteData.sublistView(data).getInt16(0, Endian.little);
-  int get u16 => data.length < 2 ? 0 : ByteData.sublistView(data).getUint16(0, Endian.little);
-  int get i32 => data.length < 4 ? 0 : ByteData.sublistView(data).getInt32(0, Endian.little);
+  int get i16 => data.length < 2
+      ? 0
+      : ByteData.sublistView(data).getInt16(0, Endian.little);
+  int get u16 => data.length < 2
+      ? 0
+      : ByteData.sublistView(data).getUint16(0, Endian.little);
+  int get i32 => data.length < 4
+      ? 0
+      : ByteData.sublistView(data).getInt32(0, Endian.little);
 }
 
 List<_Sprm> _parseGrpprl(Uint8List b, int start, int end) {
@@ -110,7 +116,11 @@ class _LvlInfo {
 }
 
 class _CharProps {
-  bool bold = false, italic = false, strike = false, caps = false, smallCaps = false;
+  bool bold = false,
+      italic = false,
+      strike = false,
+      caps = false,
+      smallCaps = false;
   bool vanish = false, deleted = false, special = false;
   bool underline = false;
   int? color;
@@ -153,9 +163,23 @@ class _ParaProps {
 }
 
 const _icoColors = [
-  null, 0xFF000000, 0xFF0000FF, 0xFF00FFFF, 0xFF00FF00, 0xFFFF00FF,
-  0xFFFF0000, 0xFFFFFF00, 0xFFFFFFFF, 0xFF000080, 0xFF008080, 0xFF008000,
-  0xFF800080, 0xFF800000, 0xFF808000, 0xFF808080, 0xFFC0C0C0,
+  null,
+  0xFF000000,
+  0xFF0000FF,
+  0xFF00FFFF,
+  0xFF00FF00,
+  0xFFFF00FF,
+  0xFFFF0000,
+  0xFFFFFF00,
+  0xFFFFFFFF,
+  0xFF000080,
+  0xFF008080,
+  0xFF008000,
+  0xFF800080,
+  0xFF800000,
+  0xFF808000,
+  0xFF808080,
+  0xFFC0C0C0,
 ];
 
 class _DocParser {
@@ -273,7 +297,9 @@ class _DocParser {
           final fcRaw = tu32(pcd + 2);
           final compressed = (fcRaw & 0x40000000) != 0;
           final fcVal = fcRaw & 0x3FFFFFFF;
-          pieces.add(_Piece(cpStart, cpEnd, compressed ? fcVal ~/ 2 : fcVal, compressed));
+          pieces.add(
+            _Piece(cpStart, cpEnd, compressed ? fcVal ~/ 2 : fcVal, compressed),
+          );
         }
         return;
       } else {
@@ -291,10 +317,14 @@ class _DocParser {
       final fcS = p.fcOf(s);
       if (p.compressed) {
         final end = (fcS + (e - s)).clamp(0, wd.length);
-        if (fcS < end) sb.write(decodeCp1252(Uint8List.sublistView(wd, fcS, end)));
+        if (fcS < end) {
+          sb.write(decodeCp1252(Uint8List.sublistView(wd, fcS, end)));
+        }
       } else {
         final end = (fcS + (e - s) * 2).clamp(0, wd.length);
-        if (fcS < end) sb.write(decodeUtf16le(Uint8List.sublistView(wd, fcS, end)));
+        if (fcS < end) {
+          sb.write(decodeUtf16le(Uint8List.sublistView(wd, fcS, end)));
+        }
       }
     }
     return sb.toString();
@@ -364,7 +394,13 @@ class _DocParser {
         }
         p = start + cbUpx;
       }
-      styles[istd] = _StyleInfo(name.toString(), stk, base == 0xFFF ? -1 : base, papx, chpx);
+      styles[istd] = _StyleInfo(
+        name.toString(),
+        stk,
+        base == 0xFFF ? -1 : base,
+        papx,
+        chpx,
+      );
     }
   }
 
@@ -401,7 +437,9 @@ class _DocParser {
             o += 1;
           }
           final istd = u16(o);
-          papxRuns.add(_FcRun(fcStart, fcEnd, _parseGrpprl(wd, o + 2, o + size), istd));
+          papxRuns.add(
+            _FcRun(fcStart, fcEnd, _parseGrpprl(wd, o + 2, o + size), istd),
+          );
         } else {
           final bOff = wd[pageOff + (crun + 1) * 4 + r] * 2;
           if (bOff == 0) {
@@ -410,7 +448,9 @@ class _DocParser {
           }
           final o = pageOff + bOff;
           final cb = wd[o];
-          chpxRuns.add(_FcRun(fcStart, fcEnd, _parseGrpprl(wd, o + 1, o + 1 + cb)));
+          chpxRuns.add(
+            _FcRun(fcStart, fcEnd, _parseGrpprl(wd, o + 1, o + 1 + cb)),
+          );
         }
       }
     }
@@ -486,7 +526,13 @@ class _DocParser {
     }
     if (w > 72 && h > 72) {
       page = DocPageSetup(
-          width: w, height: h, marginLeft: ml, marginRight: mr, marginTop: mt, marginBottom: mb);
+        width: w,
+        height: h,
+        marginLeft: ml,
+        marginRight: mr,
+        marginTop: mt,
+        marginBottom: mb,
+      );
     }
   }
 
@@ -562,7 +608,9 @@ class _DocParser {
         case 0x6412:
           if (s.data.length >= 4) {
             final dya = ByteData.sublistView(s.data).getInt16(0, Endian.little);
-            final mult = ByteData.sublistView(s.data).getInt16(2, Endian.little);
+            final mult = ByteData.sublistView(
+              s.data,
+            ).getInt16(2, Endian.little);
             if (mult == 1) {
               p.line = (dya / 240).clamp(0.5, 5.0);
               p.exact = null;
@@ -591,7 +639,11 @@ class _DocParser {
             final itcMac = s.data[0];
             final edges = <double>[];
             final b = ByteData.sublistView(s.data);
-            for (var k = 0; k <= itcMac && 1 + k * 2 + 2 <= s.data.length; k++) {
+            for (
+              var k = 0;
+              k <= itcMac && 1 + k * 2 + 2 <= s.data.length;
+              k++
+            ) {
               edges.add(b.getInt16(1 + k * 2, Endian.little) / 20);
             }
             p.cellEdges = edges;
@@ -643,7 +695,8 @@ class _DocParser {
             if (s.data[3] == 0xFF) {
               c.color = null;
             } else {
-              c.color = 0xFF000000 | (s.data[0] << 16) | (s.data[1] << 8) | s.data[2];
+              c.color =
+                  0xFF000000 | (s.data[0] << 16) | (s.data[1] << 8) | s.data[2];
             }
           }
         case 0x4A43:
@@ -652,7 +705,9 @@ class _DocParser {
           c.iss = s.u8;
         case 0x2A0C:
           final ico = s.u8;
-          c.highlight = ico > 0 && ico < _icoColors.length ? _icoColors[ico] : null;
+          c.highlight = ico > 0 && ico < _icoColors.length
+              ? _icoColors[ico]
+              : null;
         case 0x4A4F:
           c.font = s.u16;
         case 0x0855:
@@ -685,7 +740,11 @@ class _DocParser {
     if (st == null || depth > 10) {
       c = _CharProps();
     } else {
-      c = (st.base >= 0 && st.base != istd ? _styleChar(st.base, depth + 1) : _CharProps()).copy();
+      c =
+          (st.base >= 0 && st.base != istd
+                  ? _styleChar(st.base, depth + 1)
+                  : _CharProps())
+              .copy();
       _applyChar(c, st.chpx, c.copy());
     }
     _styleCharCache[istd] = c;
@@ -732,7 +791,9 @@ class _DocParser {
   }
 
   DocRunStyle _runStyle(_CharProps c) {
-    final fontName = c.font >= 0 && c.font < fonts.length ? fonts[c.font] : null;
+    final fontName = c.font >= 0 && c.font < fonts.length
+        ? fonts[c.font]
+        : null;
     return DocRunStyle(
       bold: c.bold,
       italic: c.italic,
@@ -747,8 +808,8 @@ class _DocParser {
       vertAlign: c.iss == 1
           ? DocVertAlign.superscript
           : c.iss == 2
-              ? DocVertAlign.subscript
-              : DocVertAlign.baseline,
+          ? DocVertAlign.subscript
+          : DocVertAlign.baseline,
     );
   }
 
@@ -765,7 +826,8 @@ class _DocParser {
     var cellBlocks = <DocBlock>[];
 
     // Field state.
-    final fieldStack = <List<Object>>[]; // [inResult(bool), instr(StringBuffer)]
+    final fieldStack =
+        <List<Object>>[]; // [inResult(bool), instr(StringBuffer)]
 
     void flushTable() {
       if (table != null) {
@@ -804,7 +866,14 @@ class _DocParser {
         ..istd = istd;
       _applyPara(pp, sprms);
 
-      final para = _paragraph(text, paraStart, cp, pp, fieldStack, listCounters);
+      final para = _paragraph(
+        text,
+        paraStart,
+        cp,
+        pp,
+        fieldStack,
+        listCounters,
+      );
       paraStart = cp + 1;
 
       if (pp.inTable || ch == 0x07) {
@@ -817,9 +886,11 @@ class _DocParser {
               for (var k = 0; k < row!.cells.length; k++) {
                 row!.cells[k].width = edges[k + 1] - edges[k];
               }
-              if (table!.columnWidths.isEmpty || table!.columnWidths.length < row!.cells.length) {
+              if (table!.columnWidths.isEmpty ||
+                  table!.columnWidths.length < row!.cells.length) {
                 table!.columnWidths = [
-                  for (var k = 0; k < row!.cells.length; k++) (edges[k + 1] - edges[k]).abs(),
+                  for (var k = 0; k < row!.cells.length; k++)
+                    (edges[k + 1] - edges[k]).abs(),
                 ];
               }
             }
@@ -878,8 +949,14 @@ class _DocParser {
   }
 
   /// Builds a paragraph from text [start, end); returns null for nothing.
-  List<DocBlock>? _paragraph(String text, int start, int end, _ParaProps pp,
-      List<List<Object>> fields, Map<int, List<int>> counters) {
+  List<DocBlock>? _paragraph(
+    String text,
+    int start,
+    int end,
+    _ParaProps pp,
+    List<List<Object>> fields,
+    Map<int, List<int>> counters,
+  ) {
     final styleChar = _styleChar(pp.istd);
     final inlines = <DocInline>[];
     String? link;
@@ -911,7 +988,9 @@ class _DocParser {
           if (instr.toUpperCase().startsWith('HYPERLINK')) {
             final m = RegExp(r'"([^"]*)"').firstMatch(instr);
             final anchor = RegExp(r'\\l\s+"([^"]*)"').firstMatch(instr);
-            link = m != null && anchor == null ? m.group(1) : (anchor != null ? '#${anchor.group(1)}' : null);
+            link = m != null && anchor == null
+                ? m.group(1)
+                : (anchor != null ? '#${anchor.group(1)}' : null);
           }
         }
         continue;
@@ -946,11 +1025,13 @@ class _DocParser {
           continue;
         case 0x02:
           _footnote++;
-          inlines.add(DocObject(
-            kind: 'Footnote',
-            displayText: '$_footnote',
-            style: style.copyWith(vertAlign: DocVertAlign.superscript),
-          ));
+          inlines.add(
+            DocObject(
+              kind: 'Footnote',
+              displayText: '$_footnote',
+              style: style.copyWith(vertAlign: DocVertAlign.superscript),
+            ),
+          );
           continue;
         case 0x0B:
           out = '\n';
@@ -1001,14 +1082,18 @@ class _DocParser {
         final bullet = lvl.nfc == 23;
         String label;
         if (bullet) {
-          label = lvl.text.isEmpty ? '\u2022' : mapSymbolChar(lvl.text.codeUnitAt(0), 'Symbol');
+          label = lvl.text.isEmpty
+              ? '\u2022'
+              : mapSymbolChar(lvl.text.codeUnitAt(0), 'Symbol');
           if (lvl.text == 'o') label = '\u25E6';
         } else {
           final sb = StringBuffer();
           for (final u in lvl.text.codeUnits) {
             if (u < 9) {
               final lv = levels![u.clamp(0, levels.length - 1)];
-              sb.write(formatListNumber(c[u] == 0 ? lv.start : c[u], _nfcName(lv.nfc)));
+              sb.write(
+                formatListNumber(c[u] == 0 ? lv.start : c[u], _nfcName(lv.nfc)),
+              );
             } else {
               sb.writeCharCode(u);
             }
@@ -1022,7 +1107,12 @@ class _DocParser {
           label: label,
         );
       } else {
-        list = DocListInfo(ordered: false, level: level, label: '\u2022', format: 'bullet');
+        list = DocListInfo(
+          ordered: false,
+          level: level,
+          label: '\u2022',
+          format: 'bullet',
+        );
       }
     }
 
@@ -1048,16 +1138,16 @@ class _DocParser {
   }
 
   String _nfcName(int nfc) => switch (nfc) {
-        1 => 'upperRoman',
-        2 => 'lowerRoman',
-        3 => 'upperLetter',
-        4 => 'lowerLetter',
-        5 => 'ordinal',
-        22 => 'decimalZero',
-        23 => 'bullet',
-        255 => 'none',
-        _ => 'decimal',
-      };
+    1 => 'upperRoman',
+    2 => 'lowerRoman',
+    3 => 'upperLetter',
+    4 => 'lowerLetter',
+    5 => 'ordinal',
+    22 => 'decimalZero',
+    23 => 'bullet',
+    255 => 'none',
+    _ => 'decimal',
+  };
 
   DocImage? _picture(int offset) {
     final d = data;
@@ -1072,10 +1162,16 @@ class _DocParser {
     final end = offset + lcb;
     Uint8List? img;
     for (var i = offset + 0x44; i + 8 < end; i++) {
-      if (d[i] == 0x89 && d[i + 1] == 0x50 && d[i + 2] == 0x4E && d[i + 3] == 0x47) {
+      if (d[i] == 0x89 &&
+          d[i + 1] == 0x50 &&
+          d[i + 2] == 0x4E &&
+          d[i + 3] == 0x47) {
         // PNG: until IEND.
         for (var j = i + 8; j + 8 <= end; j++) {
-          if (d[j] == 0x49 && d[j + 1] == 0x45 && d[j + 2] == 0x4E && d[j + 3] == 0x44) {
+          if (d[j] == 0x49 &&
+              d[j + 1] == 0x45 &&
+              d[j + 2] == 0x4E &&
+              d[j + 3] == 0x44) {
             img = Uint8List.fromList(Uint8List.sublistView(d, i, j + 8));
             break;
           }
@@ -1090,7 +1186,9 @@ class _DocParser {
             break;
           }
         }
-        if (last > i) img = Uint8List.fromList(Uint8List.sublistView(d, i, last + 2));
+        if (last > i) {
+          img = Uint8List.fromList(Uint8List.sublistView(d, i, last + 2));
+        }
         break;
       }
     }

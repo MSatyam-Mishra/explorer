@@ -192,10 +192,7 @@ class _RtfParser {
       marginTop: _mt,
       marginBottom: _mb,
     );
-    final base = DocRunStyle(
-      fontSize: 12,
-      fontFamily: fonts[defaultFont],
-    );
+    final base = DocRunStyle(fontSize: 12, fontFamily: fonts[defaultFont]);
     final models = blocks.isEmpty ? <DocBlock>[DocParagraph()] : blocks;
     return DocModel(
       format: 'rtf',
@@ -216,12 +213,17 @@ class _RtfParser {
         if (i is DocText) {
           final key = '${i.style.fontFamily}|${i.style.fontSize}';
           counts[key] = (counts[key] ?? 0) + i.text.length;
-          styles[key] = DocRunStyle(fontFamily: i.style.fontFamily, fontSize: i.style.fontSize);
+          styles[key] = DocRunStyle(
+            fontFamily: i.style.fontFamily,
+            fontSize: i.style.fontSize,
+          );
         }
       }
     }
     if (counts.isEmpty) return null;
-    final best = counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+    final best = counts.entries
+        .reduce((a, b) => a.value >= b.value ? a : b)
+        .key;
     return styles[best];
   }
 
@@ -286,10 +288,70 @@ class _RtfParser {
 
   static String _decode1251(List<int> bytes) {
     const high = [
-      0x0402, 0x0403, 0x201A, 0x0453, 0x201E, 0x2026, 0x2020, 0x2021, 0x20AC, 0x2030, 0x0409, 0x2039, 0x040A, 0x040C, 0x040B, 0x040F, //
-      0x0452, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x0098, 0x2122, 0x0459, 0x203A, 0x045A, 0x045C, 0x045B, 0x045F,
-      0x00A0, 0x040E, 0x045E, 0x0408, 0x00A4, 0x0490, 0x00A6, 0x00A7, 0x0401, 0x00A9, 0x0404, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x0407,
-      0x00B0, 0x00B1, 0x0406, 0x0456, 0x0491, 0x00B5, 0x00B6, 0x00B7, 0x0451, 0x2116, 0x0454, 0x00BB, 0x0458, 0x0405, 0x0455, 0x0457,
+      0x0402,
+      0x0403,
+      0x201A,
+      0x0453,
+      0x201E,
+      0x2026,
+      0x2020,
+      0x2021,
+      0x20AC,
+      0x2030,
+      0x0409,
+      0x2039,
+      0x040A,
+      0x040C,
+      0x040B,
+      0x040F, //
+      0x0452,
+      0x2018,
+      0x2019,
+      0x201C,
+      0x201D,
+      0x2022,
+      0x2013,
+      0x2014,
+      0x0098,
+      0x2122,
+      0x0459,
+      0x203A,
+      0x045A,
+      0x045C,
+      0x045B,
+      0x045F,
+      0x00A0,
+      0x040E,
+      0x045E,
+      0x0408,
+      0x00A4,
+      0x0490,
+      0x00A6,
+      0x00A7,
+      0x0401,
+      0x00A9,
+      0x0404,
+      0x00AB,
+      0x00AC,
+      0x00AD,
+      0x00AE,
+      0x0407,
+      0x00B0,
+      0x00B1,
+      0x0406,
+      0x0456,
+      0x0491,
+      0x00B5,
+      0x00B6,
+      0x00B7,
+      0x0451,
+      0x2116,
+      0x0454,
+      0x00BB,
+      0x0458,
+      0x0405,
+      0x0455,
+      0x0457,
     ];
     return String.fromCharCodes([
       for (final b in bytes)
@@ -331,8 +393,10 @@ class _RtfParser {
           final v = int.tryParse(s.substring(pos, pos + 2), radix: 16);
           pos += 2;
           if (v != null) {
-            if (g.dest == _Dest.normal || g.dest == _Dest.listText ||
-                g.dest == _Dest.fontTable || g.dest == _Dest.styleSheet ||
+            if (g.dest == _Dest.normal ||
+                g.dest == _Dest.listText ||
+                g.dest == _Dest.fontTable ||
+                g.dest == _Dest.styleSheet ||
                 g.dest == _Dest.fieldInst) {
               _pendingBytes.add(v);
             }
@@ -368,26 +432,109 @@ class _RtfParser {
 
   bool _starred = false;
 
-  static bool _isLetter(int c) => (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A);
+  static bool _isLetter(int c) =>
+      (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A);
   static bool _isDigit(int c) => c >= 0x30 && c <= 0x39;
 
   static const _skipDestinations = {
-    'info', 'header', 'headerl', 'headerr', 'headerf', 'footer', 'footerl',
-    'footerr', 'footerf', 'footnote', 'annotation', 'filetbl', 'listtable',
-    'listoverridetable', 'revtbl', 'rsidtbl', 'xmlnstbl', 'mmathPr',
-    'generator', 'themedata', 'colorschememapping', 'latentstyles',
-    'datastore', 'defchp', 'defpap', 'pgdsctbl', 'objdata', 'objclass',
-    'bkmkstart', 'bkmkend', 'nonshppict', 'shpinst', 'userprops', 'docvar',
-    'template', 'fchars', 'lchars', 'comment', 'author', 'title', 'subject',
-    'operator', 'keywords', 'doccomm', 'company', 'category', 'manager',
-    'hlinkbase', 'upr', 'pn', 'pnseclvl', 'atnid', 'atnauthor', 'atndate',
-    'atnref', 'xe', 'tc', 'txe', 'falt', 'panose', 'fontemb', 'fontfile',
-    'blipuid', 'passwordhash', 'wgrffmtfilter', 'ftnsep', 'ftnsepc',
-    'ftncn', 'aftnsep', 'aftnsepc', 'aftncn', 'formfield', 'pgptbl',
-    'protusertbl', 'listpicture', 'background', 'docinfo', 'sp', 'sn', 'sv',
-    'oldcprops', 'oldpprops', 'oldsprops', 'oldtprops', 'mmath', 'nesttableprops',
-    'pntxta', 'pntxtb', 'ud', 'factoidname', 'ebcend', 'ebcstart', 'bkmkcolf',
-    'bkmkcoll', 'listname', 'leveltext', 'levelnumbers', 'fname',
+    'info',
+    'header',
+    'headerl',
+    'headerr',
+    'headerf',
+    'footer',
+    'footerl',
+    'footerr',
+    'footerf',
+    'footnote',
+    'annotation',
+    'filetbl',
+    'listtable',
+    'listoverridetable',
+    'revtbl',
+    'rsidtbl',
+    'xmlnstbl',
+    'mmathPr',
+    'generator',
+    'themedata',
+    'colorschememapping',
+    'latentstyles',
+    'datastore',
+    'defchp',
+    'defpap',
+    'pgdsctbl',
+    'objdata',
+    'objclass',
+    'bkmkstart',
+    'bkmkend',
+    'nonshppict',
+    'shpinst',
+    'userprops',
+    'docvar',
+    'template',
+    'fchars',
+    'lchars',
+    'comment',
+    'author',
+    'title',
+    'subject',
+    'operator',
+    'keywords',
+    'doccomm',
+    'company',
+    'category',
+    'manager',
+    'hlinkbase',
+    'upr',
+    'pn',
+    'pnseclvl',
+    'atnid',
+    'atnauthor',
+    'atndate',
+    'atnref',
+    'xe',
+    'tc',
+    'txe',
+    'falt',
+    'panose',
+    'fontemb',
+    'fontfile',
+    'blipuid',
+    'passwordhash',
+    'wgrffmtfilter',
+    'ftnsep',
+    'ftnsepc',
+    'ftncn',
+    'aftnsep',
+    'aftnsepc',
+    'aftncn',
+    'formfield',
+    'pgptbl',
+    'protusertbl',
+    'listpicture',
+    'background',
+    'docinfo',
+    'sp',
+    'sn',
+    'sv',
+    'oldcprops',
+    'oldpprops',
+    'oldsprops',
+    'oldtprops',
+    'mmath',
+    'nesttableprops',
+    'pntxta',
+    'pntxtb',
+    'ud',
+    'factoidname',
+    'ebcend',
+    'ebcstart',
+    'bkmkcolf',
+    'bkmkcoll',
+    'listname',
+    'leveltext',
+    'levelnumbers',
+    'fname',
   };
 
   void _word(String w, int? p) {
@@ -718,7 +865,8 @@ class _RtfParser {
           while (pos < s.length && _isLetter(s.codeUnitAt(pos))) {
             pos++;
           }
-          while (pos < s.length && (s.codeUnitAt(pos) == 0x2D || _isDigit(s.codeUnitAt(pos)))) {
+          while (pos < s.length &&
+              (s.codeUnitAt(pos) == 0x2D || _isDigit(s.codeUnitAt(pos)))) {
             pos++;
           }
           if (pos < s.length && s.codeUnitAt(pos) == 0x20) pos++;
@@ -800,8 +948,8 @@ class _RtfParser {
       vertAlign: c.vert == 1
           ? DocVertAlign.superscript
           : c.vert == 2
-              ? DocVertAlign.subscript
-              : DocVertAlign.baseline,
+          ? DocVertAlign.subscript
+          : DocVertAlign.baseline,
     );
   }
 
@@ -818,7 +966,8 @@ class _RtfParser {
     DocListInfo? list;
     final label = _listLabel.toString().replaceAll('\t', '').trim();
     if (pp.list > 0 || label.isNotEmpty) {
-      final ordered = RegExp(r'^[(]?[0-9a-zA-Z]{1,6}[.)]?$').hasMatch(label) &&
+      final ordered =
+          RegExp(r'^[(]?[0-9a-zA-Z]{1,6}[.)]?$').hasMatch(label) &&
           !RegExp(r'^[oO]$').hasMatch(label);
       list = DocListInfo(
         ordered: ordered,
@@ -833,14 +982,23 @@ class _RtfParser {
       inlines: inlines,
       headingLevel: heading,
       styleId: styleNames[pp.style],
-      align: const [DocAlign.left, DocAlign.center, DocAlign.right, DocAlign.justify][pp.align],
+      align: const [
+        DocAlign.left,
+        DocAlign.center,
+        DocAlign.right,
+        DocAlign.justify,
+      ][pp.align],
       indentLeft: pp.li / 20,
       indentRight: pp.ri / 20,
       firstLine: pp.fi / 20,
       spaceBefore: pp.sb / 20,
       spaceAfter: pp.sa / 20,
-      lineSpacing: pp.sl != 0 && pp.slMult ? (pp.sl.abs() / 240).clamp(0.5, 5.0) : 1.0,
-      lineExact: pp.sl < 0 ? -pp.sl / 20 : (!pp.slMult && pp.sl > 0 && pp.sl / 20 > 16 ? pp.sl / 20 : null),
+      lineSpacing: pp.sl != 0 && pp.slMult
+          ? (pp.sl.abs() / 240).clamp(0.5, 5.0)
+          : 1.0,
+      lineExact: pp.sl < 0
+          ? -pp.sl / 20
+          : (!pp.slMult && pp.sl > 0 && pp.sl / 20 > 16 ? pp.sl / 20 : null),
       list: list,
       keepNext: pp.keepNext,
       pageBreakBefore: pp.pageBreakBefore,
@@ -881,7 +1039,9 @@ class _RtfParser {
       if (def != null) {
         cell.width = (def.right - left).abs() / 20;
         left = def.right;
-        if (def.shading > 0 && def.shading < colors.length) cell.shading = colors[def.shading];
+        if (def.shading > 0 && def.shading < colors.length) {
+          cell.shading = colors[def.shading];
+        }
         if (def.vMerge) cell.covered = true;
         if (def.hMerge && cells.isNotEmpty) {
           cells.last.colSpan++;
@@ -926,7 +1086,8 @@ class _RtfParser {
     for (final r in t.rows) {
       if (widest == null || r.cells.length > widest.cells.length) widest = r;
     }
-    if (widest != null && widest.cells.every((c) => (c.width ?? 0) > 0 && c.colSpan == 1)) {
+    if (widest != null &&
+        widest.cells.every((c) => (c.width ?? 0) > 0 && c.colSpan == 1)) {
       t.columnWidths = [for (final c in widest.cells) c.width!];
     }
     blocks.add(t);
@@ -950,7 +1111,9 @@ class _RtfParser {
       header.setUint32(2, 14 + bytes.length, Endian.little);
       final bd = ByteData.sublistView(bytes);
       final infoSize = bytes.length >= 4 ? bd.getUint32(0, Endian.little) : 40;
-      final bitCount = bytes.length >= 16 ? bd.getUint16(14, Endian.little) : 24;
+      final bitCount = bytes.length >= 16
+          ? bd.getUint16(14, Endian.little)
+          : 24;
       var colorsUsed = bytes.length >= 36 ? bd.getUint32(32, Endian.little) : 0;
       if (colorsUsed == 0 && bitCount <= 8) colorsUsed = 1 << bitCount;
       header.setUint32(10, 14 + infoSize + colorsUsed * 4, Endian.little);

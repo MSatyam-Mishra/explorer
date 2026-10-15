@@ -150,14 +150,16 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   // Loading
 
   Future<void> _load({CsvLoadOptions? csv}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (!_loading || _error != null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final bytes = await _file.readAsBytes();
       final name = _fileName;
-      final wb = await Isolate.run(() => loadWorkbook(bytes, fileName: name, csv: csv));
+      final wb = await _parseInBackground(bytes, name, csv);
       if (!mounted) return;
       final old = _ctrl;
       old?.removeListener(_onControllerChanged);
@@ -274,11 +276,8 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
     }
   }
 
-  Future<XlsxWriteResult> _buildXlsx(SpreadsheetController c, SpreadsheetFormat target) {
-    final wb = c.workbook;
-    final original = _packageBytes;
-    return Isolate.run(() => XlsxWriter.writePackage(wb, original: original, target: target));
-  }
+  Future<XlsxWriteResult> _buildXlsx(SpreadsheetController c, SpreadsheetFormat target) =>
+      _writeXlsxInBackground(c.workbook, _packageBytes, target);
 
   /// Save (Ctrl+S): overwrite when possible, otherwise "Save as .xlsx".
   Future<bool> _save() async {
@@ -377,10 +376,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       final newline = csv.newline;
       final date1904 = wb.date1904;
       final encoding = target == null ? csv.encoding : TextEncodingKind.utf8Bom;
-      final bytes = await Isolate.run(() => CsvCodec.encode(
-            CsvCodec.write(sheet, delimiter: delimiter, newline: newline, date1904: date1904),
-            encoding,
-          ));
+      final bytes = await _writeCsvInBackground(sheet, delimiter, newline, date1904, encoding);
       await _writeBytes(target ?? _file, bytes);
       if (!mounted) return true;
       if (target == null) {
@@ -662,7 +658,11 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
           value: v,
           enabled: enabled,
           height: 40,
-          child: Row(children: [Icon(icon, size: 18), const SizedBox(width: 12), Text(label)]),
+          child: Row(children: [
+            Icon(icon, size: 18),
+            const SizedBox(width: 12),
+            Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          ]),
         );
     final choice = await showMenu<_CellMenu>(
       context: context,
@@ -1093,3 +1093,20 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
     );
   }
 }
+
+// Isolate entry points live at top level so their closures can't capture the
+// widget state (which isn't sendable to another isolate).
+
+Future<Workbook> _parseInBackground(Uint8List bytes, String name, CsvLoadOptions? csv) =>
+    Isolate.run(() => loadWorkbook(bytes, fileName: name, csv: csv));
+
+Future<XlsxWriteResult> _writeXlsxInBackground(
+        Workbook wb, Uint8List? original, SpreadsheetFormat target) =>
+    Isolate.run(() => XlsxWriter.writePackage(wb, original: original, target: target));
+
+Future<Uint8List> _writeCsvInBackground(SheetData sheet, String delimiter, String newline,
+        bool date1904, TextEncodingKind encoding) =>
+    Isolate.run(() => CsvCodec.encode(
+          CsvCodec.write(sheet, delimiter: delimiter, newline: newline, date1904: date1904),
+          encoding,
+        ));

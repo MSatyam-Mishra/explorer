@@ -71,8 +71,11 @@ double? _parseSize(Object? v) {
 }
 
 /// Inline Quill attributes of [s] relative to [base].
-Map<String, dynamic> runAttributes(DocRunStyle s, DocRunStyle base,
-    {String? link}) {
+Map<String, dynamic> runAttributes(
+  DocRunStyle s,
+  DocRunStyle base, {
+  String? link,
+}) {
   final a = <String, dynamic>{};
   if (s.bold && !base.bold) a['bold'] = true;
   if (s.italic && !base.italic) a['italic'] = true;
@@ -131,8 +134,12 @@ DeltaDocument modelToDelta(DocModel m) {
   return DeltaDocument(ops, side);
 }
 
-void _paragraphOps(DocParagraph p, DocModel m, DeltaSideTable side,
-    void Function(Object, [Map<String, dynamic>?]) insert) {
+void _paragraphOps(
+  DocParagraph p,
+  DocModel m,
+  DeltaSideTable side,
+  void Function(Object, [Map<String, dynamic>?]) insert,
+) {
   final base = m.editorBaseFor(p.headingLevel);
   final pIndex = side.paragraphs.length;
   side.paragraphs.add(p);
@@ -180,7 +187,10 @@ void _paragraphOps(DocParagraph p, DocModel m, DeltaSideTable side,
 
 /// Rebuilds a model from edited Delta ops.
 DocModel deltaToModel(
-    List<Map<String, dynamic>> ops, DocModel original, DeltaSideTable side) {
+  List<Map<String, dynamic>> ops,
+  DocModel original,
+  DeltaSideTable side,
+) {
   final blocks = <DocBlock>[];
   var pending = <Object>[]; // DocInline or DocBlock (block embeds)
 
@@ -274,11 +284,16 @@ int? _header(Map<String, dynamic>? a) {
   return null;
 }
 
-DocText _runFrom(String text, Map<String, dynamic>? a, DocModel m,
-    DeltaSideTable side) {
+DocText _runFrom(
+  String text,
+  Map<String, dynamic>? a,
+  DocModel m,
+  DeltaSideTable side,
+) {
   final idx = a?[OfficeEmbeds.runAttr];
-  final template =
-      idx is int && idx >= 0 && idx < side.runs.length ? side.runs[idx] : null;
+  final template = idx is int && idx >= 0 && idx < side.runs.length
+      ? side.runs[idx]
+      : null;
   // Run attrs are relative to the editor base of the line, which we don't
   // know yet; store raw attrs and resolve when the line finishes.
   final run = DocText(
@@ -295,13 +310,18 @@ DocText _runFrom(String text, Map<String, dynamic>? a, DocModel m,
 
 final Expando<Map<String, dynamic>> _pendingAttrs = Expando();
 
-DocRunStyle _resolveStyle(Map<String, dynamic> a, DocRunStyle base, DocText? run) {
+DocRunStyle _resolveStyle(
+  Map<String, dynamic> a,
+  DocRunStyle base,
+  DocText? run,
+) {
   final template = run?.style;
   final script = a['script'];
   return DocRunStyle(
     bold: a['bold'] == true || base.bold,
     italic: a['italic'] == true || base.italic,
-    underline: a['underline'] == true ||
+    underline:
+        a['underline'] == true ||
         (base.underline) ||
         (a['link'] != null && (template?.underline ?? true)),
     strike: a['strike'] == true || base.strike,
@@ -316,13 +336,17 @@ DocRunStyle _resolveStyle(Map<String, dynamic> a, DocRunStyle base, DocText? run
     vertAlign: script == 'super'
         ? DocVertAlign.superscript
         : script == 'sub'
-            ? DocVertAlign.subscript
-            : DocVertAlign.baseline,
+        ? DocVertAlign.subscript
+        : DocVertAlign.baseline,
   );
 }
 
-DocParagraph _paragraphFrom(List<DocInline> inlines, Map<String, dynamic> a,
-    DocModel m, DeltaSideTable side) {
+DocParagraph _paragraphFrom(
+  List<DocInline> inlines,
+  Map<String, dynamic> a,
+  DocModel m,
+  DeltaSideTable side,
+) {
   final idx = a[OfficeEmbeds.paraAttr];
   final t = idx is int && idx >= 0 && idx < side.paragraphs.length
       ? side.paragraphs[idx]
@@ -376,7 +400,9 @@ DocParagraph _paragraphFrom(List<DocInline> inlines, Map<String, dynamic> a,
       indentLeft = 36.0 * (list.level + 1);
       firstLine = -18;
     }
-  } else if (t != null && t.list == null && (t.indentLeft / 36).round() == indent) {
+  } else if (t != null &&
+      t.list == null &&
+      (t.indentLeft / 36).round() == indent) {
     indentLeft = t.indentLeft;
     firstLine = t.firstLine;
   } else {

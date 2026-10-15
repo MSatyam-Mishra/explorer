@@ -34,17 +34,16 @@ class DocRenderContext {
   final int? pageCount;
 
   DocRenderContext forPage(int number, int count) => DocRenderContext(
-        model: model,
-        images: images,
-        darkPage: darkPage,
-        highlights: highlights,
-        onLink: onLink,
-        pageNumber: number,
-        pageCount: count,
-      );
+    model: model,
+    images: images,
+    darkPage: darkPage,
+    highlights: highlights,
+    onLink: onLink,
+    pageNumber: number,
+    pageCount: count,
+  );
 
-  Color get pageColor =>
-      darkPage ? const Color(0xFF1F1F22) : Colors.white;
+  Color get pageColor => darkPage ? const Color(0xFF1F1F22) : Colors.white;
 
   Color get defaultText =>
       darkPage ? const Color(0xFFE6E6E6) : const Color(0xFF000000);
@@ -65,9 +64,7 @@ class DocRenderContext {
     final c = Color(argb);
     if (!darkPage) return c;
     final hsl = HSLColor.fromColor(c);
-    return hsl
-        .withLightness((1 - hsl.lightness).clamp(0.08, 0.35))
-        .toColor();
+    return hsl.withLightness((1 - hsl.lightness).clamp(0.08, 0.35)).toColor();
   }
 
   Color highlightColor(int argb) {
@@ -95,9 +92,24 @@ class DocImageCache {
 }
 
 const _serifHints = [
-  'times', 'cambria', 'georgia', 'garamond', 'antiqua', 'palatino',
-  'constantia', 'baskerville', 'bookman', 'century', 'minion', 'serif',
-  'caladea', 'didot', 'bodoni', 'perpetua', 'rockwell', 'sylfaen',
+  'times',
+  'cambria',
+  'georgia',
+  'garamond',
+  'antiqua',
+  'palatino',
+  'constantia',
+  'baskerville',
+  'bookman',
+  'century',
+  'minion',
+  'serif',
+  'caladea',
+  'didot',
+  'bodoni',
+  'perpetua',
+  'rockwell',
+  'sylfaen',
 ];
 const _monoHints = ['courier', 'consolas', 'mono', 'menlo', 'lucida console'];
 
@@ -134,8 +146,9 @@ TextStyle docTextStyle(
     fontWeight: s.bold ? FontWeight.w700 : FontWeight.w400,
     fontStyle: s.italic ? FontStyle.italic : FontStyle.normal,
     color: ctx.textColor(s.color),
-    backgroundColor:
-        s.highlight == null ? null : ctx.highlightColor(s.highlight!),
+    backgroundColor: s.highlight == null
+        ? null
+        : ctx.highlightColor(s.highlight!),
     decoration: decorations.isEmpty
         ? TextDecoration.none
         : TextDecoration.combine(decorations),
@@ -172,21 +185,37 @@ DocSpan buildParagraphSpan(
       : null;
   var offset = 0;
 
-  void placeholder(Size size, PlaceholderAlignment align, Widget Function() child) {
+  void placeholder(
+    Size size,
+    PlaceholderAlignment align,
+    Widget Function() child,
+  ) {
     dims.add(PlaceholderDimensions(size: size, alignment: align));
-    children.add(WidgetSpan(
-      alignment: align,
-      child: measure ? SizedBox(width: size.width, height: size.height) : child(),
-    ));
+    children.add(
+      WidgetSpan(
+        alignment: align,
+        child: measure
+            ? SizedBox(width: size.width, height: size.height)
+            : child(),
+      ),
+    );
   }
 
   if (p.firstLine > 0 && p.list == null) {
-    placeholder(Size(p.firstLine, 0), PlaceholderAlignment.bottom,
-        () => SizedBox(width: p.firstLine, height: 0));
+    placeholder(
+      Size(p.firstLine, 0),
+      PlaceholderAlignment.bottom,
+      () => SizedBox(width: p.firstLine, height: 0),
+    );
   }
 
-  void addText(String text, TextStyle style, DocRunStyle run, String? link,
-      int start) {
+  void addText(
+    String text,
+    TextStyle style,
+    DocRunStyle run,
+    String? link,
+    int start,
+  ) {
     if (text.isEmpty) return;
     GestureRecognizer? recognizer;
     if (link != null && !measure && ctx.onLink != null) {
@@ -195,7 +224,10 @@ DocSpan buildParagraphSpan(
       recognizer = r;
     }
     if (run.vertAlign != DocVertAlign.baseline) {
-      final small = style.copyWith(fontSize: (style.fontSize ?? 11) * 0.62, height: 1);
+      final small = style.copyWith(
+        fontSize: (style.fontSize ?? 11) * 0.62,
+        height: 1,
+      );
       final tp = TextPainter(
         text: TextSpan(text: text, style: small),
         textDirection: TextDirection.ltr,
@@ -233,26 +265,38 @@ DocSpan buildParagraphSpan(
       final s = (h.start - start).clamp(0, end);
       final e = (h.end - start).clamp(0, end);
       if (s > pos) {
-        children.add(TextSpan(
-            text: text.substring(pos, s), style: style, recognizer: recognizer));
+        children.add(
+          TextSpan(
+            text: text.substring(pos, s),
+            style: style,
+            recognizer: recognizer,
+          ),
+        );
       }
       if (e > s) {
-        children.add(TextSpan(
-          text: text.substring(s, e),
-          style: style.copyWith(
-            backgroundColor: h.current
-                ? const Color(0xFFFF9632)
-                : const Color(0xFFFFEB3B),
-            color: Colors.black,
+        children.add(
+          TextSpan(
+            text: text.substring(s, e),
+            style: style.copyWith(
+              backgroundColor: h.current
+                  ? const Color(0xFFFF9632)
+                  : const Color(0xFFFFEB3B),
+              color: Colors.black,
+            ),
+            recognizer: recognizer,
           ),
-          recognizer: recognizer,
-        ));
+        );
       }
       pos = e > pos ? e : pos;
     }
     if (pos < end) {
-      children.add(TextSpan(
-          text: text.substring(pos), style: style, recognizer: recognizer));
+      children.add(
+        TextSpan(
+          text: text.substring(pos),
+          style: style,
+          recognizer: recognizer,
+        ),
+      );
     }
   }
 
@@ -279,8 +323,11 @@ DocSpan buildParagraphSpan(
           addText(parts[i], style, run, inline.link, segStart);
           segStart += parts[i].length;
           if (i < parts.length - 1) {
-            placeholder(const Size(kDocTabWidth, 0), PlaceholderAlignment.bottom,
-                () => const SizedBox(width: kDocTabWidth, height: 0));
+            placeholder(
+              const Size(kDocTabWidth, 0),
+              PlaceholderAlignment.bottom,
+              () => const SizedBox(width: kDocTabWidth, height: 0),
+            );
             segStart += 1;
           }
         }
@@ -298,14 +345,22 @@ DocSpan buildParagraphSpan(
           w = maxWidth;
         }
         final id = inline.imageId;
-        placeholder(Size(w, h), PlaceholderAlignment.bottom,
-            () => DocImageBox(id: id, width: w, height: h, ctx: ctx));
+        placeholder(
+          Size(w, h),
+          PlaceholderAlignment.bottom,
+          () => DocImageBox(id: id, width: w, height: h, ctx: ctx),
+        );
         offset += 1;
       case DocObject():
         final t = inline.displayText ?? '';
         if (t.isNotEmpty) {
-          addText(t, docTextStyle(inline.style, ctx, lineHeight: multiple),
-              inline.style, null, offset);
+          addText(
+            t,
+            docTextStyle(inline.style, ctx, lineHeight: multiple),
+            inline.style,
+            null,
+            offset,
+          );
         }
         offset += t.length;
     }
@@ -395,11 +450,19 @@ class DocImageBox extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.image_not_supported_outlined,
-                  size: 18, color: Color(0x88000000)),
-              Text('$label image',
-                  style: const TextStyle(
-                      fontSize: 9, color: Color(0x88000000), inherit: false)),
+              const Icon(
+                Icons.image_not_supported_outlined,
+                size: 18,
+                color: Color(0x88000000),
+              ),
+              Text(
+                '$label image',
+                style: const TextStyle(
+                  fontSize: 9,
+                  color: Color(0x88000000),
+                  inherit: false,
+                ),
+              ),
             ],
           ),
         ),

@@ -39,7 +39,9 @@ class DocEditorSession {
   VoidCallback? onDirty;
 
   bool get hasPreservedObjects =>
-      side.tables.isNotEmpty || side.images.isNotEmpty || side.objects.isNotEmpty;
+      side.tables.isNotEmpty ||
+      side.images.isNotEmpty ||
+      side.objects.isNotEmpty;
 
   /// The document as currently edited.
   DocModel snapshot() {
@@ -62,23 +64,31 @@ class DocEditorSession {
 }
 
 TextStyle _ts(DocRunStyle s) => TextStyle(
-      fontSize: s.fontSize ?? 11,
-      fontFamily: s.fontFamily,
-      fontFamilyFallback: fontFallbackFor(s.fontFamily),
-      fontWeight: s.bold ? FontWeight.w700 : FontWeight.w400,
-      fontStyle: s.italic ? FontStyle.italic : FontStyle.normal,
-      color: s.color == null ? Colors.black : Color(s.color!),
-      decoration: TextDecoration.none,
-      height: 1.25,
-    );
+  fontSize: s.fontSize ?? 11,
+  fontFamily: s.fontFamily,
+  fontFamilyFallback: fontFallbackFor(s.fontFamily),
+  fontWeight: s.bold ? FontWeight.w700 : FontWeight.w400,
+  fontStyle: s.italic ? FontStyle.italic : FontStyle.normal,
+  color: s.color == null ? Colors.black : Color(s.color!),
+  decoration: TextDecoration.none,
+  height: 1.25,
+);
 
 DefaultStyles _editorStyles(DocModel m) {
   final base = _ts(m.baseStyle);
   DefaultTextBlockStyle block(TextStyle t, double top, double bottom) =>
-      DefaultTextBlockStyle(t, HorizontalSpacing.zero, VerticalSpacing(top, bottom),
-          VerticalSpacing.zero, null);
-  DefaultTextBlockStyle heading(int l) =>
-      block(_ts(m.headingStyles[l] ?? m.baseStyle), (m.headingSpacing[l] ?? 10).clamp(4, 24), 4);
+      DefaultTextBlockStyle(
+        t,
+        HorizontalSpacing.zero,
+        VerticalSpacing(top, bottom),
+        VerticalSpacing.zero,
+        null,
+      );
+  DefaultTextBlockStyle heading(int l) => block(
+    _ts(m.headingStyles[l] ?? m.baseStyle),
+    (m.headingSpacing[l] ?? 10).clamp(4, 24),
+    4,
+  );
   return DefaultStyles(
     paragraph: block(base, 0, 6),
     h1: heading(1),
@@ -87,19 +97,29 @@ DefaultStyles _editorStyles(DocModel m) {
     h4: heading(4),
     h5: heading(5),
     h6: heading(6),
-    lists: DefaultListBlockStyle(base, HorizontalSpacing.zero, const VerticalSpacing(0, 4),
-        VerticalSpacing.zero, null, null),
-    link: const TextStyle(color: Color(0xFF0563C1), decoration: TextDecoration.underline),
+    lists: DefaultListBlockStyle(
+      base,
+      HorizontalSpacing.zero,
+      const VerticalSpacing(0, 4),
+      VerticalSpacing.zero,
+      null,
+      null,
+    ),
+    link: const TextStyle(
+      color: Color(0xFF0563C1),
+      decoration: TextDecoration.underline,
+    ),
     placeHolder: block(base.copyWith(color: Colors.black38), 0, 0),
   );
 }
 
 /// Read-only rendering of preserved blocks inside the editor.
 class _TableEmbed extends EmbedBuilder {
-  _TableEmbed(this.model, this.side, this.ctx);
+  _TableEmbed(this.model, this.side, this.ctx, this.scale);
   final DocModel model;
   final DeltaSideTable side;
   final DocRenderContext ctx;
+  final double scale;
   final Map<String, LaidTable> _cache = {};
 
   @override
@@ -109,25 +129,44 @@ class _TableEmbed extends EmbedBuilder {
   Widget build(BuildContext context, EmbedContext embedContext) {
     final table = side.tables[embedContext.node.value.data];
     if (table == null) return const SizedBox.shrink();
-    return LayoutBuilder(builder: (context, c) {
-      final width = c.maxWidth.isFinite ? c.maxWidth : 600.0;
-      final key = '${embedContext.node.value.data}@${width.round()}';
-      final laid = _cache[key] ??= DocLayoutEngine(model, ctx).layoutTable(table, width);
-      return Tooltip(
-        message: 'Table (kept as is; not editable here)',
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: SizedBox(width: width, height: laid.height, child: laid.build(ctx)),
-        ),
-      );
-    });
+    return LayoutBuilder(
+      builder: (context, c) {
+        final width = c.maxWidth.isFinite ? c.maxWidth : 600.0;
+        final inner = width / scale;
+        final key = '${embedContext.node.value.data}@${inner.round()}';
+        final laid = _cache[key] ??= DocLayoutEngine(
+          model,
+          ctx,
+        ).layoutTable(table, inner);
+        return Tooltip(
+          message: 'Table (kept as is; not editable here)',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: SizedBox(
+              width: width,
+              height: laid.height * scale,
+              child: FittedBox(
+                fit: BoxFit.fill,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: inner,
+                  height: laid.height,
+                  child: laid.build(ctx),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
 class _ImageEmbed extends EmbedBuilder {
-  _ImageEmbed(this.side, this.ctx);
+  _ImageEmbed(this.side, this.ctx, this.scale);
   final DeltaSideTable side;
   final DocRenderContext ctx;
+  final double scale;
 
   @override
   String get key => OfficeEmbeds.image;
@@ -139,16 +178,18 @@ class _ImageEmbed extends EmbedBuilder {
   Widget build(BuildContext context, EmbedContext embedContext) {
     final img = side.images[embedContext.node.value.data];
     if (img == null) return const SizedBox.shrink();
-    return LayoutBuilder(builder: (context, c) {
-      var w = img.width <= 0 ? 144.0 : img.width;
-      var h = img.height <= 0 ? 108.0 : img.height;
-      final maxW = c.maxWidth.isFinite ? c.maxWidth : 600.0;
-      if (w > maxW) {
-        h = h * maxW / w;
-        w = maxW;
-      }
-      return DocImageBox(id: img.imageId, width: w, height: h, ctx: ctx);
-    });
+    return LayoutBuilder(
+      builder: (context, c) {
+        var w = (img.width <= 0 ? 144.0 : img.width) * scale;
+        var h = (img.height <= 0 ? 108.0 : img.height) * scale;
+        final maxW = c.maxWidth.isFinite ? c.maxWidth : 600.0;
+        if (w > maxW) {
+          h = h * maxW / w;
+          w = maxW;
+        }
+        return DocImageBox(id: img.imageId, width: w, height: h, ctx: ctx);
+      },
+    );
   }
 }
 
@@ -170,7 +211,10 @@ class _ObjectEmbed extends EmbedBuilder {
     if (o.kind == 'Footnote' || o.kind == 'Endnote') {
       return Transform.translate(
         offset: const Offset(0, -4),
-        child: Text(text, style: const TextStyle(fontSize: 9, color: Color(0xFF0563C1))),
+        child: Text(
+          text,
+          style: const TextStyle(fontSize: 9, color: Color(0xFF0563C1)),
+        ),
       );
     }
     final icon = switch (o.kind) {
@@ -191,16 +235,21 @@ class _ObjectEmbed extends EmbedBuilder {
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: const Color(0x22000000)),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 13, color: Colors.black54),
-          const SizedBox(width: 3),
-          Flexible(
-            child: Text(label,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: Colors.black54),
+            const SizedBox(width: 3),
+            Flexible(
+              child: Text(
+                label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: Colors.black54)),
-          ),
-        ]),
+                style: const TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -216,14 +265,19 @@ class _BreakEmbed extends EmbedBuilder {
   Widget build(BuildContext context, EmbedContext embedContext) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(children: [
-        const Expanded(child: Divider(color: Colors.black26)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(label, style: const TextStyle(fontSize: 11, color: Colors.black45)),
-        ),
-        const Expanded(child: Divider(color: Colors.black26)),
-      ]),
+      child: Row(
+        children: [
+          const Expanded(child: Divider(color: Colors.black26)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: Colors.black45),
+            ),
+          ),
+          const Expanded(child: Divider(color: Colors.black26)),
+        ],
+      ),
     );
   }
 }
@@ -264,6 +318,7 @@ class _DocEditorViewState extends State<DocEditorView> {
   final ScrollController _scroll = ScrollController();
   late List<EmbedBuilder> _builders;
   late DefaultStyles _styles;
+  double _scale = 1.25;
 
   @override
   void initState() {
@@ -281,8 +336,8 @@ class _DocEditorViewState extends State<DocEditorView> {
     final s = widget.session;
     final ctx = DocRenderContext(model: s.model, images: widget.images);
     _builders = [
-      _TableEmbed(s.model, s.side, ctx),
-      _ImageEmbed(s.side, ctx),
+      _TableEmbed(s.model, s.side, ctx, _scale),
+      _ImageEmbed(s.side, ctx, _scale),
       _ObjectEmbed(s.side),
       _BreakEmbed(OfficeEmbeds.pageBreak, 'Page break'),
       _BreakEmbed(OfficeEmbeds.section, 'Section break'),
@@ -299,7 +354,8 @@ class _DocEditorViewState extends State<DocEditorView> {
 
   Map<String, String> _fonts() {
     final fonts = <String>{
-      if (widget.session.model.baseStyle.fontFamily != null) widget.session.model.baseStyle.fontFamily!,
+      if (widget.session.model.baseStyle.fontFamily != null)
+        widget.session.model.baseStyle.fontFamily!,
       'Calibri',
       'Arial',
       'Times New Roman',
@@ -313,10 +369,33 @@ class _DocEditorViewState extends State<DocEditorView> {
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 600;
+    // Document text is in points; enlarge it a little for comfortable editing.
+    final scale = compact ? 1.25 : 1.4;
+    if (scale != _scale) {
+      _scale = scale;
+      _init();
+    }
     final controller = widget.session.controller;
     final scheme = Theme.of(context).colorScheme;
     final sizes = <String, String>{
-      for (final s in const [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72]) '$s': '$s',
+      for (final s in const [
+        8,
+        9,
+        10,
+        11,
+        12,
+        14,
+        16,
+        18,
+        20,
+        24,
+        28,
+        32,
+        36,
+        48,
+        72,
+      ])
+        '$s': '$s',
       'Clear': '0',
     };
 
@@ -358,7 +437,7 @@ class _DocEditorViewState extends State<DocEditorView> {
     );
 
     final page = widget.session.model.page;
-    final maxW = math.max(480.0, page.width * 1.25);
+    final maxW = math.max(480.0, page.width * scale + 96);
     final editor = Theme(
       data: ThemeData(
         brightness: Brightness.light,
@@ -367,18 +446,28 @@ class _DocEditorViewState extends State<DocEditorView> {
       ),
       child: DefaultTextStyle(
         style: _ts(widget.session.model.baseStyle),
-        child: QuillEditor(
-          controller: controller,
-          focusNode: _focus,
-          scrollController: _scroll,
-          config: QuillEditorConfig(
-            padding: EdgeInsets.fromLTRB(compact ? 18 : 48, 24, compact ? 18 : 48, 120),
-            placeholder: 'Start typing…',
-            embedBuilders: _builders,
-            unknownEmbedBuilder: _UnknownEmbed(),
-            customStyles: _styles,
-            onLaunchUrl: widget.onLink,
-            textCapitalization: TextCapitalization.sentences,
+        child: MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(scale)),
+          child: QuillEditor(
+            controller: controller,
+            focusNode: _focus,
+            scrollController: _scroll,
+            config: QuillEditorConfig(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 18 : 48,
+                24,
+                compact ? 18 : 48,
+                120,
+              ),
+              placeholder: 'Start typing…',
+              embedBuilders: _builders,
+              unknownEmbedBuilder: _UnknownEmbed(),
+              customStyles: _styles,
+              onLaunchUrl: widget.onLink,
+              textCapitalization: TextCapitalization.sentences,
+            ),
           ),
         ),
       ),
@@ -395,7 +484,10 @@ class _DocEditorViewState extends State<DocEditorView> {
             elevation: 1,
             child: compact
                 ? toolbar
-                : Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: toolbar),
+                : Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: toolbar,
+                  ),
           ),
           Expanded(
             child: Container(

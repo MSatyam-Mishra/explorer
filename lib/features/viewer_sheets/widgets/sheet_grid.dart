@@ -198,6 +198,7 @@ class _SheetGridState extends State<SheetGrid> {
     c.removeListener(_onController);
     if (c.onRevealCell == _reveal) c.onRevealCell = null;
     _autoScroll?.cancel();
+    _zoomTimer?.cancel();
     _v.dispose();
     _h.dispose();
     _delegate?.dispose();
@@ -296,9 +297,11 @@ class _SheetGridState extends State<SheetGrid> {
 
   void _reveal(int row, int col) {
     final geo = _geo;
-    if (geo == null || !_v.hasClients || !_h.hasClients) {
+    if (geo == null || !_v.hasClients || !_h.hasClients || _builtLayout != c.layoutVersion) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _geo != null && _v.hasClients) _reveal(row, col);
+        if (mounted && _geo != null && _v.hasClients && _builtLayout == c.layoutVersion) {
+          _reveal(row, col);
+        }
       });
       return;
     }
@@ -342,6 +345,38 @@ class _SheetGridState extends State<SheetGrid> {
     return geo.hit(local, v, h);
   }
 
+  /// Commits a pending edit before the selection moves. Returns false (and
+  /// reports why) when the edit can't be committed.
+  bool _commitBeforeSelect() {
+    if (!c.editing) return true;
+    final err = c.commitEdit();
+    if (err != null) {
+      widget.onMessage?.call(err);
+      return false;
+    }
+    return true;
+  }
+
+  /// Whether (r, col) is the active cell or part of its merged area.
+  bool _isActiveArea(int r, int col) {
+    final m = _mergeIndex[cellKey(r, col)];
+    return m == null ? (r == c.selRow && col == c.selCol) : m.contains(c.selRow, c.selCol);
+  }
+
+  /// True when [local] is on a column header's resize handle.
+  bool _onResizeHandle(Offset local) {
+    final geo = _geo;
+    if (geo == null || local.dy > geo.headerHeight) return false;
+    final hit = _hit(local);
+    if (hit == null || hit.$1 != 0 || hit.$2 == 0) return false;
+    final tc = hit.$2;
+    final h = _h.hasClients ? _h.offset : 0.0;
+    final right = tc < geo.pinnedCols
+        ? geo.colOffsets[tc + 1]
+        : geo.colOffsets[tc + 1] - geo.colOffsets[geo.pinnedCols] + geo.pinnedWidth - h;
+    return right - local.dx <= 14;
+  }
+
   // ---------------------------------------------------------------------------
   // Pointer handling
 
@@ -360,15 +395,15 @@ class _SheetGridState extends State<SheetGrid> {
     if (e.localPosition.dx > _builtSize.width - 14 || e.localPosition.dy > _builtSize.height - 14) {
       return;
     }
+    if (_onResizeHandle(e.localPosition)) return;
     final hit = _hit(e.localPosition);
     if (hit == null) return;
     final (tr, tc) = hit;
     final shift = HardwareKeyboard.instance.isShiftPressed;
-    if (tr == 0 && tc > 0 && _resizeCol != null) return;
     if (tr > 0 && tc > 0) {
       final r = tr - 1;
       final col = tc - 1;
-      if (c.editing && r == c.selRow && col == c.selCol && c.editOrigin == EditOrigin.cell) {
+      if (c.editing && _isActiveArea(r, col) && c.editOrigin == EditOrigin.cell) {
         return; // clicking inside the inline editor
       }
       if (c.canPointReference) {
@@ -378,6 +413,7 @@ class _SheetGridState extends State<SheetGrid> {
         _dragKind = _DragKind.cells;
         return;
       }
+      if (!_commitBeforeSelect()) return;
       final now = DateTime.now();
       final isDouble = _lastClickCell == (r, col) &&
           now.difference(_lastClick) < const Duration(milliseconds: 450);
@@ -390,6 +426,8 @@ class _SheetGridState extends State<SheetGrid> {
       }
       c.select(r, col, extend: shift);
       _dragKind = _DragKind.cells;
+    } else if (!_commitBeforeSelect()) {
+      return;
     } else if (tr == 0 && tc > 0) {
       final col = tc - 1;
       if (shift) {
@@ -422,8 +460,9 @@ class _SheetGridState extends State<SheetGrid> {
       if (_touches.length == 2 && start != null && start > 0) {
         final pts = _touches.values.toList();
         final d = (pts[0] - pts[1]).distance;
-        final focal = (pts[0] + pts[1]) / 2;
-        _applyZoom(_pinchStartZoom * d / start, focal);
+        _pendingZoom = (_pinchStartZoom * d / start, (pts[0] + pts[1]) / 2);
+        // Throttle relayouts: big sheets rebuild row metrics on every zoom.
+        _zoomTimer ??= Timer(Duration(milliseconds: c.displayRows > 20000 ? 120 : 40), _flushZoom);
       }
       return;
     }
@@ -431,9 +470,23 @@ class _SheetGridState extends State<SheetGrid> {
     _dragTo(e.localPosition);
   }
 
+  (double, Offset)? _pendingZoom;
+  Timer? _zoomTimer;
+
+  void _flushZoom() {
+    _zoomTimer?.cancel();
+    _zoomTimer = null;
+    final z = _pendingZoom;
+    _pendingZoom = null;
+    if (z != null && mounted) _applyZoom(z.$1, z.$2);
+  }
+
   void _onPointerUp(PointerEvent e) {
     _touches.remove(e.pointer);
-    if (_touches.length < 2) _pinchStartDistance = null;
+    if (_touches.length < 2) {
+      _pinchStartDistance = null;
+      if (_pendingZoom != null) _flushZoom();
+    }
     if (e.kind == PointerDeviceKind.mouse) {
       _mouseSelecting = false;
       _mousePointing = false;
@@ -535,6 +588,8 @@ class _SheetGridState extends State<SheetGrid> {
         c.pointReference(r, col, extend: shift);
         return;
       }
+      if (c.editing && _isActiveArea(r, col)) return;
+      if (!_commitBeforeSelect()) return;
       final m = _mergeIndex[cellKey(r, col)];
       final ar = m?.r1 ?? r;
       final ac = m?.c1 ?? col;
@@ -544,6 +599,8 @@ class _SheetGridState extends State<SheetGrid> {
         return;
       }
       c.select(r, col, extend: shift);
+    } else if (!_commitBeforeSelect()) {
+      return;
     } else if (tr == 0 && tc > 0) {
       final col = tc - 1;
       if (shift) {

@@ -140,7 +140,17 @@ class SpreadsheetController extends ChangeNotifier {
   bool get isCsv => workbook.format == SpreadsheetFormat.csv;
   bool get hasClipboard => _clip != null;
 
+  (int, int, int, int, int, int, Object)? _selKey;
+  CellRange? _selCache;
+
   CellRange get selection {
+    final key = (anchorRow, anchorCol, selRow, selCol, layoutVersion, contentVersion, sheet.merges);
+    if (_selKey == key && _selCache != null) return _selCache!;
+    _selKey = key;
+    return _selCache = _computeSelection();
+  }
+
+  CellRange _computeSelection() {
     var r = CellRange(anchorRow, anchorCol, selRow, selCol);
     if (sheet.merges.isEmpty) return r;
     for (var pass = 0; pass < 3; pass++) {
@@ -227,7 +237,8 @@ class SpreadsheetController extends ChangeNotifier {
 
   /// Selects a cell; [extend] keeps the anchor (shift-click / drag).
   void select(int row, int col, {bool extend = false, bool reveal = true}) {
-    if (editing) commitEdit();
+    // An invalid formula keeps the editor open (the caller shows why).
+    if (editing && commitEdit() != null) return;
     row = row.clamp(0, kMaxRows - 1);
     col = col.clamp(0, kMaxCols - 1);
     if (!extend) {
@@ -248,7 +259,7 @@ class SpreadsheetController extends ChangeNotifier {
   }
 
   void selectRange(CellRange r, {bool reveal = false}) {
-    if (editing) commitEdit();
+    if (editing && commitEdit() != null) return;
     anchorRow = r.r1;
     anchorCol = r.c1;
     selRow = r.r2;
@@ -273,7 +284,7 @@ class SpreadsheetController extends ChangeNotifier {
 
   /// Moves the active cell (arrow keys, Enter, Tab).
   void move(int dr, int dc, {bool extend = false, bool jump = false}) {
-    if (editing) commitEdit();
+    if (editing && commitEdit() != null) return;
     var r = selRow;
     var c = selCol;
     if (!extend) {
@@ -645,7 +656,7 @@ class SpreadsheetController extends ChangeNotifier {
 
   void activateSheet(int index) {
     if (index < 0 || index >= workbook.sheets.length || index == workbook.activeSheet) return;
-    if (editing) commitEdit();
+    if (editing && commitEdit() != null) cancelEdit();
     workbook.activeSheet = index;
     anchorRow = anchorCol = selRow = selCol = 0;
     _extraRows = _extraCols = 0;

@@ -72,7 +72,12 @@ class _Pinch {
 }
 
 class _ZoomPill extends StatelessWidget {
-  const _ZoomPill({required this.label, required this.onMinus, required this.onPlus, this.onReset});
+  const _ZoomPill({
+    required this.label,
+    required this.onMinus,
+    required this.onPlus,
+    this.onReset,
+  });
   final String label;
   final VoidCallback onMinus;
   final VoidCallback onPlus;
@@ -98,7 +103,10 @@ class _ZoomPill extends StatelessWidget {
             onTap: onReset,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
             ),
           ),
           IconButton(
@@ -160,7 +168,9 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
 
   @override
   void dispose() {
-    if (identical(widget.controller._target, this)) widget.controller._target = null;
+    if (identical(widget.controller._target, this)) {
+      widget.controller._target = null;
+    }
     _v.dispose();
     _h.dispose();
     super.dispose();
@@ -171,7 +181,8 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
 
   void _onScroll() {
     if (!_v.hasClients || _extents.isEmpty) return;
-    final probe = _v.offset + _v.position.viewportDimension * 0.35 - widget.topPadding;
+    final probe =
+        _v.offset + _v.position.viewportDimension * 0.35 - widget.topPadding;
     var acc = 0.0;
     var p = 0;
     for (var i = 0; i < _extents.length; i++) {
@@ -199,7 +210,9 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
     if (blockIndex < 0 || blockIndex >= r.blocks.length) return;
     final laid = r.blocks[blockIndex];
     var y = 0.0;
-    if (paragraph != null && laid is LaidParagraph && identical(laid.paragraph, paragraph)) {
+    if (paragraph != null &&
+        laid is LaidParagraph &&
+        identical(laid.paragraph, paragraph)) {
       y = laid.caretY(widget.ctx, offset);
     } else if (paragraph != null && laid is LaidTable) {
       y = laid.yOfParagraph(paragraph) ?? 0;
@@ -207,7 +220,10 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
     final loc = r.locate(blockIndex, y);
     if (loc == null || !_v.hasClients) return;
     final page = r.pages[loc.$1];
-    final target = _pageTop(loc.$1) + _gap / 2 + (page.setup.marginTop + loc.$2) * _scale -
+    final target =
+        _pageTop(loc.$1) +
+        _gap / 2 +
+        (page.setup.marginTop + loc.$2) * _scale -
         _v.position.viewportDimension * 0.3;
     _v.animateTo(
       target.clamp(0.0, _v.position.maxScrollExtent),
@@ -220,7 +236,9 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
     final nz = z.clamp(0.4, 5.0);
     if ((nz - _zoom).abs() < 0.001) return;
     final ratio = nz / _zoom;
-    final f = focal ?? Offset(0, _v.hasClients ? _v.position.viewportDimension / 2 : 0);
+    final f =
+        focal ??
+        Offset(0, _v.hasClients ? _v.position.viewportDimension / 2 : 0);
     setState(() => _zoom = nz);
     if (_v.hasClients) {
       final target = (_v.offset + f.dy) * ratio - f.dy;
@@ -241,105 +259,132 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
   @override
   Widget build(BuildContext context) {
     final r = widget.result;
-    return LayoutBuilder(builder: (context, c) {
-      final avail = c.maxWidth;
-      final maxW = r.pages.fold<double>(1, (m, p) => math.max(m, p.setup.width));
-      final readable = math.min(avail - 24, 900.0);
-      _scale = math.max(0.05, readable / maxW) * _zoom;
-      final scale = _scale;
-      _extents = [for (final p in r.pages) p.setup.height * scale + _gap];
-      final contentW = maxW * scale + 24;
-      final shadow = Theme.of(context).brightness == Brightness.dark
-          ? const Color(0x66000000)
-          : const Color(0x33000000);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final avail = c.maxWidth;
+        final maxW = r.pages.fold<double>(
+          1,
+          (m, p) => math.max(m, p.setup.width),
+        );
+        final readable = math.min(avail - 24, 900.0);
+        _scale = math.max(0.05, readable / maxW) * _zoom;
+        final scale = _scale;
+        _extents = [for (final p in r.pages) p.setup.height * scale + _gap];
+        final contentW = maxW * scale + 24;
+        final shadow = Theme.of(context).brightness == Brightness.dark
+            ? const Color(0x66000000)
+            : const Color(0x33000000);
 
-      Widget list = ListView.builder(
-        controller: _v,
-        physics: _pinching ? const NeverScrollableScrollPhysics() : null,
-        padding: EdgeInsets.only(top: widget.topPadding + 8, bottom: 96),
-        itemCount: r.pages.length,
-        itemExtentBuilder: (i, _) => i < _extents.length ? _extents[i] : null,
-        itemBuilder: (context, i) {
-          final s = r.pages[i].setup;
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: _gap / 2),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  boxShadow: [BoxShadow(color: shadow, blurRadius: 10, offset: const Offset(0, 3))],
-                ),
-                child: RepaintBoundary(
-                  child: SizedBox(
-                    width: s.width * scale,
-                    height: s.height * scale,
-                    child: FittedBox(
-                      fit: BoxFit.fill,
-                      alignment: Alignment.topLeft,
-                      child: DocPageView(result: r, pageIndex: i, ctx: widget.ctx),
+        Widget list = ListView.builder(
+          controller: _v,
+          physics: _pinching ? const NeverScrollableScrollPhysics() : null,
+          padding: EdgeInsets.only(top: widget.topPadding + 8, bottom: 96),
+          itemCount: r.pages.length,
+          itemExtentBuilder: (i, _) => i < _extents.length ? _extents[i] : null,
+          itemBuilder: (context, i) {
+            final s = r.pages[i].setup;
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: _gap / 2),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    boxShadow: [
+                      BoxShadow(
+                        color: shadow,
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: RepaintBoundary(
+                    child: SizedBox(
+                      width: s.width * scale,
+                      height: s.height * scale,
+                      child: FittedBox(
+                        fit: BoxFit.fill,
+                        alignment: Alignment.topLeft,
+                        child: DocPageView(
+                          result: r,
+                          pageIndex: i,
+                          ctx: widget.ctx,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          );
-        },
-      );
-      if (contentW > avail) {
-        list = Scrollbar(
-          controller: _h,
-          child: SingleChildScrollView(
-            controller: _h,
-            scrollDirection: Axis.horizontal,
-            physics: _pinching ? const NeverScrollableScrollPhysics() : null,
-            child: SizedBox(width: contentW, height: c.maxHeight, child: list),
-          ),
+            );
+          },
         );
-      }
-
-      return Listener(
-        onPointerDown: (e) {
-          _pinch.down(e, _zoom);
-          if (_pinch.active && !_pinching) setState(() => _pinching = true);
-        },
-        onPointerMove: (e) {
-          final z = _pinch.move(e);
-          if (z != null) _setZoom(z, focal: _pinch.focal());
-        },
-        onPointerUp: (e) {
-          if (_pinch.up(e)) setState(() => _pinching = false);
-        },
-        onPointerCancel: (e) {
-          if (_pinch.up(e)) setState(() => _pinching = false);
-        },
-        onPointerSignal: (e) {
-          if (e is PointerScrollEvent && HardwareKeyboard.instance.isControlPressed) {
-            GestureBinding.instance.pointerSignalResolver.register(e, (_) {
-              _setZoom(_zoom * (e.scrollDelta.dy > 0 ? 0.9 : 1.1), focal: e.localPosition);
-            });
-          }
-        },
-        child: Stack(
-          children: [
-            Positioned.fill(child: Scrollbar(controller: _v, child: list)),
-            Positioned(
-              left: 12,
-              bottom: 16 + MediaQuery.paddingOf(context).bottom,
-              child: _PageBadge(text: 'Page ${_page + 1} of ${r.pages.length}'),
-            ),
-            Positioned(
-              right: 12,
-              bottom: 12 + MediaQuery.paddingOf(context).bottom,
-              child: _ZoomPill(
-                label: '${(_zoom * 100).round()}%',
-                onMinus: () => _setZoom(_zoom / 1.25),
-                onPlus: () => _setZoom(_zoom * 1.25),
-                onReset: () => _setZoom(1),
+        if (contentW > avail) {
+          list = Scrollbar(
+            controller: _h,
+            child: SingleChildScrollView(
+              controller: _h,
+              scrollDirection: Axis.horizontal,
+              physics: _pinching ? const NeverScrollableScrollPhysics() : null,
+              child: SizedBox(
+                width: contentW,
+                height: c.maxHeight,
+                child: list,
               ),
             ),
-          ],
-        ),
-      );
-    });
+          );
+        }
+
+        return Listener(
+          onPointerDown: (e) {
+            _pinch.down(e, _zoom);
+            if (_pinch.active && !_pinching) setState(() => _pinching = true);
+          },
+          onPointerMove: (e) {
+            final z = _pinch.move(e);
+            if (z != null) _setZoom(z, focal: _pinch.focal());
+          },
+          onPointerUp: (e) {
+            if (_pinch.up(e)) setState(() => _pinching = false);
+          },
+          onPointerCancel: (e) {
+            if (_pinch.up(e)) setState(() => _pinching = false);
+          },
+          onPointerSignal: (e) {
+            if (e is PointerScrollEvent &&
+                HardwareKeyboard.instance.isControlPressed) {
+              GestureBinding.instance.pointerSignalResolver.register(e, (_) {
+                _setZoom(
+                  _zoom * (e.scrollDelta.dy > 0 ? 0.9 : 1.1),
+                  focal: e.localPosition,
+                );
+              });
+            }
+          },
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Scrollbar(controller: _v, child: list),
+              ),
+              Positioned(
+                left: 12,
+                bottom: 16 + MediaQuery.paddingOf(context).bottom,
+                child: _PageBadge(
+                  text: 'Page ${_page + 1} of ${r.pages.length}',
+                ),
+              ),
+              Positioned(
+                right: 12,
+                bottom: 12 + MediaQuery.paddingOf(context).bottom,
+                child: _ZoomPill(
+                  label: '${(_zoom * 100).round()}%',
+                  onMinus: () => _setZoom(_zoom / 1.25),
+                  onPlus: () => _setZoom(_zoom * 1.25),
+                  onReset: () => _setZoom(1),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -412,7 +457,9 @@ class _DocReflowViewState extends State<DocReflowView> implements _Revealer {
 
   @override
   void dispose() {
-    if (identical(widget.controller._target, this)) widget.controller._target = null;
+    if (identical(widget.controller._target, this)) {
+      widget.controller._target = null;
+    }
     _debounce?.cancel();
     _v.dispose();
     super.dispose();
@@ -459,15 +506,23 @@ class _DocReflowViewState extends State<DocReflowView> implements _Revealer {
     if (blocks == null || blockIndex >= blocks.length || !_v.hasClients) return;
     final laid = blocks[blockIndex];
     var y = 0.0;
-    if (paragraph != null && laid is LaidParagraph && identical(laid.paragraph, paragraph)) {
+    if (paragraph != null &&
+        laid is LaidParagraph &&
+        identical(laid.paragraph, paragraph)) {
       y = laid.caretY(widget.ctx, offset);
     } else if (paragraph != null && laid is LaidTable) {
       y = laid.yOfParagraph(paragraph) ?? 0;
     }
-    final target = widget.topPadding + 16 + (_offsets[blockIndex] + y) * _textScale -
+    final target =
+        widget.topPadding +
+        16 +
+        (_offsets[blockIndex] + y) * _textScale -
         _v.position.viewportDimension * 0.3;
-    _v.animateTo(target.clamp(0.0, _v.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
+    _v.animateTo(
+      target.clamp(0.0, _v.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _setScale(double s) {
@@ -486,82 +541,96 @@ class _DocReflowViewState extends State<DocReflowView> implements _Revealer {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, c) {
-      final avail = math.min(c.maxWidth, 900.0);
-      final width = math.max(120.0, (avail - 32) / _textScale);
-      if (_blocks == null || (width - _layoutWidth).abs() > 1) {
-        if ((width - _layoutWidth).abs() > 1) {
-          _layoutWidth = width;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _layout(width);
-          });
+    return LayoutBuilder(
+      builder: (context, c) {
+        final avail = math.min(c.maxWidth, 900.0);
+        final width = math.max(120.0, (avail - 32) / _textScale);
+        if (_blocks == null || (width - _layoutWidth).abs() > 1) {
+          if ((width - _layoutWidth).abs() > 1) {
+            _layoutWidth = width;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _layout(width);
+            });
+          }
+          if (_blocks == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
         }
-        if (_blocks == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
-      }
-      final blocks = _blocks!;
-      final scale = _textScale;
-      final preview = _pendingScale / _textScale;
-      Widget list = ListView.builder(
-        controller: _v,
-        padding: EdgeInsets.only(top: widget.topPadding + 16, bottom: 96),
-        itemCount: blocks.length,
-        itemBuilder: (context, i) {
-          final b = blocks[i];
-          if (b is LaidMarker) {
-            return SizedBox(
-              height: 24 * scale,
-              child: Center(
-                child: Container(
-                  height: 1,
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  color: widget.ctx.borderColor.withValues(alpha: 0.25),
+        final blocks = _blocks!;
+        final scale = _textScale;
+        final preview = _pendingScale / _textScale;
+        Widget list = ListView.builder(
+          controller: _v,
+          padding: EdgeInsets.only(top: widget.topPadding + 16, bottom: 96),
+          itemCount: blocks.length,
+          itemBuilder: (context, i) {
+            final b = blocks[i];
+            if (b is LaidMarker) {
+              return SizedBox(
+                height: 24 * scale,
+                child: Center(
+                  child: Container(
+                    height: 1,
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    color: widget.ctx.borderColor.withValues(alpha: 0.25),
+                  ),
+                ),
+              );
+            }
+            return Center(
+              child: SizedBox(
+                width: b.width * scale,
+                height: b.height * scale,
+                child: FittedBox(
+                  fit: BoxFit.fill,
+                  alignment: Alignment.topLeft,
+                  child: SizedBox(
+                    width: b.width,
+                    height: b.height,
+                    child: b.build(widget.ctx),
+                  ),
                 ),
               ),
             );
-          }
-          return Center(
-            child: SizedBox(
-              width: b.width * scale,
-              height: b.height * scale,
-              child: FittedBox(
-                fit: BoxFit.fill,
-                alignment: Alignment.topLeft,
-                child: SizedBox(width: b.width, height: b.height, child: b.build(widget.ctx)),
-              ),
-            ),
+          },
+        );
+        if ((preview - 1).abs() > 0.01) {
+          list = Transform.scale(
+            scale: preview,
+            alignment: Alignment.topCenter,
+            child: list,
           );
-        },
-      );
-      if ((preview - 1).abs() > 0.01) {
-        list = Transform.scale(scale: preview, alignment: Alignment.topCenter, child: list);
-      }
-      return Listener(
-        onPointerDown: (e) => _pinch.down(e, _pendingScale),
-        onPointerMove: (e) {
-          final z = _pinch.move(e);
-          if (z != null) _setScale(z);
-        },
-        onPointerUp: _pinch.up,
-        onPointerCancel: _pinch.up,
-        child: ColoredBox(
-          color: widget.ctx.pageColor,
-          child: Stack(children: [
-            Positioned.fill(child: Scrollbar(controller: _v, child: list)),
-            Positioned(
-              right: 12,
-              bottom: 12 + MediaQuery.paddingOf(context).bottom,
-              child: _ZoomPill(
-                label: 'Aa ${(_pendingScale * 100 / 1.3).round()}%',
-                onMinus: () => _setScale(_pendingScale / 1.15),
-                onPlus: () => _setScale(_pendingScale * 1.15),
-                onReset: () => _setScale(1.3),
-              ),
+        }
+        return Listener(
+          onPointerDown: (e) => _pinch.down(e, _pendingScale),
+          onPointerMove: (e) {
+            final z = _pinch.move(e);
+            if (z != null) _setScale(z);
+          },
+          onPointerUp: _pinch.up,
+          onPointerCancel: _pinch.up,
+          child: ColoredBox(
+            color: widget.ctx.pageColor,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Scrollbar(controller: _v, child: list),
+                ),
+                Positioned(
+                  right: 12,
+                  bottom: 12 + MediaQuery.paddingOf(context).bottom,
+                  child: _ZoomPill(
+                    label: 'Aa ${(_pendingScale * 100 / 1.3).round()}%',
+                    onMinus: () => _setScale(_pendingScale / 1.15),
+                    onPlus: () => _setScale(_pendingScale * 1.15),
+                    onReset: () => _setScale(1.3),
+                  ),
+                ),
+              ],
             ),
-          ]),
-        ),
-      );
-    });
+          ),
+        );
+      },
+    );
   }
 }

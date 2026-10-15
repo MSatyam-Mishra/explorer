@@ -80,7 +80,13 @@ abstract final class NumberFormats {
     final cached = _cache[code];
     if (cached != null) return cached;
     if (_cache.length > 2000) _cache.clear();
-    return _cache[code] = _Format.parse(code);
+    _Format f;
+    try {
+      f = _Format.parse(code);
+    } catch (_) {
+      f = _Format.parse('General');
+    }
+    return _cache[code] = f;
   }
 
   static bool isDateFormat(String code) => _compile(code).isDate;
@@ -94,9 +100,15 @@ abstract final class NumberFormats {
     if (value == null) return const FormattedValue('');
     if (value is bool) return FormattedValue(value ? 'TRUE' : 'FALSE');
     if (value is CellError) return FormattedValue(value.code);
-    final fmt = _compile(code);
-    if (value is String) return fmt.formatText(value);
-    if (value is num) return fmt.formatNumber(value.toDouble(), date1904);
+    try {
+      final fmt = _compile(code);
+      if (value is String) return fmt.formatText(value);
+      if (value is num) return fmt.formatNumber(value.toDouble(), date1904);
+    } catch (_) {
+      // Unusual format codes must never break rendering.
+      if (value is num) return FormattedValue(formatGeneral(value.toDouble()));
+      if (value is String) return FormattedValue(value);
+    }
     return FormattedValue(value.toString());
   }
 
@@ -160,6 +172,7 @@ abstract final class NumberFormats {
   }
 
   static String _toFixed(double v, int decimals) {
+    if (decimals > 20) decimals = 20;
     // Round on the 15-significant-digit representation first so 2.675 shows
     // as 2.68 like Excel instead of the binary 2.67499.
     final adj = double.parse(v.toStringAsPrecision(15));

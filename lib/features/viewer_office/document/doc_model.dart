@@ -65,11 +65,15 @@ class DocRunStyle {
       allCaps: allCaps ?? this.allCaps,
       smallCaps: smallCaps ?? this.smallCaps,
       color: identical(color, _unset) ? this.color : color as int?,
-      highlight:
-          identical(highlight, _unset) ? this.highlight : highlight as int?,
-      fontSize: identical(fontSize, _unset) ? this.fontSize : fontSize as double?,
-      fontFamily:
-          identical(fontFamily, _unset) ? this.fontFamily : fontFamily as String?,
+      highlight: identical(highlight, _unset)
+          ? this.highlight
+          : highlight as int?,
+      fontSize: identical(fontSize, _unset)
+          ? this.fontSize
+          : fontSize as double?,
+      fontFamily: identical(fontFamily, _unset)
+          ? this.fontFamily
+          : fontFamily as String?,
       vertAlign: vertAlign ?? this.vertAlign,
     );
   }
@@ -90,8 +94,19 @@ class DocRunStyle {
       other.vertAlign == vertAlign;
 
   @override
-  int get hashCode => Object.hash(bold, italic, underline, strike, allCaps,
-      smallCaps, color, highlight, fontSize, fontFamily, vertAlign);
+  int get hashCode => Object.hash(
+    bold,
+    italic,
+    underline,
+    strike,
+    allCaps,
+    smallCaps,
+    color,
+    highlight,
+    fontSize,
+    fontFamily,
+    vertAlign,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +116,14 @@ sealed class DocInline {}
 
 /// A run of text. Tabs are `\t`, soft line breaks are `\n`.
 class DocText extends DocInline {
-  DocText(this.text, this.style, {this.link, this.raw, this.field, this.origin});
+  DocText(
+    this.text,
+    this.style, {
+    this.link,
+    this.raw,
+    this.field,
+    this.origin,
+  });
 
   String text;
   DocRunStyle style;
@@ -316,8 +338,7 @@ class DocParagraph extends DocBlock {
     return sb.toString();
   }
 
-  bool get isEmpty =>
-      inlines.every((i) => i is DocText && i.text.isEmpty);
+  bool get isEmpty => inlines.every((i) => i is DocText && i.text.isEmpty);
 }
 
 class DocTableCell {
@@ -343,8 +364,12 @@ class DocTableCell {
 }
 
 class DocTableRow {
-  DocTableRow({List<DocTableCell>? cells, this.height, this.exactHeight = false, this.header = false})
-      : cells = cells ?? [];
+  DocTableRow({
+    List<DocTableCell>? cells,
+    this.height,
+    this.exactHeight = false,
+    this.header = false,
+  }) : cells = cells ?? [];
 
   List<DocTableCell> cells;
   double? height;
@@ -363,8 +388,8 @@ class DocTable extends DocBlock {
     this.indent = 0,
     this.cellPadding = 5.4,
     this.raw,
-  })  : rows = rows ?? [],
-        columnWidths = columnWidths ?? [];
+  }) : rows = rows ?? [],
+       columnWidths = columnWidths ?? [];
 
   List<DocTableRow> rows;
   List<double> columnWidths;
@@ -462,8 +487,8 @@ class DocxSourceInfo {
     this.bodySectPr,
     Map<String, String>? hyperlinkTargets,
     Set<String>? headingStyleSet,
-  })  : hyperlinkTargets = hyperlinkTargets ?? {},
-        headingStyleSet = headingStyleSet ?? {};
+  }) : hyperlinkTargets = hyperlinkTargets ?? {},
+       headingStyleSet = headingStyleSet ?? {};
 
   final String mainPart;
   final Map<int, String> headingStyleIds;
@@ -492,12 +517,12 @@ class DocModel {
     List<String>? warnings,
     this.docx,
     this.title,
-  })  : images = images ?? {},
-        headingStyles = headingStyles ?? defaultHeadingStyles(baseStyle),
-        headingSpacing = headingSpacing ?? {},
-        header = header ?? [],
-        footer = footer ?? [],
-        warnings = warnings ?? [];
+  }) : images = images ?? {},
+       headingStyles = headingStyles ?? defaultHeadingStyles(baseStyle),
+       headingSpacing = headingSpacing ?? {},
+       header = header ?? [],
+       footer = footer ?? [],
+       warnings = warnings ?? [];
 
   /// Source format id: `docx`, `doc`, `rtf`, `odt`, `wps`, `txt`.
   final String format;
@@ -673,7 +698,21 @@ String _letters(int n) {
 String _roman(int n) {
   if (n <= 0 || n >= 4000) return '$n';
   const vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
-  const syms = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+  const syms = [
+    'M',
+    'CM',
+    'D',
+    'CD',
+    'C',
+    'XC',
+    'L',
+    'XL',
+    'X',
+    'IX',
+    'V',
+    'IV',
+    'I',
+  ];
   final sb = StringBuffer();
   var v = n;
   for (var i = 0; i < vals.length; i++) {
@@ -687,8 +726,14 @@ String _roman(int n) {
 
 /// Statistics shown in the info sheet.
 class DocStats {
-  DocStats(this.words, this.characters, this.charactersNoSpaces,
-      this.paragraphs, this.tables, this.images);
+  DocStats(
+    this.words,
+    this.characters,
+    this.charactersNoSpaces,
+    this.paragraphs,
+    this.tables,
+    this.images,
+  );
 
   final int words;
   final int characters;
