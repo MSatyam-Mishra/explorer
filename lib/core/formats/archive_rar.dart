@@ -76,6 +76,7 @@ class RarBackend extends ArcBackend {
     koni.ByteSource first, {
     VolumeResolver? nextVolume,
     String Function(int number)? volumeName,
+    bool Function(int number)? volumeExists,
     String? password,
     ArcLimits limits = const ArcLimits(),
   }) async {
@@ -152,7 +153,10 @@ class RarBackend extends ArcBackend {
         addVolume(next, (await parse(next)).files);
         number++;
       }
-      if (expectingContinuation) {
+      // A gap: a later part exists although this one doesn't.
+      final gap = volumeExists != null &&
+          (volumeExists(number + 1) || volumeExists(number + 2));
+      if (expectingContinuation || gap) {
         final missing = volumeName?.call(number) ?? 'volume $number';
         throw ArcException(
           ArcErrorKind.missingVolume,
@@ -610,10 +614,18 @@ class _SolidRun {
   Future<Uint8List> decodeTo(int index) async {
     if (_r5 == null && _r4 == null) await _init();
     Uint8List? result;
+    var seekTotal = 0, seekDone = 0;
+    for (var i = nextIndex; i < index; i++) {
+      seekTotal += _h[i].isDirectory ? 0 : _h[i].unpackedSize;
+    }
     for (var i = nextIndex; i <= index; i++) {
       final h = _h[i];
       nextIndex = i + 1;
       if (h.isDirectory) continue;
+      if (i < index && seekTotal > 0) {
+        owner.onSeek?.call(seekDone / seekTotal);
+        seekDone += h.unpackedSize;
+      }
       _ensureRoom(h.unpackedSize);
       final start = _ptr;
       final data = await owner._readData(i, h);

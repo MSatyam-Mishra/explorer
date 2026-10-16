@@ -141,6 +141,10 @@ abstract class ArcBackend {
   /// [ArcEntry.index] order; random access still works but costs more.
   bool get isSequential => false;
 
+  /// Called while a sequential backend decodes data stored before the
+  /// entry being read (solid RAR, compressed TAR), with the share done.
+  void Function(double fraction)? onSeek;
+
   /// Streams the decoded bytes of [entry]. Errors are [ArcException]s,
   /// thrown synchronously or delivered through the stream. Cancelling the
   /// subscription stops decoding.

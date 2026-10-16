@@ -559,6 +559,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   Future<bool> _save({required bool asCopy}) async {
     if (_busy || _latestBytes == null) return false;
+    // A PDF-compatible file of another type (e.g. an Illustrator .ai opened
+    // as PDF) would lose its own data if overwritten with a plain PDF.
+    asCopy = asCopy || p.extension(_file.path).toLowerCase() != '.pdf';
     _setBusy(asCopy ? 'Saving a copy…' : 'Saving…');
     try {
       final out = await _bytesForDisk();

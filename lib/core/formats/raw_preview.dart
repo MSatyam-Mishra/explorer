@@ -294,8 +294,10 @@ class _RawScanner {
     }
     // Nothing usable from the structure (unknown layout, generic .raw,
     // damaged file): look for JPEG streams directly.
+    // Embedded JPEGs sit near the start in the layouts seen so far, so the
+    // scan is bounded; less so when an uncompressed thumbnail was found.
     if (!_found.any((j) => j.longSide >= 640 && j.endVerified)) {
-      _scanForJpegs();
+      _scanForJpegs(limit: _rgb == null ? 48 << 20 : 8 << 20);
     }
     // The previews' own EXIF fills gaps (RAF, RW2 and X3F keep camera
     // settings there).
@@ -412,9 +414,9 @@ class _RawScanner {
   }
 
   /// Last resort: finds displayable JPEG streams by their markers.
-  void _scanForJpegs() {
+  void _scanForJpegs({required int limit}) {
     const chunk = 1 << 20;
-    final limit = math.min(src.length, 512 * 1024 * 1024);
+    limit = math.min(src.length, limit);
     var pos = 0;
     var found = 0;
     while (pos < limit && found < 16) {

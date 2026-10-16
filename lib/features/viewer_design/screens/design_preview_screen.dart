@@ -606,6 +606,10 @@ class _EmptyState extends StatelessWidget {
       for (final k in keys)
         if (preview.details[k] != null) (k, preview.details[k]!),
     ].take(4).toList();
+    final message = preview.note ??
+        (preview.pdfCompatible
+            ? "The artwork couldn't be rendered here. Try opening it as a PDF."
+            : null);
 
     return ColoredBox(
       color: scheme.surfaceContainerLow,
@@ -646,10 +650,10 @@ class _EmptyState extends StatelessWidget {
                       style: theme.textTheme.bodyMedium
                           ?.copyWith(color: scheme.onSurfaceVariant),
                     ),
-                    if (preview.note != null) ...[
+                    if (message != null) ...[
                       const SizedBox(height: 12),
                       Text(
-                        preview.note!,
+                        message,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium,
                       ),

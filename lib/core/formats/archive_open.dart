@@ -290,6 +290,10 @@ Future<ArcOpened> openArchive(
           volumeName: (n) => p.basename(
             isMulti ? set.pathOf(n) : _guessRarVolume(firstPath, n),
           ),
+          volumeExists: (n) {
+            final next = isMulti ? set.pathOf(n) : _guessRarVolume(firstPath, n);
+            return next.isNotEmpty && File(next).existsSync();
+          },
           nextVolume: (n) async {
             final next = isMulti ? set.pathOf(n) : _guessRarVolume(firstPath, n);
             if (next.isEmpty || !File(next).existsSync()) return null;

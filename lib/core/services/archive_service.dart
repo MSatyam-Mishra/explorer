@@ -1,14 +1,20 @@
 import 'dart:io';
-import 'package:archive/archive.dart';
-import 'package:archive/archive_io.dart';
-import 'package:path/path.dart' as p;
-// import 'package:rar/rar.dart';
 
+import 'package:archive/archive_io.dart';
+import 'package:explorer/core/formats/archive_backend.dart';
+import 'package:explorer/core/formats/archive_extract.dart';
+import 'package:explorer/core/formats/archive_open.dart';
+import 'package:explorer/core/formats/archive_session.dart';
+import 'package:path/path.dart' as p;
+
+/// A listed archive member (kept for callers of [ArchiveService.listContents]).
 class ArchiveItem {
   final String name;
   final int size;
   final bool isFile;
-  final dynamic originalObject; // ArchiveFile (zip/tar) or String (rar path)
+
+  /// The underlying [ArcEntry].
+  final dynamic originalObject;
 
   ArchiveItem({
     required this.name,
@@ -18,143 +24,50 @@ class ArchiveItem {
   });
 }
 
+/// Archive helpers for the rest of the app.
+///
+/// Reading goes through the format-neutral readers in `lib/core/formats/`
+/// (ZIP family, TAR + gzip/bzip2/xz, RAR 4/5, 7z, ISO 9660/UDF). Prefer
+/// [ArchiveSession]/[ExtractJob] from UI code: they run in background
+/// isolates. The methods here run on the caller's isolate.
 class ArchiveService {
-  /// Lists contents of an archive file.
-  /// Supports: .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tar.xz, .rar
-  Future<List<ArchiveItem>> listContents(File file) async {
-    final extension = p.extension(file.path).toLowerCase();
-
-    // Check for double extension for tar.gz, tar.xz etc if the main extension is .gz or .xz
-    // Actually path.extension only gives last part.
-    // We handle logic inside.
-
-    if (extension == '.rar') {
-      // return _listRar(file);
-      throw Exception(".rar support temporarily disabled");
-    }
-
-    final bytes = await file.readAsBytes();
-    Archive? archive;
-
+  /// Lists the contents of [file] (format detected from content).
+  Future<List<ArchiveItem>> listContents(File file, {String? password}) async {
+    final opened = await openArchive(file.path, password: password);
     try {
-      if (extension == '.zip' || extension == '.cbz' || extension == '.jar') {
-        archive = ZipDecoder().decodeBytes(bytes);
-      } else if (extension == '.tar') {
-        archive = TarDecoder().decodeBytes(bytes);
-      } else if (extension == '.gz' || extension == '.tgz') {
-        // GZip -> Tar?
-        final decoded = GZipDecoder().decodeBytes(bytes);
-        // If it's a tar.gz, the decoded bytes are a TAR file.
-        // We usually check if it is a tar.
-        // Simple check: try decoding as tar.
-        try {
-          archive = TarDecoder().decodeBytes(decoded);
-        } catch (_) {
-          // Not a tar, just a single GZipped file?
-          // For file manager, we might just show the "content" file.
-          // But usually .tgz implies tar.
-        }
-      } else if (extension == '.bz2') {
-        final decoded = BZip2Decoder().decodeBytes(bytes);
-        try {
-          archive = TarDecoder().decodeBytes(decoded);
-        } catch (_) {}
-      } else if (extension == '.xz') {
-        final decoded = XZDecoder().decodeBytes(bytes);
-        try {
-          archive = TarDecoder().decodeBytes(decoded);
-        } catch (_) {}
-      }
-    } catch (e) {
-      throw Exception("Failed to decode archive: $e");
+      return [
+        for (final e in opened.backend.entries)
+          ArchiveItem(
+            name: e.path,
+            size: e.size,
+            isFile: !e.isDirectory,
+            originalObject: e,
+          ),
+      ];
+    } finally {
+      await opened.backend.close();
     }
-
-    if (archive != null) {
-      return archive.files
-          .map(
-            (f) => ArchiveItem(
-              name: f.name,
-              size: f.size,
-              isFile: f.isFile,
-              originalObject: f,
-            ),
-          )
-          .toList();
-    }
-
-    throw Exception("Unsupported or invalid archive format");
   }
 
-  /*
-  Future<List<ArchiveItem>> _listRar(File file) async {
-    final result = await Rar.listRarContents(rarFilePath: file.path);
-    if (result['success'] == true && result['files'] != null) {
-      final fileList = result['files'] as List;
-      return fileList.map((f) {
-        final path = f.toString();
-        // Rar package doesn't give isFile/size info in list easily without parsing
-        // We assume file for now.
-        return ArchiveItem(
-          name: path,
-          size: 0,
-          isFile: true,
-          originalObject: path,
-        );
-      }).toList();
+  /// Extracts the whole archive into [destination] in a background isolate,
+  /// replacing existing files. Throws [ArcException] on failure.
+  Future<ExtractResult> extractAll(
+    File archiveFile,
+    Directory destination, {
+    String? password,
+    ConflictPolicy policy = ConflictPolicy.overwrite,
+  }) async {
+    final job = await ExtractJob.start(ExtractRequest(
+      archivePath: archiveFile.path,
+      destination: destination.path,
+      password: password,
+      policy: policy == ConflictPolicy.ask ? ConflictPolicy.overwrite : policy,
+    ));
+    await for (final event in job.events) {
+      if (event is ExtractDone) return event.result;
+      if (event is ExtractFailed) throw event.error;
     }
-    throw Exception(result['message'] ?? 'Failed to list RAR contents');
-  }
-*/
-
-  /// Extracts the entire archive to destination
-  Future<void> extractAll(File archiveFile, Directory destination) async {
-    final extension = p.extension(archiveFile.path).toLowerCase();
-
-    if (!await destination.exists()) {
-      await destination.create(recursive: true);
-    }
-
-    if (extension == '.rar') {
-      /*
-      final result = await Rar.extractRarFile(
-        rarFilePath: archiveFile.path,
-        destinationPath: destination.path,
-      );
-      if (result['success'] != true) {
-        throw Exception(result['message']);
-      }
-      */
-      throw Exception(".rar support temporarily disabled");
-      // return;
-    }
-
-    // Reuse logic: decode archive then write files
-    // But listContents reads bytes into memory. For extraction of huge files,
-    // we might want streams (InputFileStream), but 'archive' package
-    // usage details: ZipDecoder().decodeBuffer(InputFileStream...)
-
-    // For now, simpler implementation matching existing memory-based approach
-    // but refactored.
-
-    // Load Items first (this loads into memory... efficient?)
-    // Archive package generally loads into memory unless using InputFileStream.
-    // Let's use InputFileStream for cleaner handling if possible, or just bytes for now since we did that before.
-
-    final items = await listContents(archiveFile);
-
-    for (final item in items) {
-      if (item.originalObject is ArchiveFile) {
-        final file = item.originalObject as ArchiveFile;
-        final filePath = p.join(destination.path, file.name);
-        if (file.isFile) {
-          final outFile = File(filePath);
-          await outFile.parent.create(recursive: true);
-          await outFile.writeAsBytes(file.content as List<int>);
-        } else {
-          await Directory(filePath).create(recursive: true);
-        }
-      }
-    }
+    throw ArcException(ArcErrorKind.io, 'Extraction stopped unexpectedly.');
   }
 
   /// Compresses a list of files into a destination .zip file

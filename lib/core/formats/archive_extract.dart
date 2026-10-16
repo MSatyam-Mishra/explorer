@@ -72,6 +72,7 @@ class ExtractProgress extends ExtractEvent {
     required this.totalFiles,
     required this.current,
     this.tempPath,
+    this.seeking,
   });
 
   final int doneBytes;
@@ -83,6 +84,10 @@ class ExtractProgress extends ExtractEvent {
   /// File being written right now (deleted by the caller after a hard
   /// cancel).
   final String? tempPath;
+
+  /// While a solid/streamed archive decodes the data stored before the
+  /// current file: the share of that work done.
+  final double? seeking;
 
   double? get fraction => totalBytes > 0
       ? (doneBytes / totalBytes).clamp(0.0, 1.0)
@@ -328,7 +333,12 @@ Future<ExtractResult> runExtraction(
   var doneBytes = 0;
   var doneFiles = 0;
   var lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
-  void progress(String current, String? temp, {bool force = false}) {
+  void progress(
+    String current,
+    String? temp, {
+    bool force = false,
+    double? seeking,
+  }) {
     final now = DateTime.now();
     if (!force && now.difference(lastEmit).inMilliseconds < 80) return;
     lastEmit = now;
@@ -339,6 +349,7 @@ Future<ExtractResult> runExtraction(
       totalFiles: items.length,
       current: current,
       tempPath: temp,
+      seeking: seeking,
     ));
   }
 
@@ -372,6 +383,7 @@ Future<ExtractResult> runExtraction(
     final cap = e.size >= 0
         ? e.size
         : _ratioCap(archiveSize ?? 0);
+    backend.onSeek = (f) => progress(e.path, temp, seeking: f);
     try {
       out = await File(temp).open(mode: FileMode.write);
       if (e.size != 0) {
@@ -415,6 +427,7 @@ Future<ExtractResult> runExtraction(
           await File(target).setLastModified(m.toLocal());
         } catch (_) {}
       }
+      backend.onSeek = null;
       result.files++;
       result.bytes += written;
       result.firstFile ??= target;
@@ -423,6 +436,7 @@ Future<ExtractResult> runExtraction(
       doneFiles++;
       if (req.reportEachFile) emit(ExtractFileDone(e.index, target));
     } catch (err) {
+      backend.onSeek = null;
       try {
         await out?.close();
       } catch (_) {}

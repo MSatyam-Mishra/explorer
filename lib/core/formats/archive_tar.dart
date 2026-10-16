@@ -428,7 +428,14 @@ class TarBackend extends ArcBackend {
     }
     cursor.busy = true;
     try {
-      await cursor.skip(item.dataOffset - cursor.pos);
+      final gap = item.dataOffset - cursor.pos;
+      var skipped = 0;
+      while (skipped < gap) {
+        final step = gap - skipped < (8 << 20) ? gap - skipped : 8 << 20;
+        await cursor.skip(step);
+        skipped += step;
+        if (gap > (8 << 20)) onSeek?.call(skipped / gap);
+      }
       var left = bare ? 1 << 62 : item.size;
       while (left > 0) {
         final chunk = await cursor.next(left < (1 << 20) ? left : 1 << 20);
