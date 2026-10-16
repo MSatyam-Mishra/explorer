@@ -68,6 +68,18 @@ android {
     }
 }
 
+// One versionCode for every APK (per-ABI splits and the universal one), so
+// users can update from any of them to any other. Flutter's split builds add
+// per-ABI offsets meant for multi-APK Play Store uploads, which this project
+// doesn't use. Registered after the Flutter plugin's hook, so this runs last.
+@Suppress("DEPRECATION")
+android.applicationVariants.configureEach {
+    val code = versionCode
+    outputs.configureEach {
+        (this as com.android.build.gradle.api.ApkVariantOutput).versionCodeOverride = code
+    }
+}
+
 flutter {
     source = "../.."
 }
