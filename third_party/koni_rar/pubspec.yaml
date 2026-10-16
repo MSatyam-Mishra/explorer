@@ -1,0 +1,14 @@
+name: koni_rar
+description: >-
+  Clean-room RAR4/RAR5 reader for the koni_archive ecosystem, including CBR comic archives.
+version: 0.9.0+explorer.1
+repository: https://github.com/zenbaku/koni_archive
+topics:
+  - archive
+  - rar
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  koni_archive_core: ^0.9.0
+  koni_codecs: ^0.9.0

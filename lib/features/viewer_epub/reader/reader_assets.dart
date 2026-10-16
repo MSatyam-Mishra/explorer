@@ -1,9 +1,10 @@
 /// Reader stylesheet and script injected into every book document.
 ///
-/// Served by the book's loopback mount at `__er__/reader.css` and
-/// `__er__/reader.js`. The script reads `window.__ER_CONFIG__` (inlined per
-/// load) and talks to Flutter through the `er` JavaScript handler with
-/// `(type, jsonPayload)`.
+/// Both are inlined into the document's head (no extra requests before the
+/// first layout). The script reads `window.__ER_CONFIG__` (set per load
+/// right before it) and talks to Flutter through the `er` JavaScript
+/// handler with `(type, jsonPayload)`. Neither may contain `]]>` or
+/// `</script`/`</style` (they sit in CDATA in XHTML and raw text in HTML).
 library;
 
 const String kReaderCss = r'''
@@ -554,7 +555,9 @@ const String kReaderJs = r'''
   }
   function goToFraction(f) {
     f = clamp(+f || 0, 0, 1);
-    if (st.paginated) goToPage(Math.floor(f * st.pages + 1e-6));
+    // Tolerance: positions saved by older versions were rounded to 5
+    // decimals, which could otherwise land one page early.
+    if (st.paginated) goToPage(Math.floor(f * st.pages + 0.01));
     else scrollToXY(0, f * docHeight());
   }
   function currentFraction() {
@@ -675,17 +678,19 @@ const String kReaderJs = r'''
     }
   }
 
+  // Explicit navigation: the reading position is wherever it lands.
   function userMoved() {
     st.stickEnd = false;
     st.pending = null;
     st.focusRange = null;
+    st.anchor = null;
   }
 
   function relocated() {
     if (!st.ready) return;
     post('relocated', state());
     clearTimeout(st.anchorTimer);
-    st.anchorTimer = setTimeout(captureAnchor, 450);
+    if (!st.anchor) st.anchorTimer = setTimeout(captureAnchor, 450);
   }
 
   function relayout(force) {
@@ -702,13 +707,18 @@ const String kReaderJs = r'''
     if (st.focusRange) goToRange(st.focusRange, true);
     else if (st.pending && st.pending.type === 'fragment') goToFragment(st.pending.id);
     else if (st.stickEnd) goToEnd();
-    else if (anchor && anchor.startContainer && doc.contains(anchor.startContainer)) goToRange(anchor);
+    else if (anchor && anchor.startContainer && doc.contains(anchor.startContainer)) {
+      goToRange(anchor);
+      // Keep the original anchor: re-capturing it from the top of the page
+      // it landed on would move the position back on every relayout.
+      st.anchor = anchor;
+    }
     else goToFraction(frac);
     var s = state();
     s.anchors = anchorPages();
     post('layout', s);
     clearTimeout(st.anchorTimer);
-    st.anchorTimer = setTimeout(captureAnchor, 80);
+    if (!st.anchor) st.anchorTimer = setTimeout(captureAnchor, 80);
   }
   var relayoutTimer = 0;
   function scheduleRelayout(delay, force) {

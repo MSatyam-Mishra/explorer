@@ -154,7 +154,14 @@ class ReaderSettings {
         'spreads': spreads,
       };
 
-  static Future<ReaderSettings> load() async {
+  /// The settings last loaded or saved in this process, so a reader can
+  /// paint its first frame in the right theme before [load] completes.
+  static ReaderSettings? lastKnown;
+
+  static Future<ReaderSettings> load() async =>
+      lastKnown = await _read();
+
+  static Future<ReaderSettings> _read() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_prefsKey);
@@ -170,6 +177,7 @@ class ReaderSettings {
   }
 
   Future<void> save() async {
+    lastKnown = this;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefsKey, jsonEncode(toJson()));

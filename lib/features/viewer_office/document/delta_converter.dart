@@ -22,8 +22,13 @@ class DeltaSideTable {
   final Map<String, DocImage> images = {};
   final Map<String, DocObject> objects = {};
   final Map<String, DocSectionBreak> sections = {};
+  final Map<String, DocPageBreak> pageBreaks = {};
   final List<DocParagraph> paragraphs = [];
   final List<DocText> runs = [];
+
+  /// Heading level of the paragraph each of [runs] came from (its Quill
+  /// attributes are relative to that paragraph's base style).
+  final List<int?> runHeadings = [];
   int _next = 0;
 
   String id(String prefix) => '$prefix${_next++}';
@@ -121,7 +126,9 @@ DeltaDocument modelToDelta(DocModel m) {
         side.tables[id] = b;
         blockEmbed(OfficeEmbeds.table, id);
       case DocPageBreak():
-        blockEmbed(OfficeEmbeds.pageBreak, 'page');
+        final id = side.id('b');
+        side.pageBreaks[id] = b;
+        blockEmbed(OfficeEmbeds.pageBreak, id);
       case DocSectionBreak():
         final id = side.id('s');
         side.sections[id] = b;
@@ -149,6 +156,7 @@ void _paragraphOps(
         if (i.text.isEmpty) continue;
         final rIndex = side.runs.length;
         side.runs.add(i);
+        side.runHeadings.add(p.headingLevel);
         final attrs = runAttributes(i.style, base, link: i.link)
           ..[OfficeEmbeds.runAttr] = rIndex;
         insert(i.text.replaceAll('\n', '\u2028'), attrs);
@@ -244,7 +252,7 @@ DocModel deltaToModel(
           final o = side.objects[value];
           if (o != null) pending.add(o);
         case OfficeEmbeds.pageBreak:
-          pending.add(DocPageBreak());
+          pending.add(side.pageBreaks[value] ?? DocPageBreak());
         case OfficeEmbeds.section:
           final s = side.sections[value];
           if (s != null) pending.add(s);
@@ -260,7 +268,7 @@ DocModel deltaToModel(
       if (!(origLast is DocParagraph && origLast.isEmpty)) blocks.removeLast();
     }
   }
-  renumberLists(blocks);
+  relabelLists(blocks);
   return DocModel(
     format: original.format,
     blocks: blocks,
@@ -310,12 +318,47 @@ DocText _runFrom(
 
 final Expando<Map<String, dynamic>> _pendingAttrs = Expando();
 
+/// Formatting of an edited run. Attributes are relative to the line's base
+/// style, so "not bold" under a bold heading has no attribute at all. For a
+/// run that came from the document (and sits on a line with the same base),
+/// every attribute the user didn't change keeps the run's own value — an
+/// explicitly non-bold run in a bold heading stays non-bold.
 DocRunStyle _resolveStyle(
   Map<String, dynamic> a,
   DocRunStyle base,
-  DocText? run,
+  DocText run,
+  DocModel m,
+  DeltaSideTable side,
 ) {
-  final template = run?.style;
+  final fresh = _freshStyle(a, base, run.style);
+  final idx = a[OfficeEmbeds.runAttr];
+  if (idx is! int || idx < 0 || idx >= side.runs.length) return fresh;
+  final template = side.runs[idx];
+  if (m.editorBaseFor(side.runHeadings[idx]) != base) return fresh;
+  final t = template.style;
+  final o = runAttributes(t, base, link: template.link);
+  bool same(String k) => a[k] == o[k];
+  final linkSame = same('link');
+  return DocRunStyle(
+    bold: same('bold') ? t.bold : fresh.bold,
+    italic: same('italic') ? t.italic : fresh.italic,
+    underline: same('underline') && linkSame ? t.underline : fresh.underline,
+    strike: same('strike') ? t.strike : fresh.strike,
+    allCaps: t.allCaps,
+    smallCaps: t.smallCaps,
+    color: same('color') && linkSame ? t.color : fresh.color,
+    highlight: same('background') ? t.highlight : fresh.highlight,
+    fontSize: same('size') ? t.fontSize : fresh.fontSize,
+    fontFamily: same('font') ? t.fontFamily : fresh.fontFamily,
+    vertAlign: same('script') ? t.vertAlign : fresh.vertAlign,
+  );
+}
+
+DocRunStyle _freshStyle(
+  Map<String, dynamic> a,
+  DocRunStyle base,
+  DocRunStyle? template,
+) {
   final script = a['script'];
   return DocRunStyle(
     bold: a['bold'] == true || base.bold,
@@ -356,7 +399,7 @@ DocParagraph _paragraphFrom(
   for (final i in inlines) {
     if (i is DocText) {
       final attrs = _pendingAttrs[i] ?? const <String, dynamic>{};
-      i.style = _resolveStyle(attrs, base, i);
+      i.style = _resolveStyle(attrs, base, i, m, side);
       _pendingAttrs[i] = null;
     }
   }
@@ -371,13 +414,18 @@ DocParagraph _paragraphFrom(
     final ordered = listType == 'ordered';
     final tl = t?.list;
     final same = tl != null && tl.ordered == ordered;
+    final unchanged = same && tl.level == indent;
     list = DocListInfo(
       ordered: ordered,
       level: indent,
       numId: same ? tl.numId : null,
-      format: same && tl.level == indent
+      format: unchanged
           ? tl.format
           : (ordered ? defaultOrderedFormat(indent) : 'bullet'),
+      // Kept so letters, roman numerals, custom bullets and continued
+      // numbering survive (formats like RTF store labels literally);
+      // relabelLists renumbers around inserted or removed items.
+      label: unchanged ? tl.label : '',
       labelStyle: tl?.labelStyle,
     );
   }
@@ -393,7 +441,11 @@ DocParagraph _paragraphFrom(
   double firstLine;
   if (list != null) {
     final tl = t?.list;
-    if (tl != null && tl.level == list.level && t!.indentLeft > 0) {
+    if (tl != null && tl.ordered == list.ordered && tl.level == list.level) {
+      // An item that stays as it was keeps its exact geometry.
+      indentLeft = t!.indentLeft;
+      firstLine = t.firstLine;
+    } else if (tl != null && tl.level == list.level && t!.indentLeft > 0) {
       indentLeft = t.indentLeft;
       firstLine = t.firstLine < 0 ? t.firstLine : -18;
     } else {
@@ -402,7 +454,9 @@ DocParagraph _paragraphFrom(
     }
   } else if (t != null &&
       t.list == null &&
-      (t.indentLeft / 36).round() == indent) {
+      // Same transform as modelToDelta, so outdents (< 0) and very deep
+      // indents (> 8 steps) of untouched paragraphs survive.
+      (t.indentLeft / 36).round().clamp(0, 8) == indent) {
     indentLeft = t.indentLeft;
     firstLine = t.firstLine;
   } else {
@@ -446,5 +500,9 @@ DocParagraph _paragraphFrom(
     contextualSpacing: t?.contextualSpacing ?? false,
     markStyle: headingChanged ? base : (t?.markStyle ?? base),
     raw: t?.raw,
-  )..origin = t == null ? null : (t.origin ?? t);
+  )
+    ..origin = t == null ? null : (t.origin ?? t)
+    // Lets the DOCX writer copy the original markup when nothing changed.
+    ..source = t?.source
+    ..sourcePart = t?.sourcePart ?? 0;
 }

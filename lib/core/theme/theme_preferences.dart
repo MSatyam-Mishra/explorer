@@ -1,11 +1,13 @@
 import 'package:explorer/core/theme/app_color_theme.dart';
 import 'package:explorer/core/theme/app_theme_settings.dart';
+import 'package:explorer/shared/file_icons/file_icon_style.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 abstract final class ThemePreferences {
   static const _keyThemeMode = 'theme_mode';
   static const _keyColorThemeId = 'color_theme_id';
+  static const _keyFileIconStyle = 'file_icon_style';
 
   static Future<AppThemeSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -15,6 +17,7 @@ abstract final class ThemePreferences {
     return AppThemeSettings(
       themeMode: _parseThemeMode(modeName),
       colorThemeId: _resolveColorThemeId(colorId),
+      fileIconStyle: FileIconStyle.parse(prefs.getString(_keyFileIconStyle)),
     );
   }
 
@@ -22,6 +25,7 @@ abstract final class ThemePreferences {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyThemeMode, settings.themeMode.name);
     await prefs.setString(_keyColorThemeId, settings.colorThemeId);
+    await prefs.setString(_keyFileIconStyle, settings.fileIconStyle.name);
   }
 
   static String _resolveColorThemeId(String? stored) {

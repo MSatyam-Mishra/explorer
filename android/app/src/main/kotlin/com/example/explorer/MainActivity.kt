@@ -25,8 +25,23 @@ class MainActivity : FlutterFragmentActivity() {
     // Cache interfaces: deviceId -> UsbInterface
     private val deviceInterfaces = HashMap<Int, UsbInterface>()
 
+    private var incomingFiles: IncomingFiles? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingFiles?.onNewIntent(intent)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        incomingFiles?.dispose()
+        incomingFiles = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        incomingFiles = IncomingFiles(this, flutterEngine.dartExecutor.binaryMessenger)
         
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 

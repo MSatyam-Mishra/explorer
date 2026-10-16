@@ -216,6 +216,10 @@ class _DocxWriter {
   int _nextAbsId = 0;
   String? _currentOrderedNum;
 
+  /// The original main part, for copying untouched body elements verbatim.
+  String? _source;
+  final Set<DocSourceSpan> _claimed = {};
+
   // ---------------------------------------------------------------------------
 
   Uint8List writeIntoPackage() {
@@ -225,6 +229,7 @@ class _DocxWriter {
     if (docText == null) {
       throw const FormatException('Missing main document part');
     }
+    _source = docText;
 
     // Existing relationships.
     final rels = pkg.rels(mainPart);
@@ -403,15 +408,38 @@ class _DocxWriter {
 
   String _body(List<DocBlock> blocks, String? finalSectPr) {
     final sb = StringBuffer();
+    // Body elements whose blocks are all present and unedited are copied
+    // from the original part as they were.
+    final verbatim = <int, (int, DocSourceSpan)>{};
+    final covered = <int>{};
+    for (var i = 0; i < blocks.length; i++) {
+      final v = _verbatimRun(blocks, i);
+      if (v == null) continue;
+      verbatim[i] = v;
+      _claimed.add(v.$2);
+      for (var k = i; k < v.$1; k++) {
+        covered.add(k);
+      }
+      i = v.$1 - 1;
+    }
+
     final leadingBreak = <int>{};
     final attachSect = <int, String>{};
     final skip = <int>{};
     for (var i = 0; i < blocks.length; i++) {
+      if (covered.contains(i)) continue;
       final b = blocks[i];
       if (b is DocPageBreak) {
-        if (i + 1 < blocks.length && blocks[i + 1] is DocParagraph) {
-          leadingBreak.add(i + 1);
-          skip.add(i);
+        final next = i + 1 < blocks.length ? blocks[i + 1] : null;
+        if (next is DocParagraph && !covered.contains(i + 1)) {
+          if (next.pageBreakBefore) {
+            skip.add(i); // the paragraph starts a page anyway
+          } else if (b.joinNext) {
+            // A break inside the paragraph, before its text. A break that
+            // was a paragraph of its own stays one.
+            leadingBreak.add(i + 1);
+            skip.add(i);
+          }
         }
       } else if (b is DocSectionBreak) {
         final xml = b.raw ?? _sectPrXml(b.page, b.newPage);
@@ -419,13 +447,36 @@ class _DocxWriter {
         while (j >= 0 && blocks[j] is DocFrame) {
           j--;
         }
-        if (j >= 0 && blocks[j] is DocParagraph && !attachSect.containsKey(j)) {
+        if (j >= 0 &&
+            blocks[j] is DocParagraph &&
+            !covered.contains(j) &&
+            !attachSect.containsKey(j)) {
           attachSect[j] = xml;
           skip.add(i);
         }
       }
     }
     for (var i = 0; i < blocks.length; i++) {
+      final v = verbatim[i];
+      if (v != null) {
+        final (end, span) = v;
+        sb.write(_source!.substring(span.start, span.end));
+        for (var k = i; k < end; k++) {
+          final x = blocks[k];
+          if (x is DocTable) {
+            _currentOrderedNum = null;
+          } else if (x is DocParagraph) {
+            final l = x.list;
+            if (l != null && l.ordered) {
+              _currentOrderedNum = l.numId;
+            } else if (l == null && !x.isEmpty) {
+              _currentOrderedNum = null;
+            }
+          }
+        }
+        i = end - 1;
+        continue;
+      }
       if (skip.contains(i)) continue;
       final b = blocks[i];
       switch (b) {
@@ -455,6 +506,81 @@ class _DocxWriter {
     }
     if (finalSectPr != null) sb.write(finalSectPr);
     return sb.toString();
+  }
+
+  /// When the blocks from [i] on are exactly the blocks one original body
+  /// element produced (all present, in order, unedited), returns the index
+  /// after them and the element's span.
+  (int, DocSourceSpan)? _verbatimRun(List<DocBlock> blocks, int i) {
+    final source = _source;
+    final span = blocks[i].source;
+    if (!preserve ||
+        source == null ||
+        span == null ||
+        blocks[i].sourcePart != 0 ||
+        _claimed.contains(span)) {
+      return null;
+    }
+    if (span.start < 0 ||
+        span.end > source.length ||
+        span.end <= span.start ||
+        source.codeUnitAt(span.start) != 0x3C ||
+        source.codeUnitAt(span.end - 1) != 0x3E) {
+      return null; // not the package the model was parsed from
+    }
+    var part = 0;
+    var j = i;
+    while (j < blocks.length && part < span.parts) {
+      final b = blocks[j];
+      if (b is DocFrame) {
+        j++;
+        continue;
+      }
+      if (!identical(b.source, span) || b.sourcePart != part) return null;
+      if (b is DocParagraph && !_unedited(b)) return null;
+      part++;
+      j++;
+    }
+    return part == span.parts ? (j, span) : null;
+  }
+
+  /// Whether [p] still has exactly the content and paragraph formatting it
+  /// was parsed with.
+  static bool _unedited(DocParagraph p) {
+    final o = p.origin;
+    if (o == null) return true; // parsed, never edited
+    if (o.headingLevel != p.headingLevel ||
+        o.align != p.align ||
+        o.rtl != p.rtl ||
+        (o.list == null) != (p.list == null) ||
+        (o.indentLeft - p.indentLeft).abs() > 0.05 ||
+        (o.firstLine - p.firstLine).abs() > 0.05) {
+      return false;
+    }
+    final ol = o.list, pl = p.list;
+    if (ol != null && (ol.ordered != pl!.ordered || ol.level != pl.level)) {
+      return false;
+    }
+    final a = [
+      for (final i in o.inlines)
+        if (i is! DocText || i.text.isNotEmpty) i,
+    ];
+    final b = [
+      for (final i in p.inlines)
+        if (i is! DocText || i.text.isNotEmpty) i,
+    ];
+    if (a.length != b.length) return false;
+    for (var k = 0; k < a.length; k++) {
+      final x = a[k], y = b[k];
+      if (x is DocText && y is DocText) {
+        if (x.text != y.text || x.style != y.style || x.link != y.link) {
+          return false;
+        }
+      } else if (!identical(x, y)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   String _sectPrXml(DocPageSetup p, bool? newPage) {
@@ -551,7 +677,9 @@ class _DocxWriter {
         (o.list == null) != (list == null) ||
         (list != null &&
             (o.list!.ordered != list.ordered || o.list!.level != list.level));
-    if (explicit || listChanged || list?.numId == null) {
+    // Untouched non-list paragraphs keep their numPr — including
+    // `numId 0`, which switches off numbering inherited from the style.
+    if (explicit || listChanged || (list != null && list.numId == null)) {
       _removeAll(el, {'numPr'});
       if (list != null) {
         final numId = _numIdFor(list);

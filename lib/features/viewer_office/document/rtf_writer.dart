@@ -27,6 +27,7 @@ class _RtfWriter {
 
   String write() {
     _font(model.baseStyle.fontFamily);
+    _planLists(model.blocks);
     final body = StringBuffer();
     _blocks(model.blocks, body, inTable: false);
 
@@ -55,6 +56,7 @@ class _RtfWriter {
       );
     }
     _out.write('}');
+    _writeListTables();
     if (model.title != null) {
       _out.write('{\\info{\\title ${_escape(model.title!)}}}');
     }
@@ -73,6 +75,85 @@ class _RtfWriter {
   }
 
   static int _tw(double pt) => (pt * 20).round();
+
+  // ---------------------------------------------------------------------------
+  // Lists. Word ignores `\listtext` (the literal label) unless the paragraph
+  // belongs to a list (`\ls`), so every run of list items gets a list whose
+  // levels reproduce its labels and starting numbers.
+
+  final Map<DocParagraph, int> _listOf = {};
+  final List<_RtfList> _lists = [];
+
+  void _planLists(List<DocBlock> blocks) {
+    _RtfList? run;
+    for (final b in blocks) {
+      switch (b) {
+        case DocTable():
+          for (final r in b.rows) {
+            for (final c in r.cells) {
+              _planLists(c.blocks);
+            }
+          }
+        case DocFrame():
+          _planLists(b.blocks);
+        case DocParagraph():
+          final l = b.list;
+          if (l == null) {
+            if (!b.isEmpty) run = null;
+            continue;
+          }
+          if (run == null || !run.accepts(l)) {
+            run = _RtfList(_lists.length + 1);
+            _lists.add(run);
+          }
+          run.add(l);
+          _listOf[b] = run.ls;
+        default:
+          break;
+      }
+    }
+  }
+
+  void _writeListTables() {
+    if (_lists.isEmpty) return;
+    final table = StringBuffer(r'{\*\listtable');
+    final overrides = StringBuffer(r'{\*\listoverridetable');
+    for (final list in _lists) {
+      final id = 1000 + list.ls;
+      table.write('{\\list\\listtemplateid${id + 50000}\\listhybrid');
+      for (var lv = 0; lv < 9; lv++) {
+        final level = list.levels[lv] ?? _RtfLevel.fallback(lv);
+        final text = StringBuffer();
+        final numbers = StringBuffer();
+        var length = 0;
+        for (final part in level.parts) {
+          if (part is int) {
+            text.write("\\'${part.toRadixString(16).padLeft(2, '0')}");
+            length++;
+            numbers.write("\\'${length.toRadixString(16).padLeft(2, '0')}");
+          } else {
+            final s = part as String;
+            text.write(_escape(s));
+            length += s.length;
+          }
+        }
+        final left = _tw(36.0 * (lv + 1));
+        table.write(
+          '{\\listlevel\\levelnfc${level.nfc}\\levelnfcn${level.nfc}'
+          '\\leveljc0\\leveljcn0\\levelfollow0\\levelstartat${level.start}'
+          "{\\leveltext\\'${length.toRadixString(16).padLeft(2, '0')}$text;}"
+          '{\\levelnumbers$numbers;}\\fi-360\\li$left\\lin$left}',
+        );
+      }
+      table.write('{\\listname ;}\\listid$id}');
+      overrides.write('{\\listoverride\\listid$id\\listoverridecount0\\ls${list.ls}}');
+    }
+    _out
+      ..write(table)
+      ..write('}')
+      ..write(overrides)
+      ..write('}');
+  }
 
   void _blocks(
     List<DocBlock> blocks,
@@ -136,6 +217,8 @@ class _RtfWriter {
   }) {
     sb.write('\\pard\\plain');
     if (inTable) sb.write('\\intbl');
+    final ls = _listOf[p];
+    if (ls != null) sb.write('\\ls$ls\\ilvl${p.list!.level.clamp(0, 8)}');
     final h = p.headingLevel;
     if (h != null) sb.write('\\s$h\\outlinelevel${h - 1}');
     switch (p.align) {
@@ -344,4 +427,88 @@ class _RtfWriter {
   }
 
   static String _escapePlain(String t) => _escape(t).replaceAll(';', '');
+}
+
+/// One level of a written list: number format, start and level text
+/// (literal strings and level-number placeholders).
+class _RtfLevel {
+  _RtfLevel(this.nfc, this.start, this.parts);
+
+  final int nfc;
+  final int start;
+  final List<Object> parts;
+
+  static _RtfLevel fallback(int level) => _RtfLevel(0, 1, [level, '.']);
+
+  static _RtfLevel of(DocListInfo l) {
+    final level = l.level.clamp(0, 8);
+    if (!l.ordered) {
+      final first = l.label.runes.isEmpty ? null : l.label.runes.first;
+      final bullet = first == null || first > 0xFFFF
+          ? bulletForLevel(level)
+          : String.fromCharCode(first);
+      return _RtfLevel(23, 1, [bullet]);
+    }
+    final label = l.label.replaceAll(';', '');
+    final own = ListLabel.parse(label);
+    if (own != null) {
+      return _RtfLevel(_nfc(own.format), own.value, [
+        if (own.prefix.isNotEmpty) own.prefix,
+        level,
+        if (own.suffix.isNotEmpty) own.suffix,
+      ]);
+    }
+    // Multi-level labels ("1.2."): one number per level.
+    final numbers = RegExp(r'\d+').allMatches(label).toList();
+    if (numbers.length > 1 && numbers.length == level + 1) {
+      final parts = <Object>[];
+      var at = 0;
+      for (var k = 0; k < numbers.length; k++) {
+        if (numbers[k].start > at) {
+          parts.add(label.substring(at, numbers[k].start));
+        }
+        parts.add(k);
+        at = numbers[k].end;
+      }
+      if (at < label.length) parts.add(label.substring(at));
+      return _RtfLevel(0, int.parse(numbers.last.group(0)!), parts);
+    }
+    final format = l.format == 'bullet' || l.format == 'none'
+        ? 'decimal'
+        : l.format;
+    return _RtfLevel(_nfc(format), 1, [level, '.']);
+  }
+
+  static int _nfc(String format) => switch (format) {
+    'upperRoman' => 1,
+    'lowerRoman' => 2,
+    'upperLetter' => 3,
+    'lowerLetter' => 4,
+    'ordinal' => 5,
+    'decimalZero' => 22,
+    'none' => 255,
+    _ => 0,
+  };
+}
+
+/// A run of list items written as one RTF list (`\lsN`).
+class _RtfList {
+  _RtfList(this.ls);
+
+  final int ls;
+  final List<_RtfLevel?> levels = List.filled(9, null);
+  final List<bool?> _ordered = List.filled(9, null);
+
+  /// False when [l] switches between bullets and numbers at a level, which
+  /// starts a new list.
+  bool accepts(DocListInfo l) {
+    final k = _ordered[l.level.clamp(0, 8)];
+    return k == null || k == l.ordered;
+  }
+
+  void add(DocListInfo l) {
+    final level = l.level.clamp(0, 8);
+    _ordered[level] = l.ordered;
+    levels[level] ??= _RtfLevel.of(l);
+  }
 }

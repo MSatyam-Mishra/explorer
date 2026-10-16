@@ -27,6 +27,9 @@ enum FileKind {
   openDocumentPresentation,
   model3d,
   archive,
+  diskImage,
+  cameraRaw,
+  design,
   markdown,
   html,
   json,
@@ -92,6 +95,22 @@ abstract final class FileTypes {
   static const archive = {
     'zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'tbz', 'tbz2', 'xz',
     'txz', 'jar', 'war', 'aar', 'xapk', 'apks',
+  };
+
+  static const diskImage = {'iso'};
+
+  /// Camera raw formats; viewers show the JPEG preview the camera embeds.
+  static const cameraRaw = {
+    'dng', 'cr2', 'cr3', 'crw', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'orf',
+    'rw2', 'raf', 'pef', 'srw', '3fr', 'iiq', 'erf', 'mef', 'mos', 'dcr',
+    'kdc', 'x3f', 'rwl', 'raw',
+  };
+
+  /// Design, CAD and print files shown through their embedded preview.
+  static const design = {
+    'ai', 'eps', 'epsf', 'epsi', 'ps', 'indd', 'indt', 'fig', 'dwg',
+    'sketch', 'kra', 'ora', 'procreate', 'cdr', 'xd', 'afdesign', 'afphoto',
+    'afpub', 'pages', 'numbers',
   };
 
   static const markdown = {'md', 'markdown', 'mdown', 'mkd', 'mdx'};
@@ -166,6 +185,9 @@ abstract final class FileTypes {
       e: FileKind.openDocumentPresentation,
     for (final e in model3d) e: FileKind.model3d,
     for (final e in archive) e: FileKind.archive,
+    for (final e in diskImage) e: FileKind.diskImage,
+    for (final e in cameraRaw) e: FileKind.cameraRaw,
+    for (final e in design) e: FileKind.design,
     for (final e in text) e: FileKind.text,
     for (final e in code) e: FileKind.code,
     for (final e in markdown) e: FileKind.markdown,
@@ -234,6 +256,9 @@ abstract final class FileTypes {
           'Presentation',
         FileKind.model3d => '3D model',
         FileKind.archive => 'Archive',
+        FileKind.diskImage => 'Disk image',
+        FileKind.cameraRaw => 'Camera raw photo',
+        FileKind.design => 'Design file',
         FileKind.markdown => 'Markdown',
         FileKind.html => 'Web page',
         FileKind.json => 'JSON',

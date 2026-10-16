@@ -164,7 +164,15 @@ class OfficePackage {
 
   static String _normalize(String path) {
     final segs = <String>[];
-    for (final s in Uri.decodeFull(path).split('/')) {
+    for (final raw in path.split('/')) {
+      // Targets are URIs, but generators also write a literal '%' (e.g.
+      // `media/100%.png`); keep such a segment as written.
+      String s;
+      try {
+        s = Uri.decodeComponent(raw);
+      } catch (_) {
+        s = raw;
+      }
       if (s.isEmpty || s == '.') continue;
       if (s == '..') {
         if (segs.isNotEmpty) segs.removeLast();

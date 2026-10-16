@@ -6,35 +6,57 @@ import 'package:flutter/material.dart';
 import '../../common/office_package.dart';
 import '../../document/layout/doc_render_context.dart' show fontFallbackFor;
 import '../slide_model.dart';
+import 'slide_file_image.dart';
 
-/// Decoded images for one deck.
+/// Image providers for one deck.
 class SlideImageCache {
   SlideImageCache(this.deck);
   final SlideDeck deck;
   final Map<String, ImageProvider> _providers = {};
 
-  /// Reuses decoded images from [old] when the bytes are unchanged (e.g.
-  /// after an edit re-reads the same package).
+  /// Reuses providers (and so decoded images) from [old] when the image is
+  /// unchanged (e.g. after an edit re-reads the same package).
   void adoptFrom(SlideImageCache old) {
     old._providers.forEach((key, provider) {
       final id = key.split('@').first;
       final a = old.deck.images[id], b = deck.images[id];
-      if (a != null && b != null && identical(a.bytes, b.bytes)) {
-        _providers[key] = provider;
-      }
+      if (a == null || b == null) return;
+      final same = a.bytes != null
+          ? identical(a.bytes, b.bytes)
+          : a.ref != null && a.ref == b.ref;
+      if (same) _providers[key] = provider;
     });
   }
 
-  ImageProvider? provider(String id, {int? cacheWidth}) {
+  /// Provider for image [id] decoded to fit [width] × [height] device
+  /// pixels (aspect ratio kept; never upscaled). Null sizes decode at the
+  /// image's own size. Null when the image isn't displayable.
+  ImageProvider? provider(String id, {int? width, int? height}) {
     final data = deck.images[id];
     if (data == null || !isDisplayableImage(data.extension)) return null;
-    final key = cacheWidth == null ? id : '$id@$cacheWidth';
-    return _providers.putIfAbsent(key, () {
-      final p = MemoryImage(data.bytes);
-      return cacheWidth == null
-          ? p
-          : ResizeImage(p, width: cacheWidth, allowUpscaling: false);
-    });
+    final ImageProvider base;
+    if (data.bytes != null) {
+      base = MemoryImage(data.bytes!);
+    } else if (data.ref != null) {
+      base = SlideFileImage(data.ref!);
+    } else {
+      return null;
+    }
+    if (width == null && height == null) {
+      return _providers.putIfAbsent(id, () => base);
+    }
+    return _providers.putIfAbsent(
+      '$id@${width ?? 0}x${height ?? 0}',
+      () => ResizeImage(
+        base,
+        width: width,
+        height: height,
+        policy: width != null && height != null
+            ? ResizeImagePolicy.fit
+            : ResizeImagePolicy.exact,
+        allowUpscaling: false,
+      ),
+    );
   }
 }
 
@@ -49,7 +71,7 @@ class SlideCanvas extends StatelessWidget {
     this.onShapeTap,
     this.onLink,
     this.selectedShapeId,
-    this.thumbnail = false,
+    this.pixelScale,
   });
 
   final SlideDeck deck;
@@ -59,11 +81,21 @@ class SlideCanvas extends StatelessWidget {
   final ValueChanged<String>? onLink;
   final String? selectedShapeId;
 
-  /// Downsample images for small previews.
-  final bool thumbnail;
+  /// Device pixels per slide point where the slide is shown (see
+  /// [SlideFit.builder]); pictures are decoded at that resolution instead
+  /// of their own, which is far cheaper for photos. Null decodes them at
+  /// full size.
+  final double? pixelScale;
 
   @override
   Widget build(BuildContext context) {
+    if (slide.pending) {
+      return SizedBox(
+        width: deck.width,
+        height: deck.height,
+        child: const ColoredBox(color: Color(0xFFF1F3F4)),
+      );
+    }
     final children = <Widget>[
       Positioned.fill(child: _background(slide.background)),
       for (final s in slide.shapes) _shape(s),
@@ -77,18 +109,35 @@ class SlideCanvas extends StatelessWidget {
     );
   }
 
-  int? get _cacheWidth => thumbnail ? 320 : null;
+  /// Device pixels for [points], rounded up to 128 px steps so small layout
+  /// changes (e.g. showing the notes panel) reuse the decoded image.
+  int? _px(double points) {
+    final s = pixelScale;
+    if (s == null || !points.isFinite || points <= 0) return null;
+    return math.min(8192, math.max(128, (points * s / 128).ceil() * 128));
+  }
+
+  /// Provider for an image drawn with [BoxFit.cover] over [w] × [h] points.
+  ImageProvider? _coverProvider(String id, double w, double h) {
+    final side = _px(math.max(w, h));
+    return images.provider(id, width: side, height: side);
+  }
 
   Widget _background(SlideFill? fill) {
     if (fill == null || fill.isEmpty) {
       return const ColoredBox(color: Colors.white);
     }
     if (fill.imageId != null) {
-      final p = images.provider(fill.imageId!, cacheWidth: _cacheWidth);
+      final p = _coverProvider(fill.imageId!, deck.width, deck.height);
       if (p != null) {
         return DecoratedBox(
           decoration: const BoxDecoration(color: Colors.white),
-          child: Image(image: p, fit: BoxFit.cover, gaplessPlayback: true),
+          child: Image(
+            image: p,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
         );
       }
     }
@@ -164,14 +213,19 @@ class SlideCanvas extends StatelessWidget {
       ),
     );
     if (hasImageFill) {
-      final p = images.provider(fill!.imageId!, cacheWidth: _cacheWidth);
+      final p = _coverProvider(fill!.imageId!, s.frame.w, s.frame.h);
       if (p != null) {
         layers.insert(
           0,
           Positioned.fill(
             child: ClipPath(
               clipper: _GeometryClipper(s),
-              child: Image(image: p, fit: BoxFit.cover, gaplessPlayback: true),
+              child: Image(
+                image: p,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
             ),
           ),
         );
@@ -189,8 +243,12 @@ class SlideCanvas extends StatelessWidget {
   }
 
   Widget _picture(SlidePicture p) {
-    final provider = images.provider(p.imageId, cacheWidth: _cacheWidth);
     final f = p.frame;
+    final provider = images.provider(
+      p.imageId,
+      // The whole picture is f.w / visible-fraction wide before cropping.
+      width: _px(f.w / (1 - p.cropLeft - p.cropRight).clamp(0.01, 10.0)),
+    );
     Widget child;
     if (provider == null) {
       child = Container(
@@ -274,7 +332,15 @@ class SlideCanvas extends StatelessWidget {
     for (var r = 0; r < t.rows.length; r++) {
       final cells = <Widget>[];
       var c = 0;
+      // Both PPTX (hMerge) and ODP (covered-table-cell) list a placeholder
+      // for every column a cell spans; those columns are already drawn.
+      var covered = 0;
       for (final cell in t.rows[r]) {
+        if (covered > 0 && cell.merged) {
+          covered--;
+          continue;
+        }
+        covered = math.max(0, cell.colSpan - 1);
         final int span = math.min(
           math.max(1, cell.colSpan),
           math.max(1, widths.length - c),
@@ -340,15 +406,40 @@ LinearGradient _gradient(SlideFill fill) {
 
 /// Scales a slide to fit, keeping its aspect ratio.
 class SlideFit extends StatelessWidget {
-  const SlideFit({super.key, required this.deck, required this.child});
+  const SlideFit({super.key, required this.deck, required Widget this.child})
+    : builder = null;
+
+  /// Builds the slide with the device pixels per slide point it's shown at
+  /// (pass it to [SlideCanvas.pixelScale]).
+  const SlideFit.builder({
+    super.key,
+    required this.deck,
+    required Widget Function(BuildContext context, double pixelScale)
+    this.builder,
+  }) : child = null;
+
   final SlideDeck deck;
-  final Widget child;
+  final Widget? child;
+  final Widget Function(BuildContext context, double pixelScale)? builder;
 
   @override
   Widget build(BuildContext context) {
+    final build = builder;
     return AspectRatio(
       aspectRatio: deck.aspect,
-      child: FittedBox(fit: BoxFit.contain, child: child),
+      child: build == null
+          ? FittedBox(fit: BoxFit.contain, child: child)
+          : LayoutBuilder(
+              builder: (context, c) {
+                final dpr = MediaQuery.devicePixelRatioOf(context);
+                final shown = c.hasBoundedWidth ? c.maxWidth : deck.width;
+                final scale = deck.width <= 0 ? dpr : shown / deck.width * dpr;
+                return FittedBox(
+                  fit: BoxFit.contain,
+                  child: build(context, scale),
+                );
+              },
+            ),
     );
   }
 }

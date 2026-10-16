@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
@@ -21,14 +22,20 @@ import '../slides/slide_model.dart';
 import '../slides/widgets/slide_canvas.dart';
 import '../slides/widgets/slide_widgets.dart';
 
-Future<SlideDeck> _parseInBackground(Uint8List bytes, String ext) =>
-    Isolate.run(() => parseAnyPresentation(bytes, ext));
+// The file is read inside the isolate so its bytes are never copied over
+// from (or held by) the UI isolate.
+Future<SlideDeck> _loadInBackground(String path, String ext) =>
+    Isolate.run(() => loadPresentationFile(path, ext));
 
-Future<OfficePackage> _decodeInBackground(Uint8List bytes) =>
-    Isolate.run(() => OfficePackage.decode(bytes));
+Future<OfficePackage> _decodeInBackground(String path) =>
+    Isolate.run(() => OfficePackage.decode(File(path).readAsBytesSync()));
 
 Future<Uint8List> _encodeInBackground(OfficePackage pkg) =>
     Isolate.run(() => pkg.encode());
+
+/// Placeholder colour for a slide that hasn't been read yet (matches
+/// [SlideCanvas] for pending slides).
+const _skeletonColor = Color(0xFFF1F3F4);
 
 /// Viewer for presentations (PPTX family, PPT/PPS/POT, ODP/OTP) with
 /// thumbnails, notes, a fullscreen slideshow and, for PPTX, editing (text,
@@ -46,11 +53,19 @@ class PptViewerScreen extends StatefulWidget {
 
 class _PptViewerScreenState extends State<PptViewerScreen> {
   late File _file;
-  Uint8List? _bytes;
+  int? _fileSize;
   SlideDeck? _deck;
   SlideImageCache? _images;
   String? _error;
-  bool _loading = true;
+
+  /// Reads the deck slide by slide; null once everything has arrived.
+  PresentationLoader? _loader;
+  final Completer<void> _loaded = Completer<void>();
+  bool _loadDone = false;
+  bool _notesLoaded = false;
+
+  /// Thumbnails are built a frame after the first slide so it shows first.
+  bool _thumbsReady = false;
 
   OfficePackage? _pkg;
   int _index = 0;
@@ -74,6 +89,9 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
 
   @override
   void dispose() {
+    _loader?.dispose();
+    // Releases anything waiting in _whenLoaded (it then sees !mounted).
+    if (!_loaded.isCompleted) _loaded.complete();
     _pages.dispose();
     _thumbs.dispose();
     super.dispose();
@@ -82,39 +100,99 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   String get _ext =>
       p.extension(_file.path).toLowerCase().replaceFirst('.', '');
 
-  Future<void> _load() async {
-    try {
-      final bytes = await _file.readAsBytes();
-      final deck = await _parseInBackground(bytes, _ext);
-      if (!mounted) return;
-      setState(() {
-        _bytes = bytes;
-        _setDeck(deck);
-        _loading = false;
-      });
-      if (deck.slides.isEmpty) {
-        setState(() => _error = 'This presentation has no slides.');
-      }
-    } on PresentationEncryptedException {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error =
-            'This presentation is password-protected. Open it in PowerPoint or another app that can decrypt it.';
-      });
-    } on FormatException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = 'This file couldn\'t be read as a presentation.\n${e.message}';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = 'Something went wrong while opening this presentation.';
-      });
+  /// Starts reading in a background isolate. The first frame (title and a
+  /// slide-shaped placeholder) doesn't wait for it; slide 1 shows as soon
+  /// as it's parsed and the others fill in behind it.
+  void _load() {
+    _file.length().then((n) => _fileSize = n, onError: (_) {});
+    final loader = _loader = PresentationLoader(_file.path, _ext);
+    loader.events.listen(_onLoadEvent);
+    loader.start();
+  }
+
+  void _onLoadEvent(SlideLoadEvent e) {
+    if (!mounted) return;
+    switch (e) {
+      case SlideDeckOpened(:final deck):
+        setState(() {
+          _setDeck(deck);
+          if (deck.slides.isEmpty) _error = 'This presentation has no slides.';
+        });
+      case SlidesParsed(:final slides, :final images):
+        final deck = _deck;
+        if (deck == null) return;
+        deck.images.addAll(images);
+        slides.forEach((i, s) {
+          if (i < deck.slides.length) deck.slides[i] = s;
+        });
+        if (slides.containsKey(_index)) _showThumbsAfterThisFrame();
+        setState(() {});
+      case SlideNotesParsed(:final notes):
+        final deck = _deck;
+        if (deck == null) return;
+        notes.forEach((i, t) {
+          if (i < deck.slides.length) deck.slides[i].notes = t;
+        });
+        setState(() => _notesLoaded = true);
+      case SlideDeckParsed(:final deck):
+        setState(() {
+          _setDeck(deck);
+          _notesLoaded = true;
+          if (deck.slides.isEmpty) _error = 'This presentation has no slides.';
+        });
+        _showThumbsAfterThisFrame();
+        _finishLoad();
+      case SlideLoadDone():
+        _finishLoad();
+      case SlideLoadFailed(:final error):
+        final deck = _deck;
+        if (deck == null) {
+          setState(() => _error = _loadErrorText(error));
+        } else {
+          // Lost the loader midway: keep what arrived.
+          for (var i = 0; i < deck.slides.length; i++) {
+            final s = deck.slides[i];
+            if (s.pending) {
+              deck.slides[i] = unreadableSlide(i, deck.width, deck.height)
+                ..partName = s.partName
+                ..relId = s.relId
+                ..slideId = s.slideId;
+            }
+          }
+          setState(() => _notesLoaded = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Some slides couldn\'t be read.')),
+          );
+        }
+        _finishLoad();
     }
+  }
+
+  static String _loadErrorText(Object error) => switch (error) {
+    PresentationEncryptedException() =>
+      'This presentation is password-protected. Open it in PowerPoint or another app that can decrypt it.',
+    FormatException(:final message) =>
+      'This file couldn\'t be read as a presentation.\n$message',
+    _ => 'Something went wrong while opening this presentation.',
+  };
+
+  void _finishLoad() {
+    _loader = null;
+    if (!_loaded.isCompleted) _loaded.complete();
+    if (mounted) setState(() => _loadDone = true);
+  }
+
+  void _showThumbsAfterThisFrame() {
+    if (_thumbsReady) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_thumbsReady) setState(() => _thumbsReady = true);
+    });
+  }
+
+  /// Waits until every slide is parsed (actions that need the whole deck).
+  Future<bool> _whenLoaded() async {
+    if (!_loadDone) await _loaded.future;
+    return mounted && _deck != null && _error == null;
   }
 
   void _setDeck(SlideDeck deck) {
@@ -127,10 +205,19 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
     }
   }
 
+  /// Asks the loader for slide [i] next when it's still pending.
+  void _want(int i) {
+    final deck = _deck;
+    if (deck != null && i < deck.slides.length && deck.slides[i].pending) {
+      _loader?.prioritize(i);
+    }
+  }
+
   void _goTo(int i, {bool animate = true}) {
     final deck = _deck;
     if (deck == null || deck.slides.isEmpty) return;
     final t = i.clamp(0, deck.slides.length - 1);
+    _want(t);
     if (_pages.hasClients) {
       if (animate && (t - _index).abs() <= 2) {
         _pages.animateToPage(
@@ -180,10 +267,12 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   bool get _canEdit => _deck?.format == 'pptx';
 
   Future<void> _startEditing() async {
-    if (!_canEdit || _bytes == null) return;
+    if (!_canEdit) return;
     setState(() => _busy = true);
     try {
-      _pkg ??= await _decodeInBackground(_bytes!);
+      // The package is only decoded when editing starts.
+      if (!await _whenLoaded()) return;
+      _pkg ??= await _decodeInBackground(_file.path);
       if (!mounted) return;
       setState(() => _editing = true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -346,7 +435,7 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
       setState(() {
         if (!copy) {
           _dirty = false;
-          _bytes = bytes;
+          _fileSize = bytes.length;
         } else {
           _createdNewFile = true;
         }
@@ -372,10 +461,11 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
     // Discard: reload the file as it is on disk.
     _pkg = null;
     _dirty = false;
-    final bytes = _bytes;
-    if (bytes != null) {
-      final deck = await _parseInBackground(bytes, _ext);
+    try {
+      final deck = await _loadInBackground(_file.path, _ext);
       if (mounted) setState(() => _setDeck(deck));
+    } catch (_) {
+      // Keep showing the edited deck; nothing was written.
     }
     return true;
   }
@@ -399,9 +489,10 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   // Actions
 
   Future<void> _present() async {
+    if (!await _whenLoaded()) return;
     final deck = _deck;
     final images = _images;
-    if (deck == null || images == null) return;
+    if (deck == null || images == null || !mounted) return;
     final last = await Navigator.of(context).push<int>(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -412,9 +503,10 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
     if (last != null && mounted) _goTo(last, animate: false);
   }
 
-  void _showInfo() {
+  Future<void> _showInfo() async {
+    if (!await _whenLoaded()) return;
     final deck = _deck;
-    if (deck == null) return;
+    if (deck == null || !mounted) return;
     String cm(double pt) => (pt / 72 * 2.54).toStringAsFixed(1);
     final notes = deck.slides.where((s) => s.notes.isNotEmpty).length;
     final rows = <(String, String)>[
@@ -427,7 +519,7 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
           _ => 'OpenDocument presentation (view only)',
         },
       ),
-      ('Size', formatBytes(_bytes?.length ?? 0)),
+      ('Size', formatBytes(_fileSize ?? 0)),
       ('Slides', '${deck.slides.length}'),
       ('Hidden slides', '${deck.slides.where((s) => s.hidden).length}'),
       ('Slides with notes', '$notes'),
@@ -497,13 +589,33 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
       case 'goto':
         await _askGoTo();
       case 'info':
-        _showInfo();
+        await _showInfo();
       case 'notes':
         setState(() => _showNotes = !_showNotes);
       case 'share':
-        await SharePlus.instance.share(ShareParams(files: [XFile(_file.path)]));
+        await _share();
       case 'open':
         await OpenFilex.open(_file.path);
+    }
+  }
+
+  Future<void> _share() async {
+    // iPad presents the share sheet as a popover and requires an anchor;
+    // use the top bar's trailing corner, where the menu was opened.
+    final size = MediaQuery.sizeOf(context);
+    final origin = Rect.fromLTWH(
+      math.max(0, size.width - 64),
+      MediaQuery.paddingOf(context).top + 12,
+      48,
+      48,
+    );
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(_file.path)], sharePositionOrigin: origin),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Couldn\'t share: $e')));
     }
   }
 
@@ -627,8 +739,8 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
 
   Widget _body(BuildContext context) {
     final top = DockedGlossyTopBar.contentTopInset(context);
-    if (_loading) return const Center(child: CircularProgressIndicator());
     final deck = _deck;
+    if (_error == null && deck == null) return _skeleton(context, top);
     if (_error != null || deck == null) {
       return Padding(
         padding: EdgeInsets.only(top: top),
@@ -662,30 +774,115 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
       );
     }
 
-    final split = AdaptiveSplitView.isSplit(context);
-    final main = _mainArea(context, deck);
-    if (split) {
+    return _layout(
+      context,
+      top,
+      main: _mainArea(context, deck),
+      thumbnails: (axis) => _thumbnailList(context, deck, axis),
+    );
+  }
+
+  /// Phone: slide over a thumbnail strip. Tablet/unfolded: thumbnails on
+  /// the side. The body is drawn edge to edge, so keep clear of the system
+  /// bars on every side.
+  Widget _layout(
+    BuildContext context,
+    double top, {
+    required Widget main,
+    required Widget Function(Axis axis) thumbnails,
+  }) {
+    final pad = MediaQuery.paddingOf(context);
+    final insets = EdgeInsets.fromLTRB(pad.left, top, pad.right, pad.bottom);
+    if (AdaptiveSplitView.isSplit(context)) {
       return Padding(
-        padding: EdgeInsets.only(top: top),
+        padding: insets,
         child: AdaptiveSplitView(
           secondaryWidth: 240,
-          secondary: _thumbnailList(context, deck, Axis.vertical),
+          secondary: thumbnails(Axis.vertical),
           primary: main,
         ),
       );
     }
     return Padding(
-      padding: EdgeInsets.only(top: top),
+      padding: insets,
       child: Column(
         children: [
           Expanded(child: main),
-          SizedBox(
-            height: 92,
-            child: _thumbnailList(context, deck, Axis.horizontal),
-          ),
-          SizedBox(height: MediaQuery.paddingOf(context).bottom),
+          SizedBox(height: 92, child: thumbnails(Axis.horizontal)),
         ],
       ),
+    );
+  }
+
+  /// First frame, before the slide size is known: a 16:9 slide-shaped
+  /// placeholder and empty thumbnail cards.
+  Widget _skeleton(BuildContext context, double top) {
+    const aspect = 16 / 9;
+    return _layout(
+      context,
+      top,
+      main: Column(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: aspect,
+                  child: _pendingSlide(context, spinner: true),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 48),
+        ],
+      ),
+      thumbnails: (axis) => _thumbnailSkeleton(axis, aspect, 6),
+    );
+  }
+
+  Widget _pendingSlide(BuildContext context, {bool spinner = false}) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: _skeletonColor,
+        borderRadius: BorderRadius.circular(2),
+      ),
+      child: spinner
+          ? Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+              ),
+            )
+          : const SizedBox.expand(),
+    );
+  }
+
+  /// Empty thumbnail cards (cheap to build) shown until the first slide is
+  /// on screen.
+  Widget _thumbnailSkeleton(Axis axis, double aspect, int count) {
+    final vertical = axis == Axis.vertical;
+    return LayoutBuilder(
+      builder: (context, c) {
+        final extent = vertical
+            ? (c.maxWidth - 44) / aspect + 8
+            : (c.maxHeight - 8) * aspect + 36;
+        return ListView.builder(
+          scrollDirection: axis,
+          padding: const EdgeInsets.all(4),
+          physics: const NeverScrollableScrollPhysics(),
+          itemExtent: extent,
+          itemCount: count,
+          itemBuilder: (context, i) => Padding(
+            padding: const EdgeInsets.fromLTRB(32, 4, 4, 4),
+            child: _pendingSlide(context),
+          ),
+        );
+      },
     );
   }
 
@@ -700,6 +897,7 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
             physics: _zoomed ? const NeverScrollableScrollPhysics() : null,
             itemCount: deck.slides.length,
             onPageChanged: (i) {
+              _want(i);
               setState(() {
                 _index = i;
                 _selectedShape = null;
@@ -714,28 +912,42 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Center(
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      boxShadow: [
-                        BoxShadow(
-                          color: Color(0x40000000),
-                          blurRadius: 12,
-                          offset: Offset(0, 4),
+                  child: deck.slides[i].pending
+                      ? AspectRatio(
+                          aspectRatio: deck.aspect,
+                          child: _pendingSlide(context, spinner: true),
+                        )
+                      : DecoratedBox(
+                          decoration: const BoxDecoration(
+                            boxShadow: [
+                              BoxShadow(
+                                color: Color(0x40000000),
+                                blurRadius: 12,
+                                offset: Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: SlideFit.builder(
+                            deck: deck,
+                            builder: (context, scale) => SlideCanvas(
+                              deck: deck,
+                              slide: deck.slides[i],
+                              images: _images!,
+                              onShapeTap: _editing && i == _index
+                                  ? _editShape
+                                  : null,
+                              onLink: _openLink,
+                              selectedShapeId: i == _index
+                                  ? _selectedShape
+                                  : null,
+                              // Decode pictures at screen size; sharper
+                              // once the user zooms in.
+                              pixelScale: _zoomed && i == _index
+                                  ? scale * 4
+                                  : scale,
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
-                    child: SlideFit(
-                      deck: deck,
-                      child: SlideCanvas(
-                        deck: deck,
-                        slide: deck.slides[i],
-                        images: _images!,
-                        onShapeTap: _editing && i == _index ? _editShape : null,
-                        onLink: _openLink,
-                        selectedShapeId: i == _index ? _selectedShape : null,
-                      ),
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -762,9 +974,11 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
                       ),
                       const SizedBox(height: 4),
                       SelectableText(
-                        slide.notes.isEmpty
+                        slide.notes.isNotEmpty
+                            ? slide.notes
+                            : _notesLoaded
                             ? 'No notes for this slide.'
-                            : slide.notes,
+                            : 'Loading notes…',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: slide.notes.isEmpty
                               ? scheme.onSurfaceVariant
@@ -877,6 +1091,9 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   }
 
   Widget _thumbnailList(BuildContext context, SlideDeck deck, Axis axis) {
+    if (!_thumbsReady) {
+      return _thumbnailSkeleton(axis, deck.aspect, deck.slides.length);
+    }
     final vertical = axis == Axis.vertical;
     return LayoutBuilder(
       builder: (context, c) {

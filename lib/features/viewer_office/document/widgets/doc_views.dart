@@ -367,7 +367,10 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
                 left: 12,
                 bottom: 16 + MediaQuery.paddingOf(context).bottom,
                 child: _PageBadge(
-                  text: 'Page ${_page + 1} of ${r.pages.length}',
+                  // Later pages are still being laid out.
+                  text:
+                      'Page ${_page + 1} of ${r.pages.length}'
+                      '${r.complete ? '' : '+'}',
                 ),
               ),
               Positioned(
@@ -472,27 +475,40 @@ class _DocReflowViewState extends State<DocReflowView> implements _Revealer {
     final gen = ++_generation;
     final engine = DocLayoutEngine(widget.model, widget.ctx);
     final out = <LaidBlock>[];
+    final offsets = <double>[];
+    var y = 0.0;
     final blocks = widget.model.blocks;
     final sw = Stopwatch()..start();
-    // Lay out in batches, keeping contextual spacing within each batch.
+    final sinceShown = Stopwatch()..start();
+    var shown = false;
+    // Lay out in batches (keeping contextual spacing within each batch) and
+    // show what's ready: the first screenful right away, the rest as it
+    // comes.
     var i = 0;
     while (i < blocks.length) {
       final end = math.min(blocks.length, i + 40);
-      out.addAll(engine.layoutBlocks(blocks.sublist(i, end), width));
+      for (final b in engine.layoutBlocks(blocks.sublist(i, end), width)) {
+        offsets.add(y);
+        y += b is LaidMarker ? 24 : b.height;
+        out.add(b);
+      }
       i = end;
-      if (sw.elapsedMilliseconds > 12) {
+      if (sw.elapsedMilliseconds > 8) {
+        if (!shown || sinceShown.elapsedMilliseconds > 250) {
+          shown = true;
+          sinceShown.reset();
+          setState(() {
+            _blocks = List.of(out);
+            _offsets = List.of(offsets);
+            _layoutWidth = width;
+          });
+        }
         await Future<void>.delayed(Duration.zero);
         if (!mounted || gen != _generation) return;
         sw.reset();
       }
     }
     if (!mounted || gen != _generation) return;
-    final offsets = <double>[];
-    var y = 0.0;
-    for (final b in out) {
-      offsets.add(y);
-      y += b is LaidMarker ? 24 : b.height;
-    }
     setState(() {
       _blocks = out;
       _offsets = offsets;

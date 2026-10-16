@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Token colours for the editor, derived from light/dark mode.
@@ -258,6 +259,8 @@ class CodeEditorController extends TextEditingController {
   List<(int, int, _Token)> _cachedTokens = const [];
 
   void setMatches(List<TextRange> matches, int current) {
+    // Listeners re-run searches; never notify for a no-op update.
+    if (current == _currentMatch && listEquals(matches, _matches)) return;
     _matches = matches;
     _currentMatch = current;
     notifyListeners();

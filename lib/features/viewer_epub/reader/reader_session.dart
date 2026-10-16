@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:isolate';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:explorer/core/services/local_content_server.dart';
+import 'package:path_provider/path_provider.dart';
 
-import '../book/book_models.dart';
 import '../book/book_source.dart';
 import '../book/document_preparer.dart';
 import '../book/html_text.dart';
@@ -32,17 +32,27 @@ class ReaderSession {
   final Map<int, Future<PreparedDocument>> _preparing = {};
   final Set<int> _forceHtml = {};
   Uri? _base;
+  bool _disposed = false;
 
   /// Config JSON inlined into the next served document.
   String configJson = 'null';
 
   static const xhtmlSuffix = '__er.xhtml';
   static const htmlSuffix = '__er.html';
-  static const _assetDir = '__er__/';
   static const _maxCached = 8;
 
-  static final Uint8List _jsBytes = Uint8List.fromList(utf8.encode(kReaderJs));
-  static final Uint8List _cssBytes = Uint8List.fromList(utf8.encode(kReaderCss));
+  static Future<String?>? _cacheDir;
+
+  /// Directory for the parsed-structure cache (resolved once per process;
+  /// null if unavailable).
+  static Future<String?> cacheDirectory() => _cacheDir ??= () async {
+        try {
+          final base = await getApplicationCacheDirectory();
+          return '${base.path}${Platform.pathSeparator}ebook_structure';
+        } catch (_) {
+          return null;
+        }
+      }();
 
   Uri get base => _base!;
 
@@ -51,6 +61,7 @@ class ReaderSession {
   }
 
   void dispose() {
+    _disposed = true;
     final b = _base;
     if (b != null) LocalContentServer.instance.unmount(b);
     _base = null;
@@ -59,11 +70,11 @@ class ReaderSession {
 
   /// Encodes a config map so it can sit inside an inline script/CDATA.
   static String encodeConfig(Map<String, dynamic> config) => jsonEncode(config)
-      .replaceAll('<', r'\u003c')
-      .replaceAll('>', r'\u003e')
-      .replaceAll('&', r'\u0026')
-      .replaceAll(String.fromCharCode(0x2028), r'\u2028')
-      .replaceAll(String.fromCharCode(0x2029), r'\u2029');
+      .replaceAll('<', r'<')
+      .replaceAll('>', r'>')
+      .replaceAll('&', r'&')
+      .replaceAll(String.fromCharCode(0x2028), r' ')
+      .replaceAll(String.fromCharCode(0x2029), r' ');
 
   int? spineIndexForPath(String path) {
     final canonical = source.canonicalPath(path) ?? path;
@@ -78,6 +89,8 @@ class ReaderSession {
     return true;
   }
 
+  /// Prepares spine [index] (cached; concurrent calls share the work). Safe
+  /// to call before [start].
   Future<PreparedDocument> prepare(int index) {
     final cached = _prepared.remove(index);
     if (cached != null) {
@@ -90,32 +103,25 @@ class ReaderSession {
 
   Future<PreparedDocument> _doPrepare(int index) async {
     final item = source.info.spine[index];
-    final bytes = await source.readResource(item.path);
-    if (bytes == null) {
-      throw const BookOpenException('This chapter is missing from the book.');
-    }
-    final request = DocumentPrepareRequest(
-      bytes: bytes,
-      path: item.path,
-      mediaType: item.mediaType,
-      assetBase: '${base.path}$_assetDir',
-      fixedLayout: item.fixedLayout,
-      forceHtml: _forceHtml.contains(index),
+    final doc = await source.prepare(
+      item.path,
+      DocumentPrepareRequest(
+        bytes: Uint8List(0),
+        path: item.path,
+        mediaType: item.mediaType,
+        readerCss: kReaderCss,
+        readerJs: kReaderJs,
+        fixedLayout: item.fixedLayout,
+        forceHtml: _forceHtml.contains(index),
+      ),
     );
-    final doc = bytes.length < 24 * 1024
-        ? prepareDocument(request)
-        : await _prepareInBackground(request);
+    if (_disposed) return doc;
     _prepared[index] = doc;
     while (_prepared.length > _maxCached) {
       _prepared.remove(_prepared.keys.first);
     }
     return doc;
   }
-
-  static Future<PreparedDocument> _prepareInBackground(
-    DocumentPrepareRequest request,
-  ) =>
-      Isolate.run(() => prepareDocument(request));
 
   /// URL the WebView loads for spine [index].
   Uri documentUrl(int index, PreparedDocument doc) {
@@ -147,24 +153,13 @@ class ReaderSession {
   }
 
   Future<Uint8List?> _resolve(String path) async {
-    if (path.startsWith(_assetDir)) {
-      switch (path.substring(_assetDir.length)) {
-        case 'reader.js':
-          return _jsBytes;
-        case 'reader.css':
-          return _cssBytes;
-      }
-      return null;
-    }
     for (final suffix in const [xhtmlSuffix, htmlSuffix]) {
       if (!path.endsWith(suffix)) continue;
       final index = spineIndexForPath(path.substring(0, path.length - suffix.length));
       if (index == null) break;
       try {
         final doc = await prepare(index);
-        return Uint8List.fromList(utf8.encode(
-          doc.template.replaceFirst(kReaderConfigPlaceholder, configJson),
-        ));
+        return doc.withConfig(configJson);
       } catch (e) {
         return Uint8List.fromList(utf8.encode(
           '<!DOCTYPE html><html><body><p>${HtmlText.escape('$e')}</p></body></html>',

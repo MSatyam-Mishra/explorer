@@ -1,0 +1,203 @@
+"""Generates lib/shared/file_icons/file_icon_catalog.g.dart from assets/iocns.
+
+Run from the project root after adding or renaming icons:
+    python tool/generate_file_icon_catalog.py
+
+Every mapping below is checked against the files on disk; entries whose icon
+doesn't exist are dropped and reported, so the app never asks for a missing
+asset.
+"""
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ICONS = os.path.join(ROOT, 'assets', 'iocns')
+OUT = os.path.join(ROOT, 'lib', 'shared', 'file_icons', 'file_icon_catalog.g.dart')
+
+# Language/tool logos by extension (assets/iocns/programming/<icon>.svg).
+CODE_BY_EXTENSION = {
+    'js': 'js', 'mjs': 'js', 'cjs': 'js', 'jsx': 'jsx', 'ts': 'typeScript',
+    'mts': 'typeScript', 'cts': 'typeScript', 'tsx': 'react',
+    'json': 'json', 'jsonc': 'json', 'json5': 'json5', 'jsonld': 'jsonld',
+    'har': 'json', 'arb': 'json', 'yaml': 'yaml', 'yml': 'yaml',
+    'toml': 'toml', 'xml': 'xml', 'xsd': 'xml', 'xsl': 'xml', 'xslt': 'xml',
+    'plist': 'plist', 'py': 'python', 'pyw': 'python', 'pyi': 'python',
+    'ipynb': 'jupyter', 'rb': 'ruby', 'php': 'php', 'java': 'java',
+    'class': 'class', 'kt': 'kotlin', 'kts': 'kotlinscript', 'scala': 'scala',
+    'groovy': 'groovy', 'gradle': 'gradle', 'swift': 'swift', 'go': 'go',
+    'rs': 'rust', 'dart': 'dart', 'c': 'c', 'h': 'c', 'cpp': 'cpp',
+    'cc': 'cpp', 'cxx': 'cpp', 'hpp': 'cpp', 'hh': 'cpp',
+    'hxx': 'cpp', 'cs': 'csharp', 'mm': 'objc',
+    'lua': 'lua', 'r': 'r', 'jl': 'julia',
+    'erl': 'erlang', 'hrl': 'erlang', 'hs': 'haskell', 'clj': 'clojure',
+    'cljs': 'clojure', 'edn': 'clojure', 'elm': 'elm', 'ml': 'ocaml',
+    'mli': 'ocaml', 'fs': 'fsharp', 'fsx': 'fsharp', 'nim': 'nim', 'zig': 'zig',
+    'v': 'v', 'd': 'dlang', 'vala': 'vala', 'cr': 'crystal', 'sol': 'solidity',
+    'asm': 'asm', 's': 'asm', 'wasm': 'webassembly', 'wat': 'webassembly',
+    'sh': 'shell', 'bash': 'shell', 'zsh': 'shell', 'fish': 'fish',
+    'ps1': 'powershell', 'psm1': 'powershell', 'psd1': 'powershell',
+    'bat': 'windows', 'cmd': 'windows', 'sql': 'sql', 'db': 'db', 'sqlite': 'sqlite',
+    'sqlite3': 'sqlite', 'graphql': 'graphql', 'gql': 'graphql',
+    'proto': 'protobuf', 'prisma': 'prisma', 'tf': 'terraform',
+    'hcl': 'terraform', 'html': 'html', 'htm': 'html', 'xhtml': 'html',
+    'css': 'css', 'scss': 'scss', 'sass': 'sass', 'less': 'less',
+    'styl': 'stylus', 'pug': 'pug', 'ejs': 'ejs', 'twig': 'twig',
+    'liquid': 'liquid', 'njk': 'nunjucks', 'vue': 'vue', 'svelte': 'svelte',
+    'astro': 'astro', 'md': 'markdown', 'markdown': 'markdown',
+    'mdown': 'markdown', 'mkd': 'markdown', 'mdx': 'mdx', 'rst': 'rst',
+    'adoc': 'asciidoc', 'asciidoc': 'asciidoc', 'org': 'orgmode', 'tex': 'tex',
+    'sty': 'tex', 'cls': 'tex', 'bib': 'bibtex', 'diff': 'diff',
+    'patch': 'patch', 'log': 'log', 'lock': 'lock', 'ini': 'config',
+    'cfg': 'config', 'conf': 'config', 'config': 'config',
+    'properties': 'config', 'prop': 'config', 'env': 'config',
+    'editorconfig': 'editorconfig', 'key': 'key', 'pub': 'key', 'pem': 'certificate',
+    'crt': 'certificate', 'cer': 'certificate', 'csr': 'certificate',
+    'apk': 'apk', 'aab': 'apk', 'xapk': 'apk', 'apks': 'apk', 'dll': 'dll',
+    'iso': 'iso', 'deb': 'debian', 'vsix': 'vsix', 'csproj': 'csproj',
+    'vbproj': 'vbproj', 'sln': 'vs', 'vb': 'vb',
+    'cmake': 'cmake', 'mk': 'makefile', 'make': 'makefile', 'mak': 'makefile',
+    'dockerfile': 'docker', 'nix': 'nix', 'gd': 'godot', 'tscn': 'godot',
+    'unity': 'unity', 'blend': 'blender', 'cabal': 'cabal', 'pbxproj': 'xcode',
+    'http': 'http', 'jsp': 'jsp', 'reg': 'config', 'gitignore': 'gitignore',
+    'gitattributes': 'git', 'npmrc': 'npm', 'babelrc': 'babel',
+    'eslintrc': 'eslint', 'prettierrc': 'prettier', 'htaccess': 'htaccess',
+    'gpx': 'xml', 'kml': 'xml', 'rss': 'xml', 'atom': 'xml', 'opml': 'xml',
+}
+
+# Logos for well-known file names (lower case, full name).
+CODE_BY_NAME = {
+    'dockerfile': 'docker', 'docker-compose.yml': 'dockercompose',
+    'docker-compose.yaml': 'dockercompose', 'compose.yml': 'dockercompose',
+    'compose.yaml': 'dockercompose', '.dockerignore': 'dockerignore',
+    '.gitignore': 'gitignore', '.gitattributes': 'git', '.gitmodules': 'git',
+    '.npmignore': 'npmignore', 'package.json': 'npm',
+    'package-lock.json': 'npmlock', 'npm-shrinkwrap.json': 'npmshrinkwrap',
+    'yarn.lock': 'yarnlock', '.yarnrc': 'yarn', 'pnpm-lock.yaml': 'pnpm',
+    'pnpm-workspace.yaml': 'pnpm', 'bun.lockb': 'bunlock', 'bun.lock': 'bunlock',
+    'tsconfig.json': 'tsconfig', 'jsconfig.json': 'jsconfig',
+    '.eslintrc': 'eslint', '.eslintrc.js': 'eslint', '.eslintrc.json': 'eslint',
+    'eslint.config.js': 'eslint', '.eslintignore': 'eslintignore',
+    '.prettierrc': 'prettierconfig', '.prettierrc.json': 'prettierconfig',
+    'prettier.config.js': 'prettierconfig', '.prettierignore': 'prettierignore', '.babelrc': 'babel',
+    'babel.config.js': 'babelconfig', '.editorconfig': 'editorconfig',
+    '.browserslistrc': 'browserslist', 'readme': 'readme', 'readme.md': 'readme',
+    'readme.txt': 'readme', 'license': 'license', 'license.md': 'license',
+    'license.txt': 'license', 'licence': 'license', 'copying': 'license',
+    'changelog': 'changelog', 'changelog.md': 'changelog',
+    'authors': 'authors', 'authors.md': 'authors', 'todo': 'todo',
+    'todo.md': 'todo', 'makefile': 'makefile', 'gnumakefile': 'makefile',
+    'cmakelists.txt': 'cmakelists', 'build.gradle': 'gradle',
+    'build.gradle.kts': 'gradlekts', 'settings.gradle': 'gradle',
+    'settings.gradle.kts': 'gradlekts', 'gradlew': 'gradlew',
+    'gradlew.bat': 'gradlew', 'gradle.properties': 'gradle',
+    'pom.xml': 'maven', 'androidmanifest.xml': 'androidManifest',
+    'pubspec.yaml': 'flutter', 'pubspec.lock': 'flutterlock',
+    'analysis_options.yaml': 'dart', '.metadata': 'flutter',
+    'cargo.toml': 'cargo', 'cargo.lock': 'cargo',
+    'rust-toolchain.toml': 'rusttoolchain', 'go.mod': 'go', 'go.sum': 'go',
+    'requirements.txt': 'python', 'pyproject.toml': 'python',
+    'pipfile': 'pipfile', 'pipfile.lock': 'pipfilelock',
+    'poetry.lock': 'poetry', '.python-version': 'pythonversion',
+    'gemfile': 'bundle', 'gemfile.lock': 'bundle', 'composer.json': 'composer',
+    'composer.lock': 'composer', '.htaccess': 'htaccess',
+    'nginx.conf': 'nginx', '.nvmrc': 'nodeversion', '.node-version': 'nodeversion',
+    'nodemon.json': 'nodemon', 'angular.json': 'angular',
+    'next.config.js': 'nextjs', 'next.config.mjs': 'nextjs',
+    'next.config.ts': 'nextjs', 'nuxt.config.js': 'nuxt',
+    'nuxt.config.ts': 'nuxt', 'vite.config.js': 'vite', 'vite.config.ts': 'vite',
+    'webpack.config.js': 'webpack', 'tailwind.config.js': 'tailwindcss',
+    'tailwind.config.ts': 'tailwindcss', 'svelte.config.js': 'svelte',
+    'astro.config.mjs': 'astroconfig', 'vue.config.js': 'vueconfig',
+    '.vuerc': 'vuerc', 'podfile': 'cocoapods', 'podfile.lock': 'cocoapods',
+    'vagrantfile': 'vagrant', 'procfile': 'procfile', 'jenkinsfile': 'jenkins',
+    '.travis.yml': 'travis', '.gitlab-ci.yml': 'gitlab',
+    'firebase.json': 'firebase', '.firebaserc': 'firebase',
+    'netlify.toml': 'netlify', 'vercel.json': 'vercel',
+    'deno.json': 'deno', 'deno.jsonc': 'deno',
+}
+
+
+def solid_color(path):
+    m = re.search(r'<path[^>]*fill="(#[0-9A-Fa-f]{6})"', open(path, encoding='utf-8').read())
+    return m.group(1).upper() if m else None
+
+
+def main():
+    prog_dir = os.path.join(ICONS, 'programming')
+    programming = sorted(f[:-4] for f in os.listdir(prog_dir) if f.endswith('.svg'))
+    have = set(programming)
+    missing = []
+    code_ext = {}
+    for ext, icon in CODE_BY_EXTENSION.items():
+        if icon in have:
+            code_ext[ext] = icon
+        else:
+            missing.append(f'.{ext} -> {icon}')
+    code_name = {}
+    for name, icon in CODE_BY_NAME.items():
+        if icon in have:
+            code_name[name] = icon
+        else:
+            missing.append(f'{name} -> {icon}')
+
+    icon1 = os.listdir(os.path.join(ICONS, 'file_type', 'icon_1'))
+    solid, outline, solid_colors, cat_solid, cat_outline = {}, set(), {}, set(), set()
+    for f in icon1:
+        m = re.match(r'Color=(.+?), File Type=(.+)\.svg$', f)
+        if not m:
+            continue
+        style, label = m.groups()
+        if style == 'Solid':
+            solid_colors[label] = solid_color(os.path.join(ICONS, 'file_type', 'icon_1', f))
+        elif style == 'Outline + Color':
+            outline.add(label)
+        elif style == 'Icon + Solid':
+            cat_solid.add(label)
+        elif style == 'Icon + Outline':
+            cat_outline.add(label)
+    classic = sorted(f[:-4] for f in os.listdir(os.path.join(ICONS, 'file_type', 'icon_2')) if f.endswith('.svg'))
+
+    def dart_set(name, items, per_line=6):
+        items = sorted(items)
+        lines = []
+        for i in range(0, len(items), per_line):
+            lines.append('  ' + ' '.join(f"'{x}'," for x in items[i:i + per_line]))
+        return f'const {name} = <String>{{\n' + '\n'.join(lines) + '\n};\n'
+
+    def dart_map(name, mapping, value=lambda v: f"'{v}'", kind='String'):
+        lines = [f"  '{k}': {value(v)}," for k, v in sorted(mapping.items())]
+        return f'const {name} = <String, {kind}>{{\n' + '\n'.join(lines) + '\n};\n'
+
+    out = [
+        '// GENERATED by tool/generate_file_icon_catalog.py from assets/iocns.',
+        '// Do not edit by hand; re-run the script after changing the icons.',
+        '// ignore_for_file: lines_longer_than_80_chars',
+        '',
+        '/// Every icon in assets/iocns/programming (file names without .svg).',
+        dart_set('kProgrammingIcons', programming),
+        '/// Language/tool logo for an extension.',
+        dart_map('kCodeIconByExtension', code_ext),
+        '/// Language/tool logo for a well-known file name (lower case).',
+        dart_map('kCodeIconByName', code_name),
+        '/// Labels with an icon_1 "Solid" icon, and that icon\'s page colour.',
+        dart_map('kSolidLabelColors', solid_colors, value=lambda v: '0xFF' + v[1:], kind='int'),
+        '/// Labels with an icon_1 "Outline + Color" icon.',
+        dart_set('kOutlineLabels', outline),
+        '/// Category icons in icon_1 ("Icon + Solid" / "Icon + Outline").',
+        dart_set('kCategorySolid', cat_solid),
+        dart_set('kCategoryOutline', cat_outline),
+        '/// Labels with an icon_2 (classic) icon.',
+        dart_set('kClassicLabels', classic),
+    ]
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(out))
+    print(f'wrote {OUT}: {len(programming)} logos, {len(code_ext)} extensions, '
+          f'{len(code_name)} names, {len(solid_colors)} solid, {len(classic)} classic')
+    if missing:
+        print('dropped (icon not found):', ', '.join(missing), file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()

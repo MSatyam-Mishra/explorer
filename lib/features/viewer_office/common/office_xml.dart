@@ -1,4 +1,93 @@
 import 'package:xml/xml.dart';
+import 'package:xml/xml_events.dart';
+
+/// Pull-parses [xml], handing over the element children of the container
+/// at [path] (local names below the root, e.g. `['body']` for a Word main
+/// part) one at a time, as soon as each is complete, with its `[start, end)`
+/// range in [xml]. A long document's first blocks can then be shown before
+/// the rest is parsed; building the elements costs the same as a full DOM.
+///
+/// Children of the root named in [collect] (e.g. ODF styles that precede
+/// the body) are built whole and passed to [onCollected].
+///
+/// Throws [XmlException] (a [FormatException]) for malformed markup.
+void streamXmlChildren(
+  String xml,
+  List<String> path,
+  void Function(XmlElement element, int start, int end) onChild, {
+  Set<String> collect = const {},
+  void Function(XmlElement element)? onCollected,
+}) {
+  final open = <String>[]; // local names of the open ancestors
+  List<XmlEvent>? subtree;
+  var subtreeDepth = 0;
+  var subtreeStart = 0;
+  var collecting = false;
+
+  void deliver(int end) {
+    final nodes = const XmlNodeDecoder().convert(subtree!);
+    subtree = null;
+    for (final n in nodes) {
+      if (n is! XmlElement) continue;
+      if (collecting) {
+        onCollected?.call(n);
+      } else {
+        onChild(n, subtreeStart, end);
+      }
+      break;
+    }
+  }
+
+  bool inContainer() {
+    if (open.length != path.length + 1) return false;
+    for (var i = 0; i < path.length; i++) {
+      if (open[i + 1] != path[i]) return false;
+    }
+    return true;
+  }
+
+  for (final event in parseEvents(
+    xml,
+    validateNesting: true,
+    withLocation: true,
+  )) {
+    final current = subtree;
+    if (current != null) {
+      current.add(event);
+      if (event is XmlStartElementEvent) {
+        if (!event.isSelfClosing) subtreeDepth++;
+      } else if (event is XmlEndElementEvent) {
+        if (--subtreeDepth == 0) deliver(event.stop ?? xml.length);
+      }
+      continue;
+    }
+    if (event is XmlStartElementEvent) {
+      final local = _localName(event.name);
+      final child = inContainer();
+      final collected =
+          !child && open.length == 1 && collect.contains(local);
+      if (child || collected) {
+        collecting = collected;
+        subtree = [event];
+        subtreeStart = event.start ?? 0;
+        if (event.isSelfClosing) {
+          deliver(event.stop ?? xml.length);
+        } else {
+          subtreeDepth = 1;
+        }
+        continue;
+      }
+      if (!event.isSelfClosing) open.add(local);
+    } else if (event is XmlEndElementEvent) {
+      if (open.isNotEmpty) open.removeLast();
+    }
+  }
+}
+
+String _localName(String qualified) {
+  final i = qualified.indexOf(':');
+  return i < 0 ? qualified : qualified.substring(i + 1);
+}
 
 /// Namespace-prefix-agnostic helpers for walking Office XML.
 ///

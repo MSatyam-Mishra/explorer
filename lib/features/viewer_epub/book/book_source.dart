@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'book_models.dart';
+import 'document_preparer.dart';
 import 'epub_parser.dart';
 import 'fb2_parser.dart';
 import 'html_text.dart';
@@ -26,19 +27,56 @@ abstract class BookSource {
   /// Full-text search over the spine documents.
   Future<List<SearchHit>> search(String query, {int maxResults = 500});
 
+  /// Documents smaller than this are prepared on the calling isolate; an
+  /// isolate spawn costs more than the work.
+  static const inlinePrepareLimit = 24 * 1024;
+
+  /// Reads the spine document at [path] and prepares it for the reader
+  /// ([options] carries everything but the bytes).
+  Future<PreparedDocument> prepare(
+    String path,
+    DocumentPrepareRequest options,
+  ) async {
+    final bytes = await readResource(path);
+    if (bytes == null) {
+      throw const BookOpenException('This chapter is missing from the book.');
+    }
+    final request = options.withBytes(bytes);
+    return bytes.length < inlinePrepareLimit
+        ? prepareDocument(request)
+        : _prepareInBackground(request);
+  }
+
+  static Future<PreparedDocument> _prepareInBackground(
+    DocumentPrepareRequest request,
+  ) =>
+      Isolate.run(() => prepareDocument(request));
+
+  /// Persists anything worth caching from this open (the parsed structure),
+  /// once the book is on screen.
+  Future<void> saveCache() async {}
+
   Future<void> dispose();
 
   /// Opens [file], sniffing the content first and falling back to the
   /// extension. Throws [BookOpenException] with a friendly message.
-  static Future<BookSource> open(File file) async {
-    if (!await file.exists()) {
+  ///
+  /// With [cacheDir], an EPUB's parsed structure is cached there and reused
+  /// while the file is unchanged.
+  static Future<BookSource> open(File file, {Future<String?>? cacheDir}) async {
+    final headerFuture = _readHeader(file, 4096)
+        .then<Uint8List?>((h) => h, onError: (_) => null);
+    final stat = await file.stat();
+    final header = await headerFuture;
+    if (stat.type == FileSystemEntityType.notFound) {
       throw const BookOpenException('The file no longer exists.');
     }
-    final length = await file.length();
-    if (length == 0) {
+    if (stat.size == 0) {
       throw const BookOpenException('The file is empty.');
     }
-    final header = await _readHeader(file, 4096);
+    if (header == null) {
+      throw const BookOpenException("The file can't be read.", retryable: true);
+    }
     final name = file.path.toLowerCase();
 
     final isZip = header.length >= 4 &&
@@ -58,7 +96,13 @@ abstract class BookSource {
       if (name.endsWith('.fb2.zip') || name.endsWith('.fbz')) {
         return Fb2BookSource.open(file);
       }
-      final epub = await EpubBookSource.tryOpen(file);
+      String? dir;
+      try {
+        dir = await cacheDir;
+      } catch (_) {
+        dir = null;
+      }
+      final epub = await EpubBookSource.tryOpen(file, stat: stat, cacheDir: dir);
       if (epub != null) return epub;
       // A ZIP without an OPF: maybe a zipped FB2.
       return Fb2BookSource.open(file);

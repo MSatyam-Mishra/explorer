@@ -1,15 +1,23 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:explorer/core/services/local_content_server.dart';
 import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
+import 'package:explorer/features/viewer_text/text_document.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as p;
 
 /// Renders an HTML page (with its relative CSS/JS/images) and lets the user
 /// edit the source.
+///
+/// Opened files are untrusted: scripts are off until the user turns them on
+/// for this page, the loopback mount serves only web-resource file types
+/// (never documents or databases from the same folder), and navigation away
+/// from the page is confirmed and handed to the system browser.
 class HtmlViewerScreen extends StatefulWidget {
   final File file;
   const HtmlViewerScreen({super.key, required this.file});
@@ -21,22 +29,34 @@ class HtmlViewerScreen extends StatefulWidget {
 class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
   final _editorKey = GlobalKey<TextEditorPaneState>();
   bool _showSource = false;
+
+  /// The source editor is built on first use: laying out a whole page's
+  /// source in a hidden TextField would slow down showing the page.
+  bool _sourceCreated = false;
   bool _dirty = false;
   Uri? _base;
   int _renderToken = 0;
+  bool _scriptsEnabled = false;
+  bool _pageHasScripts = false;
 
   @override
   void initState() {
     super.initState();
     // Served over loopback HTTP: Android blocks file:// access in WebViews
     // by default, and relative resources then resolve like on a web server.
-    LocalContentServer.instance.mountDirectory(widget.file.parent.path).then((base) {
+    LocalContentServer.instance
+        .mountDirectory(
+          widget.file.parent.path,
+          allowedExtensions: LocalContentServer.webPageExtensions,
+        )
+        .then((base) {
       if (!mounted) {
         LocalContentServer.instance.unmount(base);
         return;
       }
       setState(() => _base = base);
     });
+    _detectScripts();
   }
 
   @override
@@ -44,6 +64,19 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
     final base = _base;
     if (base != null) LocalContentServer.instance.unmount(base);
     super.dispose();
+  }
+
+  /// Only pages that actually contain script get the "scripts are off"
+  /// notice.
+  Future<void> _detectScripts() async {
+    try {
+      final head = await readHead(widget.file, 512 * 1024);
+      final text = latin1.decode(head, allowInvalid: true).toLowerCase();
+      final hasScripts = text.contains('<script') ||
+          text.contains('javascript:') ||
+          RegExp(r'<[a-z][^>]*\son[a-z]+\s*=').hasMatch(text);
+      if (mounted && hasScripts) setState(() => _pageHasScripts = true);
+    } catch (_) {}
   }
 
   Future<void> _save() async {
@@ -54,6 +87,49 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
         const SnackBar(content: Text('Saved')),
       );
     }
+  }
+
+  Future<NavigationActionPolicy> _onNavigate(NavigationAction action) async {
+    final url = action.request.url;
+    final base = _base;
+    if (url == null || base == null) return NavigationActionPolicy.CANCEL;
+    final text = url.toString();
+    if (text.startsWith(base.toString()) ||
+        text.startsWith('about:') ||
+        text.startsWith('data:') ||
+        text.startsWith('blob:')) {
+      return NavigationActionPolicy.ALLOW;
+    }
+    // Leaving the page (or a sub-frame loading something external).
+    if (action.isForMainFrame &&
+        (url.scheme == 'http' || url.scheme == 'https' || url.scheme == 'mailto')) {
+      _offerExternal(text);
+    }
+    return NavigationActionPolicy.CANCEL;
+  }
+
+  void _offerExternal(String url) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Link to $url', maxLines: 2, overflow: TextOverflow.ellipsis),
+        action: SnackBarAction(
+          label: 'Open',
+          onPressed: () async {
+            try {
+              await InAppBrowser.openWithSystemBrowser(url: WebUri(url));
+            } catch (_) {
+              await Clipboard.setData(ClipboardData(text: url));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Link copied')),
+                );
+              }
+            }
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -107,7 +183,10 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
                   ),
                 ],
                 selected: {_showSource},
-                onSelectionChanged: (s) => setState(() => _showSource = s.first),
+                onSelectionChanged: (s) => setState(() {
+                  _showSource = s.first;
+                  if (_showSource) _sourceCreated = true;
+                }),
                 showSelectedIcon: false,
                 style: const ButtonStyle(
                   visualDensity: VisualDensity.compact,
@@ -123,11 +202,14 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
             index: _showSource ? 1 : 0,
             children: [
               _buildRendered(),
-              TextEditorPane(
-                key: _editorKey,
-                file: widget.file,
-                onDirtyChanged: (dirty) => setState(() => _dirty = dirty),
-              ),
+              if (_sourceCreated)
+                TextEditorPane(
+                  key: _editorKey,
+                  file: widget.file,
+                  onDirtyChanged: (dirty) => setState(() => _dirty = dirty),
+                )
+              else
+                const SizedBox.shrink(),
             ],
           ),
         ),
@@ -139,15 +221,51 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
     final base = _base;
     if (base == null) return const Center(child: CircularProgressIndicator());
     final url = base.resolve(Uri.encodeComponent(p.basename(widget.file.path)));
-    return InAppWebView(
-      key: ValueKey(_renderToken),
-      initialUrlRequest: URLRequest(url: WebUri.uri(url)),
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: true,
-        supportZoom: true,
-        builtInZoomControls: true,
-        displayZoomControls: false,
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        if (_pageHasScripts && !_scriptsEnabled)
+          Material(
+            color: scheme.secondaryContainer.withValues(alpha: 0.6),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+              child: Row(
+                children: [
+                  Icon(Icons.shield_outlined, size: 18, color: scheme.onSecondaryContainer),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Scripts on this page are off. Turn them on only if you '
+                      'trust where the file came from.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                          ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _scriptsEnabled = true),
+                    child: const Text('Enable scripts'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        Expanded(
+          child: InAppWebView(
+            key: ValueKey('$_renderToken/$_scriptsEnabled'),
+            initialUrlRequest: URLRequest(url: WebUri.uri(url)),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: _scriptsEnabled,
+              javaScriptCanOpenWindowsAutomatically: false,
+              useShouldOverrideUrlLoading: true,
+              supportZoom: true,
+              builtInZoomControls: true,
+              displayZoomControls: false,
+            ),
+            shouldOverrideUrlLoading: (controller, action) => _onNavigate(action),
+          ),
+        ),
+      ],
     );
   }
 }

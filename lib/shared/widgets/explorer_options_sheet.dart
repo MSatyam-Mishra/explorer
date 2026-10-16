@@ -2,6 +2,7 @@ import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/core/theme/app_color_theme.dart';
 import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
+import 'package:explorer/shared/file_icons/file_icons.dart';
 import 'package:explorer/shared/icons/app_icons.dart';
 import 'package:explorer/shared/liquid_glass/explorer_liquid_glass.dart';
 import 'package:explorer/shared/widgets/theme_palette_circle.dart';
@@ -108,6 +109,21 @@ class ExplorerOptionsSheet extends StatelessWidget {
           onChanged: (_) {
             context.read<ThemeCubit>().toggleBrightness();
           },
+        ),
+        const SizedBox(height: 8),
+        _SectionLabel('File icons', color: appearance.textSecondary),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final style in FileIconStyle.values)
+              ChoiceChip(
+                avatar: FileIcon(path: 'preview.pdf', size: 20, style: style),
+                label: Text(style.label),
+                selected: themeSettings.fileIconStyle == style,
+                onSelected: (_) =>
+                    context.read<ThemeCubit>().setFileIconStyle(style),
+              ),
+          ],
         ),
         const SizedBox(height: 8),
         _SectionLabel('Color theme', color: appearance.textSecondary),

@@ -28,15 +28,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Future<void> _initPlayer() async {
+    final controller = VideoPlayerController.file(widget.videoFile);
+    _videoPlayerController = controller;
     try {
-      _videoPlayerController = VideoPlayerController.file(widget.videoFile);
-      await _videoPlayerController.initialize();
+      await controller.initialize();
+      // Left the screen while the player was preparing: dispose() already
+      // released it; don't start playback behind the user's back.
+      if (!mounted) return;
 
       _chewieController = ChewieController(
-        videoPlayerController: _videoPlayerController,
+        videoPlayerController: controller,
         autoPlay: true,
         looping: false,
-        aspectRatio: _videoPlayerController.value.aspectRatio,
+        aspectRatio: controller.value.aspectRatio,
         allowFullScreen: true,
         allowMuting: true,
         showControls: true,

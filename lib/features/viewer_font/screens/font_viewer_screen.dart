@@ -21,6 +21,11 @@ class FontViewerScreen extends StatefulWidget {
 class _FontViewerScreenState extends State<FontViewerScreen> {
   static int _loadCounter = 0;
 
+  /// Fonts registered with the engine can't be unregistered, so reopening
+  /// the same (unchanged) file reuses its family instead of loading another
+  /// copy — which also makes reopening instant.
+  static final Map<String, (String, Map<String, String>)> _registered = {};
+
   String? _family;
   Map<String, String> _info = const {};
   String? _error;
@@ -42,16 +47,31 @@ class _FontViewerScreenState extends State<FontViewerScreen> {
 
   Future<void> _load() async {
     try {
+      final stat = await widget.file.stat();
+      final cacheKey =
+          '${widget.file.path}|${stat.size}|${stat.modified.millisecondsSinceEpoch}';
+      final cached = _registered[cacheKey];
+      if (cached != null) {
+        if (mounted) {
+          setState(() {
+            _family = cached.$1;
+            _info = cached.$2;
+          });
+        }
+        return;
+      }
       final bytes = await widget.file.readAsBytes();
+      // The name table is tiny: show it while the engine registers the font.
+      final info = readFontNames(bytes);
+      if (!mounted) return;
+      setState(() => _info = info);
       final family = 'preview_font_${_loadCounter++}';
       final loader = FontLoader(family)
         ..addFont(Future.value(ByteData.sublistView(bytes)));
       await loader.load();
+      _registered[cacheKey] = (family, info);
       if (!mounted) return;
-      setState(() {
-        _family = family;
-        _info = readFontNames(bytes);
-      });
+      setState(() => _family = family);
     } catch (e) {
       if (mounted) setState(() => _error = 'This font could not be loaded.\n$e');
     }

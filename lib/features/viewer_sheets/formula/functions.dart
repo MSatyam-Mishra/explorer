@@ -490,7 +490,8 @@ final Map<String, FormulaFn> formulaFunctions = {
   'VAR.P': (a, ev) => _variance(_numbers(ev, a), false),
   'SUMPRODUCT': (a, ev) {
     if (a.isEmpty) _err(CellError.value);
-    final grids = [for (final n in a) ev.grid(ev.eval(n))];
+    // Arguments are evaluated element-wise: (A2:A9="x")*B2:B9, --(A2:A9>0).
+    final grids = [for (final n in a) ev.arrayGrid(n)];
     final rows = grids.first.length;
     final cols = rows == 0 ? 0 : grids.first.first.length;
     for (final g in grids) {

@@ -98,6 +98,8 @@ class ThreeDViewerController extends ChangeNotifier {
     _errorMessage = null;
     _errorDetail = null;
     _errorCode = null;
+    // A new page only knows the inset in its URL ([initialTopInset]).
+    _sentTopInset = null;
     _notify();
   }
 

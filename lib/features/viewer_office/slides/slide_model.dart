@@ -326,9 +326,56 @@ class SlideTable extends SlideShape {
   final List<double> rowHeights;
 }
 
+/// A zip entry of the presentation file holding an image, read only when
+/// the image is shown. Carries the file's size and modification time so a
+/// stale reference (the file was rewritten) can be detected and re-resolved
+/// by [entry] name.
+class SlideImageRef {
+  const SlideImageRef({
+    required this.path,
+    required this.entry,
+    required this.fileLength,
+    required this.fileModified,
+    required this.offset,
+    required this.compressedSize,
+    required this.method,
+  });
+
+  final String path;
+  final String entry;
+  final int fileLength;
+
+  /// Milliseconds since epoch.
+  final int fileModified;
+
+  /// Offset of the entry's local header.
+  final int offset;
+  final int compressedSize;
+
+  /// Zip compression method (0 stored, 8 deflated).
+  final int method;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SlideImageRef &&
+      other.path == path &&
+      other.entry == entry &&
+      other.fileLength == fileLength &&
+      other.fileModified == fileModified;
+
+  @override
+  int get hashCode => Object.hash(path, entry, fileLength, fileModified);
+}
+
 class SlideImageData {
-  SlideImageData(this.bytes, this.extension);
-  final Uint8List bytes;
+  /// Image bytes already in memory.
+  SlideImageData(Uint8List this.bytes, this.extension) : ref = null;
+
+  /// Image read on demand from the presentation file.
+  SlideImageData.lazy(SlideImageRef this.ref, this.extension) : bytes = null;
+
+  final Uint8List? bytes;
+  final SlideImageRef? ref;
   final String extension;
 }
 
@@ -342,6 +389,7 @@ class Slide {
     this.partName,
     this.relId,
     this.slideId,
+    this.pending = false,
   }) : shapes = shapes ?? [];
 
   int index;
@@ -349,6 +397,9 @@ class Slide {
   SlideFill? background;
   String notes;
   bool hidden;
+
+  /// Still being read in the background (shown as a placeholder).
+  bool pending;
 
   /// PPTX: `ppt/slides/slideN.xml`, its relationship id in
   /// `presentation.xml.rels`, and its `p:sldId` id.

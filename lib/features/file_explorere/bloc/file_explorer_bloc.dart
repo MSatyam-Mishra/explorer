@@ -67,7 +67,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
           event.option,
           event.order,
         );
-        final sortedEntities = _sortEntities(
+        final sortedEntities = await _sortEntities(
           currentState.entities,
           event.option,
           event.order,
@@ -89,7 +89,13 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
     Emitter<FileExplorerState> emit,
   ) async {
     try {
-      emit(FileExplorerLoading());
+      // Refreshing the folder already on screen (e.g. after a viewer saved a
+      // copy) keeps the list and its scroll position instead of flashing a
+      // spinner.
+      final current = state;
+      final refreshing =
+          current is FileExplorerLoaded && current.path == event.path;
+      if (!refreshing) emit(FileExplorerLoading());
 
       if (!await repository.exists(event.path)) {
         emit(FileExplorerError("Directory not found or access denied."));
@@ -111,7 +117,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final List<FileSystemEntity> entities = await repository.listEntities(
         event.path,
       );
-      final sortedEntities = _sortEntities(
+      final sortedEntities = await _sortEntities(
         entities,
         sortOption,
         sortOrder,
@@ -137,46 +143,51 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
     return (pathLabels[entity.path] ?? p.basename(entity.path)).toLowerCase();
   }
 
-  List<FileSystemEntity> _sortEntities(
+  static Future<FileStat?> _statOrNull(FileSystemEntity entity) async {
+    try {
+      return await entity.stat();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sorts with folders first. Each entry's key is computed once (size/date
+  /// via async stat calls) instead of inside the comparator, which used to
+  /// make O(n log n) synchronous stat calls on the UI isolate.
+  Future<List<FileSystemEntity>> _sortEntities(
     List<FileSystemEntity> entities,
     SortOption option,
     SortOrder order, {
     Map<String, String> pathLabels = const {},
-  }) {
-    entities.sort((a, b) {
-      int comparison = 0;
-      switch (option) {
-        case SortOption.name:
-          comparison = _sortKey(a, pathLabels).compareTo(_sortKey(b, pathLabels));
-          break;
-        case SortOption.size:
-          // For directories, we can't easily get size without traversing, so treat them as 0 or equal
-          int sizeA = (a is File) ? a.lengthSync() : 0;
-          int sizeB = (b is File) ? b.lengthSync() : 0;
-          comparison = sizeA.compareTo(sizeB);
-          break;
-        case SortOption.date:
-          comparison = a.statSync().modified.compareTo(b.statSync().modified);
-          break;
-        case SortOption.type:
-          String typeA = (a is Directory) ? 'dir' : p.extension(a.path);
-          String typeB = (b is Directory) ? 'dir' : p.extension(b.path);
-          comparison = typeA.compareTo(typeB);
-          break;
-      }
-
-      // Always keep folders on top regardless of sort option?
-      // User requirements didn't strictly say "Folders on top", but it's standard convention.
-      // However, for "Sort by Size/Date", mixing might be desired.
-      // Let's implement strict sorting first, but keep folders-first as a secondary rule if names collide?
-      // Actually, standard behavior is usually Folders First. Let's enforce Folders First.
-      bool aIsDir = a is Directory;
-      bool bIsDir = b is Directory;
+  }) async {
+    final List<Comparable<Object>> keys;
+    switch (option) {
+      case SortOption.name:
+        keys = [for (final e in entities) _sortKey(e, pathLabels)];
+      case SortOption.size:
+        // Folder sizes would need a full traversal; they sort as 0.
+        final stats = await Future.wait([
+          for (final e in entities)
+            e is File ? _statOrNull(e) : Future<FileStat?>.value(null),
+        ]);
+        keys = [for (final s in stats) s?.size ?? 0];
+      case SortOption.date:
+        final stats = await Future.wait(entities.map(_statOrNull));
+        keys = [for (final s in stats) s?.modified.millisecondsSinceEpoch ?? 0];
+      case SortOption.type:
+        keys = [
+          for (final e in entities) e is Directory ? 'dir' : p.extension(e.path),
+        ];
+    }
+    final indices = List<int>.generate(entities.length, (i) => i);
+    indices.sort((i, j) {
+      final aIsDir = entities[i] is Directory;
+      final bIsDir = entities[j] is Directory;
       if (aIsDir && !bIsDir) return -1;
       if (!aIsDir && bIsDir) return 1;
-
+      final comparison = keys[i].compareTo(keys[j]);
       return order == SortOrder.ascending ? comparison : -comparison;
     });
-    return entities;
+    return [for (final i in indices) entities[i]];
   }
 }

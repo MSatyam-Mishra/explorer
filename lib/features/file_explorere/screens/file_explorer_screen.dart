@@ -33,14 +33,23 @@ import 'package:permission_handler/permission_handler.dart';
 
 FileActionsService fileActionsService = FileActionsService();
 
-class FileExplorerScreen extends StatelessWidget {
+class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
+
+  @override
+  State<FileExplorerScreen> createState() => _FileExplorerScreenState();
+}
+
+class _FileExplorerScreenState extends State<FileExplorerScreen> {
+  // Created once: building the FutureBuilder with a fresh future on every
+  // rebuild re-ran the permission check each time.
+  late final Future<PermissionStatus> _permission = _checkAndRequestPermission();
 
   @override
   Widget build(BuildContext context) {
     // We use a FutureBuilder to handle the initial permission check.
     return FutureBuilder<PermissionStatus>(
-      future: _checkAndRequestPermission(),
+      future: _permission,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Scaffold(
@@ -402,9 +411,11 @@ class _FileExplorerUI extends StatelessWidget {
       if (entity is Directory) {
         context.read<FileExplorerBloc>().add(LoadDirectory(entity.path));
       } else {
+        final bloc = context.read<FileExplorerBloc>();
         final result = await FileOpener.open(context, entity as File);
-        if (result == true) {
-          context.read<FileExplorerBloc>().add(LoadDirectory(state.path));
+        // Only re-list when the viewer changed the folder (saved a copy...).
+        if (result == true && !bloc.isClosed) {
+          bloc.add(LoadDirectory(state.path));
         }
       }
     }

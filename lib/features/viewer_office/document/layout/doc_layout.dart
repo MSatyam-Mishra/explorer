@@ -749,12 +749,21 @@ class DocLayoutResult {
     required this.header,
     required this.footer,
     this.headerFloats = const [],
+    this.complete = true,
   });
 
+  /// Laid-out blocks by block index (only a prefix while [complete] is
+  /// false).
   final List<LaidBlock> blocks;
+
+  /// Finished pages (more are appended while [complete] is false).
   final List<DocPageLayout> pages;
   final List<LaidBlock> header;
   final List<LaidBlock> footer;
+
+  /// Whether every block has been placed; until then [pages] holds the
+  /// pages finished so far (see [DocPaginator]).
+  bool complete;
 
   /// Floating pictures from the header/footer, repeated on every page
   /// (e.g. picture watermarks).
@@ -778,94 +787,185 @@ class DocLayoutResult {
   }
 }
 
-/// Lays out [model] into print pages. Yields to the UI between batches so
-/// big documents don't freeze it.
+/// Lays out [model] into print pages in one go, yielding to the UI between
+/// slices. Prefer [DocPaginator] to show the first pages early.
 Future<DocLayoutResult> layoutDocument(
   DocModel model,
   DocRenderContext ctx, {
   void Function(double progress)? onProgress,
   bool Function()? cancelled,
 }) async {
-  final engine = DocLayoutEngine(model, ctx);
-  final blocks = model.blocks;
-
-  // Page setup per block: a section break carries the setup of the section
-  // it ends.
-  final setups = List<DocPageSetup>.filled(blocks.length, model.page);
-  var cur = model.page;
-  for (var i = blocks.length - 1; i >= 0; i--) {
-    final b = blocks[i];
-    if (b is DocSectionBreak) cur = b.page;
-    setups[i] = cur;
+  final pager = DocPaginator(model, ctx);
+  while (!pager.step(const Duration(milliseconds: 12))) {
+    onProgress?.call(pager.progress);
+    await Future<void>.delayed(Duration.zero);
+    if (cancelled?.call() ?? false) break;
   }
+  return pager.result;
+}
 
-  final spacing = engine._effectiveSpacing(blocks);
-  final laid = <LaidBlock>[];
-  final sw = Stopwatch()..start();
-  for (var i = 0; i < blocks.length; i++) {
-    laid.add(
-      engine.layoutBlock(
-        blocks[i],
-        setups[i].contentWidth,
-        spacing: spacing[i],
-      ),
-    );
-    if (sw.elapsedMilliseconds > 12) {
-      onProgress?.call(i / blocks.length);
-      await Future<void>.delayed(Duration.zero);
-      if (cancelled?.call() ?? false) break;
-      sw.reset();
+/// Measures and paginates a document a slice at a time: each block is laid
+/// out and placed on pages right away, so the first page is ready after
+/// measuring roughly one page of text however long the document is.
+/// [result] grows as [step] runs; finished pages are appended to
+/// `result.pages` and `result.complete` turns true at the end.
+class DocPaginator {
+  DocPaginator(this.model, DocRenderContext ctx)
+    : _engine = DocLayoutEngine(model, ctx) {
+    final blocks = model.blocks;
+    // A section break carries the setup of the section it ends.
+    _setups = List<DocPageSetup>.filled(blocks.length, model.page);
+    var cur = model.page;
+    for (var i = blocks.length - 1; i >= 0; i--) {
+      final b = blocks[i];
+      if (b is DocSectionBreak) cur = b.page;
+      _setups[i] = cur;
     }
+    _page = DocPageLayout(blocks.isEmpty ? model.page : _setups.first);
+
+    final hw = model.page.contentWidth;
+    final header = _engine.layoutBlocks(model.header, hw);
+    final footer = _engine.layoutBlocks(model.footer, hw);
+    final floats = <DocPageFloat>[];
+    var hy = model.page.headerDistance;
+    for (final b in header) {
+      if (b is LaidParagraph) {
+        for (final f in b.floats) {
+          floats.add(DocPageFloat(f, hy));
+        }
+      }
+      hy += b.height;
+    }
+    final footerTop =
+        model.page.height -
+        model.page.footerDistance -
+        footer.fold<double>(0, (a, b) => a + b.height);
+    var fy = footerTop;
+    for (final b in footer) {
+      if (b is LaidParagraph) {
+        for (final f in b.floats) {
+          floats.add(DocPageFloat(f, fy));
+        }
+      }
+      fy += b.height;
+    }
+    result = DocLayoutResult(
+      blocks: [],
+      pages: [],
+      header: header,
+      footer: footer,
+      headerFloats: floats,
+      complete: false,
+    );
   }
 
-  final pages = <DocPageLayout>[];
-  var setup = blocks.isEmpty ? model.page : setups.first;
-  var page = DocPageLayout(setup);
-  var y = 0.0;
+  final DocModel model;
+  final DocLayoutEngine _engine;
+  late final List<DocPageSetup> _setups;
+  late final DocLayoutResult result;
+  late DocPageLayout _page;
+  double _y = 0;
+  int _next = 0;
 
-  void newPage(DocPageSetup s) {
-    pages.add(page);
-    page = DocPageLayout(s);
-    y = 0;
+  /// Share of blocks placed so far (0–1).
+  double get progress =>
+      model.blocks.isEmpty ? 1 : _next / model.blocks.length;
+
+  /// Places blocks for about [budget]. Returns true once the document is
+  /// fully paginated.
+  bool step(Duration budget) {
+    if (result.complete) return true;
+    final sw = Stopwatch()..start();
+    final blocks = model.blocks;
+    while (_next < blocks.length) {
+      _place(_next++);
+      if (sw.elapsed >= budget) return false;
+    }
+    result.pages.add(_page);
+    // Drop a trailing empty page created by a final break.
+    if (result.pages.length > 1 && result.pages.last.slices.isEmpty) {
+      result.pages.removeLast();
+    }
+    result.complete = true;
+    return true;
   }
 
-  for (var i = 0; i < laid.length; i++) {
-    final lb = laid[i];
-    final s = setups[i];
+  LaidBlock _laid(int i) {
+    final laid = result.blocks;
+    final blocks = model.blocks;
+    while (laid.length <= i) {
+      final k = laid.length;
+      laid.add(
+        _engine.layoutBlock(
+          blocks[k],
+          _setups[k].contentWidth,
+          spacing: _spacing(blocks, k),
+        ),
+      );
+    }
+    return laid[i];
+  }
+
+  /// Paragraph spacing with contextual spacing between same-style
+  /// paragraphs applied.
+  static (double, double)? _spacing(List<DocBlock> blocks, int i) {
+    final b = blocks[i];
+    if (b is! DocParagraph) return null;
+    var sb = b.spaceBefore;
+    var sa = b.spaceAfter;
+    if (b.contextualSpacing) {
+      final prev = i > 0 ? blocks[i - 1] : null;
+      final next = i + 1 < blocks.length ? blocks[i + 1] : null;
+      if (prev is DocParagraph && prev.styleId == b.styleId) sb = 0;
+      if (next is DocParagraph && next.styleId == b.styleId) sa = 0;
+    }
+    return (sb, sa);
+  }
+
+  void _newPage(DocPageSetup s) {
+    result.pages.add(_page);
+    _page = DocPageLayout(s);
+    _y = 0;
+  }
+
+  void _place(int i) {
+    final blocks = model.blocks;
+    final lb = _laid(i);
+    final s = _setups[i];
     if (lb is LaidMarker) {
       if (lb.kind == LaidMarkerKind.pageBreak ||
           (lb.kind == LaidMarkerKind.sectionBreak && lb.newPage)) {
-        newPage(i + 1 < setups.length ? setups[i + 1] : s);
+        _newPage(i + 1 < _setups.length ? _setups[i + 1] : s);
       }
-      continue;
+      return;
     }
     final para = blocks[i] is DocParagraph ? blocks[i] as DocParagraph : null;
-    if (para != null && para.pageBreakBefore && page.slices.isNotEmpty) {
-      newPage(s);
+    if (para != null && para.pageBreakBefore && _page.slices.isNotEmpty) {
+      _newPage(s);
     }
-    var h = page.setup.contentHeight;
+    var h = _page.setup.contentHeight;
     // Keep headings with the next block.
-    if (lb.keepWithNext && y > 0 && i + 1 < laid.length) {
-      final next = laid[i + 1];
+    if (lb.keepWithNext && _y > 0 && i + 1 < blocks.length) {
+      final next = _laid(i + 1);
       final nextNeed = next.breaks.isNotEmpty ? next.breaks.first : next.height;
-      if (y + lb.height + math.min(nextNeed, h * 0.5) > h && lb.height < h) {
-        newPage(s);
+      if (_y + lb.height + math.min(nextNeed, h * 0.5) > h && lb.height < h) {
+        _newPage(s);
       }
     }
     var off = 0.0;
     while (off < lb.contentEnd - 0.01) {
-      h = page.setup.contentHeight;
+      h = _page.setup.contentHeight;
       final remaining = lb.height - off;
-      final space = h - y;
+      final space = h - _y;
       if (off == 0 && lb is LaidParagraph) {
         for (final f in lb.floats) {
-          page.floats.add(DocPageFloat(f, page.setup.marginTop + y));
+          _page.floats.add(DocPageFloat(f, _page.setup.marginTop + _y));
         }
       }
       if (remaining <= space + 0.5 || lb.contentEnd - off <= space + 0.5) {
         final take = math.min(remaining, math.max(space, lb.contentEnd - off));
-        page.slices.add(DocPageSlice(i, off, take, y));
-        y += take;
+        _page.slices.add(DocPageSlice(i, off, take, _y));
+        _y += take;
         break;
       }
       double? best;
@@ -873,58 +973,21 @@ Future<DocLayoutResult> layoutDocument(
         if (b > off + 0.01 && b - off <= space + 0.5) best = b;
       }
       if (best != null) {
-        page.slices.add(DocPageSlice(i, off, best - off, y));
+        _page.slices.add(DocPageSlice(i, off, best - off, _y));
         off = best;
-        newPage(s);
+        _newPage(s);
         continue;
       }
-      if (y > 0.5) {
-        newPage(s);
+      if (_y > 0.5) {
+        _newPage(s);
         continue;
       }
       // Taller than a page with no break point: cut it.
-      page.slices.add(DocPageSlice(i, off, space, y));
+      _page.slices.add(DocPageSlice(i, off, space, _y));
       off += space;
-      newPage(s);
+      _newPage(s);
     }
   }
-  pages.add(page);
-  // Drop a trailing empty page created by a final break.
-  if (pages.length > 1 && pages.last.slices.isEmpty) pages.removeLast();
-
-  final hw = model.page.contentWidth;
-  final header = engine.layoutBlocks(model.header, hw);
-  final footer = engine.layoutBlocks(model.footer, hw);
-  final floats = <DocPageFloat>[];
-  var hy = model.page.headerDistance;
-  for (final b in header) {
-    if (b is LaidParagraph) {
-      for (final f in b.floats) {
-        floats.add(DocPageFloat(f, hy));
-      }
-    }
-    hy += b.height;
-  }
-  final footerTop =
-      model.page.height -
-      model.page.footerDistance -
-      footer.fold<double>(0, (a, b) => a + b.height);
-  var fy = footerTop;
-  for (final b in footer) {
-    if (b is LaidParagraph) {
-      for (final f in b.floats) {
-        floats.add(DocPageFloat(f, fy));
-      }
-    }
-    fy += b.height;
-  }
-  return DocLayoutResult(
-    blocks: laid,
-    pages: pages,
-    header: header,
-    footer: footer,
-    headerFloats: floats,
-  );
 }
 
 /// Draws one print page at its natural size (points as logical pixels).

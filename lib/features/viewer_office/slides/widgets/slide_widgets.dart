@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,13 +68,13 @@ class SlideThumbnail extends StatelessWidget {
                     child: Stack(
                       children: [
                         RepaintBoundary(
-                          child: SlideFit(
+                          child: SlideFit.builder(
                             deck: deck,
-                            child: SlideCanvas(
+                            builder: (context, scale) => SlideCanvas(
                               deck: deck,
                               slide: slide,
                               images: images,
-                              thumbnail: true,
+                              pixelScale: scale,
                             ),
                           ),
                         ),
@@ -104,7 +105,8 @@ class SlideThumbnail extends StatelessWidget {
 }
 
 /// Fullscreen slideshow: immersive, tap right/left (or arrows/space) to
-/// navigate. Pops with the index of the last slide shown.
+/// navigate. Hidden slides are skipped (unless the show starts on one, as
+/// in PowerPoint). Pops with the deck index of the last slide shown.
 class PresentationMode extends StatefulWidget {
   const PresentationMode({
     super.key,
@@ -123,14 +125,23 @@ class PresentationMode extends StatefulWidget {
 
 class _PresentationModeState extends State<PresentationMode> {
   late final PageController _pages;
+
+  /// Deck indices of the slides shown, and the position in that list.
+  late final List<int> _shown;
   late int _index;
   bool _showHud = true;
+  bool _restored = false;
   final FocusNode _focus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _index = widget.startIndex;
+    final slides = widget.deck.slides;
+    _shown = [
+      for (var i = 0; i < slides.length; i++)
+        if (!slides[i].hidden || i == widget.startIndex) i,
+    ];
+    _index = math.max(0, _shown.indexOf(widget.startIndex));
     _pages = PageController(initialPage: _index);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     if (Platform.isAndroid || Platform.isIOS) {
@@ -151,19 +162,31 @@ class _PresentationModeState extends State<PresentationMode> {
 
   @override
   void dispose() {
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    if (Platform.isAndroid || Platform.isIOS) {
-      SystemChrome.setPreferredOrientations(const []);
-    }
+    _restoreSystemUi();
     _pages.dispose();
     _focus.dispose();
     super.dispose();
   }
 
+  /// Brings the status and navigation bars back. Switching straight from
+  /// immersiveSticky to edgeToEdge leaves them hidden on Android (the engine
+  /// only changes the decor-fits flag), so show every overlay first.
+  void _restoreSystemUi() {
+    if (_restored) return;
+    _restored = true;
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    ).then((_) => SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+    if (Platform.isAndroid || Platform.isIOS) {
+      SystemChrome.setPreferredOrientations(const []);
+    }
+  }
+
   void _go(int delta) {
-    final next = (_index + delta).clamp(0, widget.deck.slides.length - 1);
+    final next = (_index + delta).clamp(0, _shown.length - 1);
     if (next == _index) {
-      if (delta > 0 && _index == widget.deck.slides.length - 1) _exit();
+      if (delta > 0 && _index == _shown.length - 1) _exit();
       return;
     }
     _pages.animateToPage(
@@ -173,7 +196,10 @@ class _PresentationModeState extends State<PresentationMode> {
     );
   }
 
-  void _exit() => Navigator.of(context).pop(_index);
+  void _exit() {
+    _restoreSystemUi();
+    Navigator.of(context).pop(_shown[_index]);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -219,15 +245,16 @@ class _PresentationModeState extends State<PresentationMode> {
               children: [
                 PageView.builder(
                   controller: _pages,
-                  itemCount: deck.slides.length,
+                  itemCount: _shown.length,
                   onPageChanged: (i) => setState(() => _index = i),
                   itemBuilder: (context, i) => Center(
-                    child: SlideFit(
+                    child: SlideFit.builder(
                       deck: deck,
-                      child: SlideCanvas(
+                      builder: (context, scale) => SlideCanvas(
                         deck: deck,
-                        slide: deck.slides[i],
+                        slide: deck.slides[_shown[i]],
                         images: widget.images,
+                        pixelScale: scale,
                       ),
                     ),
                   ),
@@ -254,7 +281,7 @@ class _PresentationModeState extends State<PresentationMode> {
                                   vertical: 6,
                                 ),
                                 child: Text(
-                                  '${_index + 1} / ${deck.slides.length}',
+                                  '${_index + 1} / ${_shown.length}',
                                   style: const TextStyle(color: Colors.white),
                                 ),
                               ),
@@ -293,6 +320,8 @@ Future<List<String>?> showShapeTextEditor(
     builder: (d) {
       final width = MediaQuery.sizeOf(d).width;
       return AlertDialog(
+        // Scrolls instead of overflowing once the keyboard is up on phones.
+        scrollable: true,
         title: Text(title ?? 'Edit text'),
         content: SizedBox(
           width: width < 600 ? width : 520,

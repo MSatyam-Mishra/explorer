@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controller/spreadsheet_controller.dart';
+import '../model/input_parser.dart' show formulaDisplayText;
 import '../model/workbook.dart';
 import 'format_toolbar.dart' show numberFormatLabel;
 import 'status_bar.dart' show formatStat;
@@ -110,7 +111,7 @@ class _Inspector extends StatelessWidget {
     final rows = <(String, String)>[
       ('Cell', '${c.sheet.name}!${cellName(c.selRow, c.selCol)}'),
       ('Type', type),
-      if (cell?.formula != null) ('Formula', '=${cell!.formula}'),
+      if (cell?.formula != null) ('Formula', formulaDisplayText(cell!.formula!)),
       if (v != null) ('Value', v is double ? v.toString() : v.toString()),
       if (v != null) ('Shows', c.display(cell).text),
       ('Format', '${numberFormatLabel(st.numFmt)}${st.numFmt == 'General' ? '' : '  (${st.numFmt})'}'),

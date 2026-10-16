@@ -31,34 +31,36 @@ abstract final class FormulaRefs {
   /// Shifts relative references by (dRow, dCol), as when copying a formula.
   static String shift(String formula, int dRow, int dCol) {
     if (dRow == 0 && dCol == 0) return formula;
-    return rewrite(formula, (r) {
-      var bad = false;
-      int mv(int v, bool abs, int d, int max) {
-        if (abs) return v;
-        final n = v + d;
-        if (n < 0 || n >= max) bad = true;
-        return n;
-      }
+    return rewrite(formula, (r) => _shiftRef(r, dRow, dCol));
+  }
 
-      switch (r.kind) {
-        case RefKind.cell:
-          r.r1 = mv(r.r1, r.absR1, dRow, kMaxRows);
-          r.c1 = mv(r.c1, r.absC1, dCol, kMaxCols);
-        case RefKind.area:
-          r.r1 = mv(r.r1, r.absR1, dRow, kMaxRows);
-          r.c1 = mv(r.c1, r.absC1, dCol, kMaxCols);
-          r.r2 = mv(r.r2, r.absR2, dRow, kMaxRows);
-          r.c2 = mv(r.c2, r.absC2, dCol, kMaxCols);
-        case RefKind.cols:
-          r.c1 = mv(r.c1, r.absC1, dCol, kMaxCols);
-          r.c2 = mv(r.c2, r.absC2, dCol, kMaxCols);
-        case RefKind.rows:
-          r.r1 = mv(r.r1, r.absR1, dRow, kMaxRows);
-          r.r2 = mv(r.r2, r.absR2, dRow, kMaxRows);
-      }
-      if (bad) return '#REF!';
-      return r.format();
-    });
+  static String _shiftRef(RefInfo r, int dRow, int dCol) {
+    var bad = false;
+    int mv(int v, bool abs, int d, int max) {
+      if (abs) return v;
+      final n = v + d;
+      if (n < 0 || n >= max) bad = true;
+      return n;
+    }
+
+    switch (r.kind) {
+      case RefKind.cell:
+        r.r1 = mv(r.r1, r.absR1, dRow, kMaxRows);
+        r.c1 = mv(r.c1, r.absC1, dCol, kMaxCols);
+      case RefKind.area:
+        r.r1 = mv(r.r1, r.absR1, dRow, kMaxRows);
+        r.c1 = mv(r.c1, r.absC1, dCol, kMaxCols);
+        r.r2 = mv(r.r2, r.absR2, dRow, kMaxRows);
+        r.c2 = mv(r.c2, r.absC2, dCol, kMaxCols);
+      case RefKind.cols:
+        r.c1 = mv(r.c1, r.absC1, dCol, kMaxCols);
+        r.c2 = mv(r.c2, r.absC2, dCol, kMaxCols);
+      case RefKind.rows:
+        r.r1 = mv(r.r1, r.absR1, dRow, kMaxRows);
+        r.r2 = mv(r.r2, r.absR2, dRow, kMaxRows);
+    }
+    if (bad) return '#REF!';
+    return r.format();
   }
 
   /// Adjusts references after inserting ([delta] > 0) or deleting
@@ -143,5 +145,36 @@ abstract final class FormulaRefs {
       r.sheet = sheet;
       return r.format();
     });
+  }
+}
+
+/// A formula tokenized once and shifted many times (shared formulas in
+/// files, fill and paste), producing the same text as [FormulaRefs.shift].
+class FormulaShifter {
+  FormulaShifter(this.formula) {
+    try {
+      _refs = [
+        for (final t in tokenizeFormula(formula))
+          if (t.type == FTokType.ref) t,
+      ];
+    } on FormulaSyntaxError {
+      _refs = const [];
+    }
+  }
+
+  final String formula;
+  late final List<FToken> _refs;
+
+  String shift(int dRow, int dCol) {
+    if ((dRow == 0 && dCol == 0) || _refs.isEmpty) return formula;
+    final b = StringBuffer();
+    var pos = 0;
+    for (final t in _refs) {
+      b.write(formula.substring(pos, t.start));
+      b.write(FormulaRefs._shiftRef(t.ref!.copy(), dRow, dCol));
+      pos = t.end;
+    }
+    b.write(formula.substring(pos));
+    return b.toString();
   }
 }

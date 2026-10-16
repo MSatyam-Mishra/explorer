@@ -1,15 +1,16 @@
 import 'dart:convert';
+import 'dart:io' show RawZLibFilter;
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:xml/xml.dart';
-import 'package:xml/xml_events.dart';
 
-import '../formula/ref_rewriter.dart';
-import '../formula/tokenizer.dart';
-import '../model/number_format.dart';
 import '../model/workbook.dart';
+import 'xlsx_sheet_scanner.dart';
 import 'xlsx_styles.dart';
+
+export 'xlsx_sheet_scanner.dart' show decodeOoxmlEscapes;
 
 /// Friendly error for files we can't open.
 class SpreadsheetReadException implements Exception {
@@ -49,6 +50,37 @@ class XlsxPackage {
     if (c is Uint8List) return c;
     if (c is List<int>) return Uint8List.fromList(c);
     return null;
+  }
+
+  /// At least the first [maxBytes] bytes of [path] (all of it when it's
+  /// shorter), inflating only what's needed; the flag tells whether the
+  /// whole part was read.
+  (Uint8List, bool)? prefixBytes(String path, int maxBytes) {
+    final f = file(path);
+    if (f == null) return null;
+    final raw = f.isCompressed && f.compressionType == ArchiveFile.DEFLATE ? f.rawContent?.toUint8List() : null;
+    if (raw == null) {
+      final all = bytes(path);
+      return all == null ? null : (all, true);
+    }
+    final filter = RawZLibFilter.inflateFilter(raw: true);
+    final out = BytesBuilder(copy: false);
+    var pos = 0;
+    while (pos < raw.length && out.length < maxBytes) {
+      final end = math.min(pos + 65536, raw.length);
+      filter.process(raw, pos, end);
+      pos = end;
+      for (var chunk = filter.processed(flush: false); chunk != null; chunk = filter.processed(flush: false)) {
+        out.add(chunk);
+      }
+    }
+    final complete = pos >= raw.length;
+    if (complete) {
+      for (var chunk = filter.processed(end: true); chunk != null; chunk = filter.processed(end: true)) {
+        out.add(chunk);
+      }
+    }
+    return (out.takeBytes(), complete);
   }
 
   String? text(String path) {
@@ -117,14 +149,6 @@ class XlsxPackage {
   }
 }
 
-final _escapedChar = RegExp(r'_x([0-9A-Fa-f]{4})_');
-
-/// Decodes OOXML `_xHHHH_` escapes.
-String decodeOoxmlEscapes(String s) {
-  if (!s.contains('_x')) return s;
-  return s.replaceAllMapped(_escapedChar, (m) => String.fromCharCode(int.parse(m[1]!, radix: 16)));
-}
-
 bool _truthy(String? v) => v == '1' || v == 'true';
 
 class _SheetRef {
@@ -137,8 +161,18 @@ class _SheetRef {
 
 /// Reads .xlsx / .xlsm / .xltx / .xltm packages.
 abstract final class XlsxReader {
-  static Workbook read(Uint8List bytes, SpreadsheetFormat format) {
-    final pkg = XlsxPackage.decode(bytes);
+  /// Reads a workbook; pass [package] when the zip was already decoded.
+  static Workbook read(Uint8List bytes, SpreadsheetFormat format, {XlsxPackage? package}) =>
+      _read(package ?? XlsxPackage.decode(bytes), format, previewRows: null);
+
+  /// A quick look at the active sheet: only its first [rows] rows are read
+  /// (other sheets are empty placeholders). For showing something while
+  /// [read] runs; never edit or save it.
+  static Workbook readPreview(Uint8List bytes, SpreadsheetFormat format,
+          {XlsxPackage? package, int rows = 300}) =>
+      _read(package ?? XlsxPackage.decode(bytes), format, previewRows: rows);
+
+  static Workbook _read(XlsxPackage pkg, SpreadsheetFormat format, {required int? previewRows}) {
     if (pkg.has('EncryptedPackage') || pkg.has('EncryptionInfo')) {
       throw SpreadsheetReadException('This workbook is password-protected and can\'t be opened here.');
     }
@@ -171,7 +205,9 @@ abstract final class XlsxReader {
 
     final theme = parseThemeColors(themePath == null ? null : pkg.text(themePath));
     final styles = XlsxStyles.parse(pkg.text(stylesPath), theme);
-    final sst = _readSharedStrings(pkg.text(sstPath));
+    // Strings are numbered in order of first use, so the first rows of a
+    // sheet rarely need more than the first few thousand.
+    final sst = scanSharedStrings(pkg.bytes(sstPath), limit: previewRows == null ? null : 50000);
 
     final warnings = <String>[];
     final refs = <_SheetRef>[];
@@ -196,32 +232,37 @@ abstract final class XlsxReader {
     }
     if (refs.isEmpty) throw SpreadsheetReadException('This workbook has no worksheets.');
 
+    SheetVisibility visibility(_SheetRef r) => r.state == 'hidden'
+        ? SheetVisibility.hidden
+        : r.state == 'veryHidden'
+            ? SheetVisibility.veryHidden
+            : SheetVisibility.visible;
+    // activeTab counts all sheets including chart sheets.
+    var active = refs.indexWhere((r) => r.index == activeTab);
+    if (active < 0) active = 0;
+    if (visibility(refs[active]) != SheetVisibility.visible) {
+      final v = refs.indexWhere((r) => visibility(r) == SheetVisibility.visible);
+      active = v < 0 ? 0 : v;
+    }
+
     final sheets = <SheetData>[];
-    for (final ref in refs) {
-      final xml = pkg.text(ref.path);
+    for (var i = 0; i < refs.length; i++) {
+      final ref = refs[i];
       final sheet = SheetData(
         name: ref.name,
-        visibility: ref.state == 'hidden'
-            ? SheetVisibility.hidden
-            : ref.state == 'veryHidden'
-                ? SheetVisibility.veryHidden
-                : SheetVisibility.visible,
+        visibility: visibility(ref),
         sourcePath: ref.path,
         sourceIndex: ref.index,
         sourceName: ref.name,
       );
-      if (xml != null) {
-        _readSheet(xml, sheet, sst, styles.cellStyles, styles.defaultFontSize);
+      if (previewRows == null) {
+        final xml = pkg.bytes(ref.path);
+        if (xml != null) scanWorksheet(xml, sheet, sst, styles.cellStyles);
+      } else if (i == active) {
+        _scanPreview(pkg, ref.path, sheet, sst, styles.cellStyles, previewRows);
       }
       sheet.invalidateBounds();
       sheets.add(sheet);
-    }
-    // activeTab counts all sheets including chart sheets.
-    var active = refs.indexWhere((r) => r.index == activeTab);
-    if (active < 0) active = 0;
-    if (sheets[active].visibility != SheetVisibility.visible) {
-      final v = sheets.indexWhere((s) => s.visibility == SheetVisibility.visible);
-      active = v < 0 ? 0 : v;
     }
     return Workbook(
       sheets: sheets,
@@ -232,374 +273,37 @@ abstract final class XlsxReader {
     );
   }
 
-  static List<String> _readSharedStrings(String? xml) {
-    final out = <String>[];
-    if (xml == null) return out;
-    StringBuffer? cur;
-    var inT = false;
-    var phonetic = 0;
-    for (final e in parseEvents(xml)) {
-      if (e is XmlStartElementEvent) {
-        final n = localName(e.name);
-        if (n == 'si') {
-          cur = StringBuffer();
-          if (e.isSelfClosing) {
-            out.add('');
-            cur = null;
-          }
-        } else if (n == 'rPh') {
-          if (!e.isSelfClosing) phonetic++;
-        } else if (n == 't' && phonetic == 0 && !e.isSelfClosing) {
-          inT = true;
-        }
-      } else if (e is XmlEndElementEvent) {
-        final n = localName(e.name);
-        if (n == 'si') {
-          out.add(decodeOoxmlEscapes(cur?.toString() ?? ''));
-          cur = null;
-        } else if (n == 't') {
-          inT = false;
-        } else if (n == 'rPh') {
-          phonetic--;
-        }
-      } else if (inT && cur != null) {
-        if (e is XmlTextEvent) {
-          cur.write(e.value);
-        } else if (e is XmlCDATAEvent) {
-          cur.write(e.value);
-        }
+  /// Inflates just enough of a worksheet for its first [rows] rows.
+  static void _scanPreview(XlsxPackage pkg, String path, SheetData sheet, List<String> sst,
+      List<CellStyle> styles, int rows) {
+    var budget = 256 * 1024;
+    while (true) {
+      final part = pkg.prefixBytes(path, budget);
+      if (part == null) return;
+      final (bytes, complete) = part;
+      final probe = sheet.clone();
+      final stopped = scanWorksheet(complete ? bytes : _upToLastRowEnd(bytes), probe, sst, styles,
+          maxRows: rows);
+      if (stopped || complete || budget >= 32 * 1024 * 1024) {
+        sheet.restoreFrom(probe);
+        return;
+      }
+      budget *= 4;
+    }
+  }
+
+  /// Cuts a truncated worksheet prefix after its last complete `</row>`.
+  static Uint8List _upToLastRowEnd(Uint8List b) {
+    for (var i = b.length - 4; i > 0; i--) {
+      // "row>" preceded by "/" (</row>) or ":" (</x:row>)
+      if (b[i] == 0x72 && b[i + 1] == 0x6F && b[i + 2] == 0x77 && b[i + 3] == 0x3E &&
+          (b[i - 1] == 0x2F || b[i - 1] == 0x3A)) {
+        return Uint8List.sublistView(b, 0, i + 4);
       }
     }
-    return out;
+    return Uint8List(0);
   }
 
   /// Column width in Excel character units -> pixels.
-  static double widthToPx(double w) => (w * 7).roundToDouble().clamp(0, 2000).toDouble();
-
-  static int _parseRow(String s) {
-    var v = 0;
-    for (var i = 0; i < s.length; i++) {
-      final u = s.codeUnitAt(i);
-      if (u >= 48 && u <= 57) v = v * 10 + (u - 48);
-    }
-    return v - 1;
-  }
-
-  /// Parses `B12` quickly into (row, col).
-  static (int, int)? _parseRef(String s) {
-    var col = 0;
-    var i = 0;
-    while (i < s.length) {
-      final u = s.codeUnitAt(i);
-      if (u >= 65 && u <= 90) {
-        col = col * 26 + (u - 64);
-      } else if (u >= 97 && u <= 122) {
-        col = col * 26 + (u - 96);
-      } else if (u != 36) {
-        break;
-      }
-      i++;
-    }
-    if (col == 0 || i >= s.length) return null;
-    var row = 0;
-    for (; i < s.length; i++) {
-      final u = s.codeUnitAt(i);
-      if (u >= 48 && u <= 57) {
-        row = row * 10 + (u - 48);
-      } else if (u != 36) {
-        return null;
-      }
-    }
-    if (row == 0) return null;
-    return (row - 1, col - 1);
-  }
-
-  static void _readSheet(String xml, SheetData sheet, List<String> sst,
-      List<CellStyle> styles, double defaultFontSize) {
-    var curRow = -1;
-    var curCol = -1;
-    // cell state
-    var inCell = false;
-    var cr = 0;
-    var cc = 0;
-    String? ct;
-    var cs = 0;
-    final vBuf = StringBuffer();
-    final fBuf = StringBuffer();
-    final isBuf = StringBuffer();
-    var hasV = false;
-    var hasF = false;
-    String? fType;
-    String? fRef;
-    String? fSi;
-    var inV = false;
-    var inF = false;
-    var inIs = false;
-    var inT = false;
-    var phonetic = 0;
-    final shared = <String, (String, int, int)>{};
-    double? defaultRowPt;
-
-    void finishCell() {
-      Object? value;
-      final v = vBuf.toString();
-      switch (ct) {
-        case 's':
-          final idx = int.tryParse(v.trim());
-          value = idx != null && idx >= 0 && idx < sst.length ? sst[idx] : '';
-        case 'str':
-          value = hasV ? decodeOoxmlEscapes(v) : null;
-        case 'inlineStr':
-          value = decodeOoxmlEscapes(isBuf.toString());
-        case 'b':
-          value = v.trim() == '1' || v.trim() == 'true';
-        case 'e':
-          final t = v.trim();
-          value = t.isEmpty ? null : (CellError.tryParse(t) ?? CellError(t));
-        case 'd':
-          final dt = DateTime.tryParse(v.trim());
-          value = dt == null
-              ? null
-              : NumberFormats.dateTimeToSerial(DateTime.utc(dt.year, dt.month,
-                  dt.day, dt.hour, dt.minute, dt.second, dt.millisecond));
-        default:
-          final t = v.trim();
-          value = t.isEmpty ? null : double.tryParse(t);
-      }
-      String? formula;
-      String? arrayRef;
-      if (hasF && fType != 'dataTable') {
-        final text = fBuf.toString();
-        if (fType == 'shared' && fSi != null) {
-          if (text.trim().isNotEmpty) {
-            formula = stripFunctionPrefixes(text);
-            shared[fSi] = (formula, cr, cc);
-          } else {
-            final master = shared[fSi];
-            if (master != null) {
-              formula = FormulaRefs.shift(master.$1, cr - master.$2, cc - master.$3);
-            }
-          }
-        } else if (text.trim().isNotEmpty) {
-          formula = stripFunctionPrefixes(text);
-          if (fType == 'array') arrayRef = fRef;
-        }
-      }
-      final style = cs >= 0 && cs < styles.length ? styles[cs] : styles.first;
-      if (value == null && formula == null && cs == 0) return;
-      if (value is double && value == 0) value = 0.0;
-      sheet.cells[cellKey(cr, cc)] =
-          Cell(value: value, formula: formula, style: style, arrayRef: arrayRef);
-    }
-
-    for (final e in parseEvents(xml)) {
-      if (e is XmlStartElementEvent) {
-        final name = localName(e.name);
-        switch (name) {
-          case 'c':
-            String? r;
-            ct = null;
-            cs = 0;
-            for (final a in e.attributes) {
-              switch (a.localName) {
-                case 'r':
-                  r = a.value;
-                case 't':
-                  ct = a.value;
-                case 's':
-                  cs = int.tryParse(a.value) ?? 0;
-              }
-            }
-            final p = r == null ? null : _parseRef(r);
-            if (p != null) {
-              cr = p.$1;
-              cc = p.$2;
-              if (curRow < 0) curRow = cr;
-            } else {
-              cr = curRow < 0 ? 0 : curRow;
-              cc = curCol + 1;
-            }
-            curCol = cc;
-            vBuf.clear();
-            fBuf.clear();
-            isBuf.clear();
-            hasV = false;
-            hasF = false;
-            fType = null;
-            fRef = null;
-            fSi = null;
-            if (cr >= kMaxRows || cc >= kMaxCols) {
-              inCell = false;
-              continue;
-            }
-            inCell = true;
-            if (e.isSelfClosing) {
-              finishCell();
-              inCell = false;
-            }
-          case 'v':
-            if (inCell) {
-              hasV = true;
-              inV = !e.isSelfClosing;
-            }
-          case 'f':
-            if (inCell) {
-              hasF = true;
-              for (final a in e.attributes) {
-                switch (a.localName) {
-                  case 't':
-                    fType = a.value;
-                  case 'ref':
-                    fRef = a.value;
-                  case 'si':
-                    fSi = a.value;
-                }
-              }
-              inF = !e.isSelfClosing;
-            }
-          case 'is':
-            if (inCell) inIs = !e.isSelfClosing;
-          case 'rPh':
-            if (!e.isSelfClosing) phonetic++;
-          case 't':
-            if (inIs && phonetic == 0 && !e.isSelfClosing) inT = true;
-          case 'row':
-            String? r;
-            String? ht;
-            var custom = false;
-            var hidden = false;
-            for (final a in e.attributes) {
-              switch (a.localName) {
-                case 'r':
-                  r = a.value;
-                case 'ht':
-                  ht = a.value;
-                case 'customHeight':
-                  custom = _truthy(a.value);
-                case 'hidden':
-                  hidden = _truthy(a.value);
-              }
-            }
-            curRow = r == null ? curRow + 1 : _parseRow(r);
-            curCol = -1;
-            if (curRow >= 0 && curRow < kMaxRows) {
-              final h = double.tryParse(ht ?? '');
-              if (h != null && (custom || defaultRowPt == null || (h - defaultRowPt).abs() > 0.01)) {
-                sheet.rowHeights[curRow] = (h * 4 / 3).roundToDouble();
-              }
-              if (hidden) sheet.hiddenRows.add(curRow);
-            }
-          case 'col':
-            int? min;
-            int? max;
-            double? w;
-            var hidden = false;
-            for (final a in e.attributes) {
-              switch (a.localName) {
-                case 'min':
-                  min = int.tryParse(a.value);
-                case 'max':
-                  max = int.tryParse(a.value);
-                case 'width':
-                  w = double.tryParse(a.value);
-                case 'hidden':
-                  hidden = _truthy(a.value);
-              }
-            }
-            if (min != null && max != null && min >= 1) {
-              final px = w == null ? null : widthToPx(w);
-              final last = max > 2048 ? 2048 : max;
-              for (var c = min - 1; c < last && c < kMaxCols; c++) {
-                if (px != null) sheet.colWidths[c] = px;
-                if (hidden) sheet.hiddenCols.add(c);
-              }
-              if (max >= kMaxCols && px != null && !hidden) sheet.defaultColWidth = px;
-            }
-          case 'sheetFormatPr':
-            final dh = double.tryParse(e.attributes
-                    .where((a) => a.localName == 'defaultRowHeight')
-                    .map((a) => a.value)
-                    .firstOrNull ??
-                '');
-            if (dh != null && dh > 0) {
-              defaultRowPt = dh;
-              sheet.defaultRowHeight = (dh * 4 / 3).roundToDouble();
-            }
-            final dw = double.tryParse(e.attributes
-                    .where((a) => a.localName == 'defaultColWidth')
-                    .map((a) => a.value)
-                    .firstOrNull ??
-                '');
-            if (dw != null && dw > 0) {
-              sheet.defaultColWidth = widthToPx(dw);
-            } else {
-              final base = double.tryParse(e.attributes
-                      .where((a) => a.localName == 'baseColWidth')
-                      .map((a) => a.value)
-                      .firstOrNull ??
-                  '');
-              if (base != null && base > 0) sheet.defaultColWidth = widthToPx(base + 1.14);
-            }
-          case 'pane':
-            String? state;
-            double? xs;
-            double? ys;
-            for (final a in e.attributes) {
-              switch (a.localName) {
-                case 'state':
-                  state = a.value;
-                case 'xSplit':
-                  xs = double.tryParse(a.value);
-                case 'ySplit':
-                  ys = double.tryParse(a.value);
-              }
-            }
-            if (state == 'frozen' || state == 'frozenSplit') {
-              sheet.frozenCols = (xs ?? 0).round().clamp(0, 1000);
-              sheet.frozenRows = (ys ?? 0).round().clamp(0, 10000);
-            }
-          case 'mergeCell':
-            for (final a in e.attributes) {
-              if (a.localName == 'ref') {
-                final range = CellRange.parse(a.value);
-                if (range != null && !range.isSingle) sheet.merges.add(range);
-              }
-            }
-        }
-      } else if (e is XmlEndElementEvent) {
-        switch (localName(e.name)) {
-          case 'c':
-            if (inCell) finishCell();
-            inCell = false;
-            inV = false;
-            inF = false;
-            inIs = false;
-          case 'v':
-            inV = false;
-          case 'f':
-            inF = false;
-          case 'is':
-            inIs = false;
-          case 't':
-            inT = false;
-          case 'rPh':
-            phonetic--;
-          case 'row':
-            curCol = -1;
-        }
-      } else if (inV || inF || inT) {
-        String? text;
-        if (e is XmlTextEvent) {
-          text = e.value;
-        } else if (e is XmlCDATAEvent) {
-          text = e.value;
-        }
-        if (text != null) {
-          if (inV) vBuf.write(text);
-          if (inF) fBuf.write(text);
-          if (inT) isBuf.write(text);
-        }
-      }
-    }
-  }
+  static double widthToPx(double w) => xlsxWidthToPx(w);
 }

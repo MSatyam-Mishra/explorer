@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/viewer_image/image_codec.dart';
+import 'package:explorer/features/viewer_image/raw_image.dart';
 import 'package:explorer/features/viewer_image/screens/image_editor_screen.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/clear_glass_panel.dart';
@@ -26,12 +28,13 @@ class ImageViewerScreen extends StatefulWidget {
 }
 
 class _ImageViewerScreenState extends State<ImageViewerScreen> {
-  PageController? _pageController;
-  List<File> _images = [];
+  // The tapped image is shown on the first frame; the rest of the folder is
+  // listed in the background and swapped in around it.
+  late PageController _pageController = PageController();
+  late List<File> _images = [widget.imageFile];
   int _currentIndex = 0;
   bool _showInfo = false;
   bool _changed = false;
-  int _reloadToken = 0;
 
   @override
   void initState() {
@@ -41,33 +44,56 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   @override
   void dispose() {
-    _pageController?.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
+  static bool _isImage(String path) {
+    final kind = FileTypes.kindOf(path);
+    return kind == FileKind.image ||
+        kind == FileKind.rasterImage ||
+        kind == FileKind.cameraRaw;
+  }
+
   Future<void> _loadImages({String? focusPath}) async {
-    List<File> images;
-    try {
-      images = (await widget.imageFile.parent.list().toList())
-          .whereType<File>()
-          .where((f) {
-        final kind = FileTypes.kindOf(f.path);
-        return kind == FileKind.image || kind == FileKind.rasterImage;
-      }).toList()
+    final self = widget.imageFile;
+    final List<File> images;
+    if (!_isImage(self.path)) {
+      // Forced open ("Open with → Image viewer") of a file whose extension
+      // isn't an image: show that file, not the folder's other pictures.
+      images = [
+        self,
+        if (focusPath != null && !p.equals(focusPath, self.path)) File(focusPath),
+      ];
+    } else {
+      List<File> listed;
+      try {
+        listed = (await self.parent.list().toList())
+            .whereType<File>()
+            .where((f) => _isImage(f.path))
+            .toList();
+      } catch (_) {
+        listed = [];
+      }
+      // Always include the launched file (and a just-saved edit), even if
+      // listing failed or missed it.
+      for (final path in [self.path, ?focusPath]) {
+        if (!listed.any((f) => p.equals(f.path, path))) listed.add(File(path));
+      }
+      images = listed
         ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
-    } catch (_) {
-      images = [];
     }
-    if (images.isEmpty) images = [widget.imageFile];
-    final target = focusPath ?? widget.imageFile.path;
-    final index = images.indexWhere((f) => f.path == target);
+    final target = focusPath ?? self.path;
+    final index = images.indexWhere((f) => p.equals(f.path, target));
     if (!mounted) return;
-    _pageController?.dispose();
+    final old = _pageController;
     setState(() {
       _images = images;
       _currentIndex = index < 0 ? 0 : index;
       _pageController = PageController(initialPage: _currentIndex);
     });
+    // The old controller is detached by the rebuild; dispose it after.
+    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
   }
 
   File get _current => _images[_currentIndex];
@@ -81,27 +107,55 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     _changed = true;
     imageCache.evict(FileImage(File(saved)));
     imageCache.clear();
-    _reloadToken++;
     await _loadImages(focusPath: saved);
   }
 
-  Future<void> _share() async {
-    await SharePlus.instance.share(ShareParams(files: [XFile(_current.path)]));
+  /// [anchor] is the share button's context: iPad (and macOS) present the
+  /// share sheet as a popover and share_plus throws without an origin rect.
+  Future<void> _share(BuildContext anchor) async {
+    final box = anchor.findRenderObject() as RenderBox?;
+    final Rect origin;
+    if (box != null && box.hasSize && box.attached) {
+      origin = box.localToGlobal(Offset.zero) & box.size;
+    } else {
+      // Fall back to the top-right corner, where the button sits.
+      final size = MediaQuery.sizeOf(context);
+      origin = Rect.fromLTWH(
+        size.width - 64,
+        MediaQuery.paddingOf(context).top + 12,
+        48,
+        48,
+      );
+    }
+    try {
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(_current.path)],
+        sharePositionOrigin: origin,
+      ));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not share: $e')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_images.isEmpty || _pageController == null) {
-      return const ExplorerScaffold(
-        backgroundColor: Colors.black,
-        title: 'Photos',
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     final iconColor = ClearGlassForeground.icon(context);
+    // Decode at about twice the screen resolution (room to zoom) instead of
+    // the full sensor size.
+    final maxSide = (MediaQuery.sizeOf(context).longestSide *
+            MediaQuery.devicePixelRatioOf(context) *
+            2)
+        .round()
+        .clamp(2048, 4096);
     final gallery = PhotoViewGallery.builder(
-        key: ValueKey(_reloadToken),
+        // PhotoViewGallery keeps the first controller it sees, so a new
+        // controller (gallery listed, or reloaded after an edit) needs a new
+        // gallery state.
+        key: ObjectKey(_pageController),
         scrollPhysics: const BouncingScrollPhysics(),
         pageController: _pageController,
         itemCount: _images.length,
@@ -111,7 +165,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         builder: (context, index) {
           final file = _images[index];
           return PhotoViewGalleryPageOptions(
-            imageProvider: ImageCodec.providerFor(file),
+            imageProvider: ImageCodec.displayProviderFor(file, maxSide),
             initialScale: PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained,
             maxScale: PhotoViewComputedScale.covered * 4.0,
@@ -123,6 +177,20 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
           );
         },
         onPageChanged: (index) => setState(() => _currentIndex = index),
+    );
+    // Always the same Stack, so swiping onto a raw doesn't re-parent (and
+    // reset) the gallery mid-gesture.
+    final galleryWithBadge = Stack(
+      fit: StackFit.expand,
+      children: [
+        gallery,
+        if (RawImages.isRaw(_current.path))
+          Positioned(
+            left: 16,
+            bottom: MediaQuery.paddingOf(context).bottom + 16,
+            child: const IgnorePointer(child: _RawBadge()),
+          ),
+      ],
     );
 
     final infoPane = _ImageInfoPane(
@@ -136,7 +204,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             minWidthForSplit: 720,
             secondaryOnLeading: false,
             secondaryWidth: 320,
-            primary: gallery,
+            primary: galleryWithBadge,
             secondary: Padding(
               padding: EdgeInsets.only(
                 top: DockedGlossyTopBar.contentTopInset(context),
@@ -144,7 +212,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               child: infoPane,
             ),
           )
-        : gallery;
+        : galleryWithBadge;
 
     return PopScope(
       canPop: false,
@@ -161,11 +229,13 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             tooltip: 'Edit',
             onPressed: _edit,
           ),
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.share_outlined, color: iconColor),
-            tooltip: 'Share',
-            onPressed: _share,
+          Builder(
+            builder: (buttonContext) => ExplorerTopBar.iconButton(
+              context: buttonContext,
+              icon: Icon(Icons.share_outlined, color: iconColor),
+              tooltip: 'Share',
+              onPressed: () => _share(buttonContext),
+            ),
           ),
           ExplorerTopBar.iconButton(
             context: context,
@@ -194,6 +264,32 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 }
 
+/// Marks a camera raw shown through its embedded preview.
+class _RawBadge extends StatelessWidget {
+  const _RawBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: const Text(
+        'RAW · embedded preview',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+}
+
 class _UnsupportedImage extends StatelessWidget {
   const _UnsupportedImage({required this.file, required this.error});
 
@@ -202,18 +298,34 @@ class _UnsupportedImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final raw = RawImages.isRaw(file.path);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 64),
+            Icon(
+              raw ? Icons.camera_outlined : Icons.broken_image_outlined,
+              color: Colors.white54,
+              size: 64,
+            ),
             const SizedBox(height: 12),
             Text(
-              "This image format isn't supported on this device.",
+              raw
+                  ? error is RawPreviewUnavailable
+                      ? "This raw photo doesn't include a preview image. "
+                          'Open it in a raw editor to see it.'
+                      : "This raw photo's preview couldn't be read."
+                  : "This image format isn't supported on this device.",
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open with another app'),
+              onPressed: () => FileOpener.openExternally(context, file),
             ),
           ],
         ),
@@ -248,9 +360,13 @@ class _ImageInfoPaneState extends State<_ImageInfoPane> {
   @override
   void initState() {
     super.initState();
-    _stream = ImageCodec.providerFor(widget.file)
-        .resolve(ImageConfiguration.empty)
-      ..addListener(_listener);
+    // A raw's details carry its raw and preview sizes; don't decode the
+    // full preview just to measure it.
+    if (!RawImages.isRaw(widget.file.path)) {
+      _stream = ImageCodec.providerFor(widget.file)
+          .resolve(ImageConfiguration.empty)
+        ..addListener(_listener);
+    }
     _load();
   }
 

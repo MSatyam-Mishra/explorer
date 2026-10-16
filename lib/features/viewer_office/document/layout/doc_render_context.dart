@@ -82,10 +82,21 @@ class DocImageCache {
   final DocModel model;
   final Map<String, ImageProvider> _providers = {};
 
-  ImageProvider? provider(String id) {
+  /// Provider for picture [id] shown [width] points wide. Pictures are
+  /// decoded at about 3 px per point (sharp up to roughly 2× zoom on a
+  /// phone) instead of at full camera resolution, which saves decode time
+  /// and memory; nothing is decoded until the picture is on screen.
+  ImageProvider? provider(String id, {double? width}) {
     final data = model.images[id];
     if (data == null || !isDisplayableImage(data.extension)) return null;
-    return _providers.putIfAbsent(id, () => MemoryImage(data.bytes));
+    // Round up to share one decode between slightly different sizes.
+    final px = width == null || width <= 0
+        ? 0
+        : ((width * 3 / 256).ceil() * 256).clamp(256, 4096);
+    return _providers.putIfAbsent('$id@$px', () {
+      final image = MemoryImage(data.bytes);
+      return px == 0 ? image : ResizeImage(image, width: px);
+    });
   }
 
   String extensionOf(String id) => model.images[id]?.extension ?? '?';
@@ -415,7 +426,7 @@ class DocImageBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final provider = ctx.images.provider(id);
+    final provider = ctx.images.provider(id, width: width);
     if (provider == null) {
       return _placeholder(ctx.images.extensionOf(id).toUpperCase());
     }

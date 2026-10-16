@@ -37,6 +37,30 @@ class BookMetadata {
   final bool fixedLayout;
 
   String get authorLine => authors.isEmpty ? '' : authors.join(', ');
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'authors': authors,
+        'language': language,
+        'publisher': publisher,
+        'description': description,
+        'identifier': identifier,
+        'cover': coverPath,
+        'rtl': rtl,
+        'fixed': fixedLayout,
+      };
+
+  factory BookMetadata.fromJson(Map<String, dynamic> j) => BookMetadata(
+        title: j['title'] as String,
+        authors: [for (final a in j['authors'] as List) a as String],
+        language: j['language'] as String?,
+        publisher: j['publisher'] as String?,
+        description: j['description'] as String?,
+        identifier: j['identifier'] as String?,
+        coverPath: j['cover'] as String?,
+        rtl: j['rtl'] == true,
+        fixedLayout: j['fixed'] == true,
+      );
 }
 
 /// One document in reading order.
@@ -61,6 +85,18 @@ class SpineItem {
 
   /// Fallback title used when the TOC doesn't name this document.
   final String? title;
+
+  List<dynamic> toJson() =>
+      [path, mediaType, linear ? 1 : 0, size, fixedLayout ? 1 : 0, title];
+
+  factory SpineItem.fromJson(List<dynamic> j) => SpineItem(
+        path: j[0] as String,
+        mediaType: j[1] as String,
+        linear: j[2] == 1,
+        size: (j[3] as num).toInt(),
+        fixedLayout: j[4] == 1,
+        title: j[5] as String?,
+      );
 }
 
 /// A node of the (possibly nested) table of contents.
@@ -85,6 +121,24 @@ class TocEntry {
   int? spineIndex;
 
   final List<TocEntry> children;
+
+  List<dynamic> toJson() => [
+        title,
+        path,
+        fragment,
+        spineIndex,
+        if (children.isNotEmpty) [for (final c in children) c.toJson()],
+      ];
+
+  factory TocEntry.fromJson(List<dynamic> j) => TocEntry(
+        title: j[0] as String,
+        path: j[1] as String?,
+        fragment: j[2] as String?,
+        spineIndex: (j[3] as num?)?.toInt(),
+        children: j.length > 4
+            ? [for (final c in j[4] as List) TocEntry.fromJson(c as List)]
+            : null,
+      );
 }
 
 /// A [TocEntry] flattened for list display.
@@ -136,6 +190,22 @@ class BookInfo {
     }
     return total < 1 ? 1 : total;
   }
+
+  /// Compact JSON form, used to cache the parsed structure on disk.
+  Map<String, dynamic> toJson() => {
+        'format': format.name,
+        'metadata': metadata.toJson(),
+        'spine': [for (final s in spine) s.toJson()],
+        'toc': [for (final t in toc) t.toJson()],
+      };
+
+  factory BookInfo.fromJson(Map<String, dynamic> j) => BookInfo(
+        format: BookFormat.values.byName(j['format'] as String),
+        metadata:
+            BookMetadata.fromJson(j['metadata'] as Map<String, dynamic>),
+        spine: [for (final s in j['spine'] as List) SpineItem.fromJson(s as List)],
+        toc: [for (final t in j['toc'] as List) TocEntry.fromJson(t as List)],
+      );
 }
 
 /// One in-book search result.
@@ -178,10 +248,12 @@ class ReaderPosition {
   /// 0..1 within the spine document.
   final double progress;
 
+  // Full precision: the reader maps the fraction back to a page with
+  // floor(progress * pages), so rounding it could land a page early.
   Map<String, dynamic> toJson() => {
         'v': 2,
         'spine': spine,
-        'progress': double.parse(progress.toStringAsFixed(5)),
+        'progress': progress,
       };
 
   /// Parses a saved position. Accepts the current map format and the legacy

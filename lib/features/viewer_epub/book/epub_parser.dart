@@ -8,6 +8,7 @@ import 'package:xml/xml.dart';
 
 import 'book_models.dart';
 import 'book_source.dart';
+import 'document_preparer.dart';
 import 'html_text.dart';
 import 'sha1.dart';
 import 'text_codec.dart';
@@ -56,6 +57,108 @@ class EpubPackage {
   final Map<String, String> obfuscation;
   final Uint8List? idpfKey;
   final Uint8List? adobeKey;
+
+  Map<String, dynamic> toJson() => {
+        'info': info.toJson(),
+        'obf': obfuscation,
+        if (idpfKey != null) 'idpf': base64.encode(idpfKey!),
+        if (adobeKey != null) 'adobe': base64.encode(adobeKey!),
+      };
+
+  factory EpubPackage.fromJson(Map<String, dynamic> j) => EpubPackage(
+        info: BookInfo.fromJson(j['info'] as Map<String, dynamic>),
+        obfuscation: {
+          for (final e in (j['obf'] as Map).entries)
+            e.key as String: e.value as String,
+        },
+        idpfKey: j['idpf'] == null ? null : base64.decode(j['idpf'] as String),
+        adobeKey:
+            j['adobe'] == null ? null : base64.decode(j['adobe'] as String),
+      );
+}
+
+/// Parsed EPUB structure cached on disk (JSON), so reopening a book skips
+/// the package/TOC parsing. Keyed by path, size and modification time.
+abstract final class EpubStructureCache {
+  static const version = 1;
+
+  /// Cache file for [path] in [dir].
+  static String fileFor(String dir, String path, FileStat stat) {
+    final key = '$version|$path|${stat.size}|'
+        '${stat.modified.millisecondsSinceEpoch}';
+    final hex = sha1Digest(utf8.encode(key))
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return '$dir${Platform.pathSeparator}$hex.json';
+  }
+
+  static Map<String, dynamic> header(String path, FileStat stat) => {
+        'v': version,
+        'path': path,
+        'size': stat.size,
+        'mtime': stat.modified.millisecondsSinceEpoch,
+      };
+
+  /// Serializes a fresh parse (in a background isolate).
+  static Uint8List encode(
+    Map<String, dynamic> header,
+    EpubPackage package,
+    ZipIndex index,
+  ) =>
+      utf8.encode(jsonEncode({
+        ...header,
+        'dir': index.directoryOffset,
+        'count': index.entries.length,
+        ...package.toJson(),
+      }));
+
+  /// Restores a cached parse, or null if it doesn't match this exact file.
+  static EpubPackage? decode(
+    Uint8List bytes,
+    Map<String, dynamic> header,
+    ZipIndex index,
+  ) {
+    try {
+      final j = utf8.decoder.fuse(json.decoder).convert(bytes);
+      if (j is! Map<String, dynamic>) return null;
+      for (final e in header.entries) {
+        if (j[e.key] != e.value) return null;
+      }
+      if (index.directoryOffset < 0 ||
+          j['dir'] != index.directoryOffset ||
+          j['count'] != index.entries.length) {
+        return null;
+      }
+      final package = EpubPackage.fromJson(j);
+      for (final s in package.info.spine) {
+        if (index.entries[s.path] == null) return null;
+      }
+      return package;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Keeps the cache directory from growing without bound.
+  static Future<void> prune(Directory dir, {int max = 300, int keep = 200}) async {
+    final files = <File>[];
+    await for (final e in dir.list()) {
+      if (e is File && e.path.endsWith('.json')) files.add(e);
+    }
+    if (files.length <= max) return;
+    final dated = <(File, DateTime)>[];
+    for (final f in files) {
+      try {
+        dated.add((f, (await f.stat()).modified));
+      } catch (_) {}
+    }
+    dated.sort((a, b) => a.$2.compareTo(b.$2));
+    for (final (f, _) in dated.take(dated.length - keep)) {
+      try {
+        await f.delete();
+      } catch (_) {}
+    }
+  }
 }
 
 class _ManifestItem {
@@ -71,22 +174,153 @@ class _ManifestItem {
 
 /// EPUB 2/3 book backed by the ZIP file on disk.
 class EpubBookSource extends BookSource {
-  EpubBookSource._(this.filePath, this._package, this._index)
-      : _reader = ZipAsyncReader(filePath);
+  EpubBookSource._(this.filePath, this._package, this._index, {
+    String? cacheFile,
+    Map<String, dynamic>? cacheHeader,
+  })  : _reader = ZipAsyncReader(filePath),
+        _cacheFile = cacheFile,
+        _cacheHeader = cacheHeader;
 
   final String filePath;
   final EpubPackage _package;
   final ZipIndex _index;
   final ZipAsyncReader _reader;
+  final String? _cacheFile;
 
-  /// Parses [file] as an EPUB. Returns null when the ZIP has no package
+  /// Set while a fresh parse still has to be written to [_cacheFile].
+  Map<String, dynamic>? _cacheHeader;
+
+  /// Parses [file] as an EPUB, or restores its structure from the cache in
+  /// [cacheDir] (keyed by [stat]). Returns null when the ZIP has no package
   /// document but contains an `.fb2` (zipped FictionBook).
-  static Future<EpubBookSource?> tryOpen(File file) async {
+  static Future<EpubBookSource?> tryOpen(
+    File file, {
+    FileStat? stat,
+    String? cacheDir,
+  }) async {
     final path = file.path;
-    final result = await Isolate.run(() => parseEpub(path));
+    final cacheFile = stat != null && cacheDir != null
+        ? EpubStructureCache.fileFor(cacheDir, path, stat)
+        : null;
+    final header =
+        stat == null ? null : EpubStructureCache.header(path, stat);
+    if (cacheFile != null) {
+      final cached = await _openCached(path, cacheFile, header!);
+      if (cached != null) return cached;
+    }
+    final result = await _parseInBackground(path);
     if (result == null) return null;
-    return EpubBookSource._(path, result.$1, result.$2);
+    return EpubBookSource._(
+      path,
+      result.$1,
+      result.$2,
+      cacheFile: cacheFile,
+      cacheHeader: cacheFile == null ? null : header,
+    );
   }
+
+  static Future<(EpubPackage, ZipIndex)?> _parseInBackground(String path) =>
+      Isolate.run(() => parseEpub(path));
+
+  static Future<Uint8List> _encodeInBackground(
+    Map<String, dynamic> header,
+    EpubPackage package,
+    ZipIndex index,
+  ) =>
+      Isolate.run(() => EpubStructureCache.encode(header, package, index));
+
+  /// Reads the central directory and the cached structure concurrently, on
+  /// this isolate (both are small); null on any mismatch.
+  static Future<EpubBookSource?> _openCached(
+    String path,
+    String cacheFile,
+    Map<String, dynamic> header,
+  ) async {
+    final bytesFuture = File(cacheFile)
+        .readAsBytes()
+        .then<Uint8List?>((b) => b, onError: (_) => null);
+    ZipIndex? index;
+    try {
+      final raf = await File(path).open();
+      try {
+        index = await ZipIndex.readAsync(raf);
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      index = null;
+    }
+    final bytes = await bytesFuture;
+    if (bytes == null || index == null) return null;
+    final idx = index;
+    final package = bytes.length > 256 * 1024
+        ? await _decodeInBackground(bytes, header, idx)
+        : EpubStructureCache.decode(bytes, header, idx);
+    if (package == null) return null;
+    return EpubBookSource._(path, package, idx, cacheFile: cacheFile);
+  }
+
+  static Future<EpubPackage?> _decodeInBackground(
+    Uint8List bytes,
+    Map<String, dynamic> header,
+    ZipIndex index,
+  ) =>
+      Isolate.run(() => EpubStructureCache.decode(bytes, header, index));
+
+  @override
+  Future<void> saveCache() async {
+    final file = _cacheFile;
+    if (file == null) return;
+    final header = _cacheHeader;
+    _cacheHeader = null;
+    try {
+      if (header == null) {
+        // Restored from the cache: mark it recently used.
+        await File(file).setLastModified(DateTime.now());
+        return;
+      }
+      // Encoded off this isolate, and only once the book is on screen.
+      final bytes = await _encodeInBackground(header, _package, _index);
+      final dir = File(file).parent;
+      await dir.create(recursive: true);
+      final tmp = File('$file.tmp');
+      await tmp.writeAsBytes(bytes, flush: true);
+      await tmp.rename(file);
+      await EpubStructureCache.prune(dir);
+    } catch (_) {
+      // The cache is an optimization only.
+    }
+  }
+
+  @override
+  Future<PreparedDocument> prepare(
+    String path,
+    DocumentPrepareRequest options,
+  ) {
+    final entry = _index.find(path);
+    if (entry == null ||
+        entry.size < BookSource.inlinePrepareLimit ||
+        _package.obfuscation.containsKey(entry.name)) {
+      return super.prepare(path, options);
+    }
+    // Read, inflate and prepare in one background isolate: nothing big is
+    // read on, or copied from, this isolate.
+    return _prepareFromFile(filePath, entry, options);
+  }
+
+  static Future<PreparedDocument> _prepareFromFile(
+    String file,
+    ZipEntryInfo entry,
+    DocumentPrepareRequest options,
+  ) =>
+      Isolate.run(() {
+        final reader = ZipSyncReader(file);
+        try {
+          return prepareDocument(options.withBytes(reader.read(entry)));
+        } finally {
+          reader.close();
+        }
+      });
 
   @override
   BookInfo get info => _package.info;
@@ -204,6 +438,16 @@ class _EpubParser {
   String? readText(String path) {
     final b = read(path);
     return b == null ? null : TextCodec.decodeMarkup(b);
+  }
+
+  Uint8List? readHead(String path, int maxBytes) {
+    final e = index.find(path);
+    if (e == null) return null;
+    try {
+      return reader.readHead(e, maxBytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   (EpubPackage, ZipIndex)? parse() {
@@ -394,11 +638,9 @@ class _EpubParser {
       for (var i = 0; i < spine.length; i++) {
         String? title;
         if (spine.length <= 400 && spine[i].mediaType.contains('html')) {
-          final bytes = read(spine[i].path);
-          if (bytes != null) {
-            final head = bytes.length > 65536
-                ? Uint8List.sublistView(bytes, 0, 65536)
-                : bytes;
+          // Only the start of each document: titles are near the top.
+          final head = readHead(spine[i].path, 64 * 1024);
+          if (head != null) {
             title = HtmlText.guessTitle(TextCodec.decodeMarkup(head));
           }
         }

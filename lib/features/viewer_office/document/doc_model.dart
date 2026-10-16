@@ -226,7 +226,27 @@ class DocObject extends DocInline {
 // ---------------------------------------------------------------------------
 // Blocks
 
-sealed class DocBlock {}
+/// Where a top-level DOCX body element sits in the original main part
+/// (`[start, end)` in its decoded text). Every block parsed from that element
+/// shares the span, so a writer can copy the element verbatim — keeping
+/// bookmarks, comments, tracked changes, fields and content controls the
+/// model doesn't represent — as long as all of its blocks are still present,
+/// in order, and unedited.
+class DocSourceSpan {
+  DocSourceSpan(this.start, this.end, this.parts);
+  int start;
+  int end;
+
+  /// Number of (non-frame) blocks the element produced.
+  final int parts;
+}
+
+sealed class DocBlock {
+  /// DOCX: the body element this block was parsed from (see
+  /// [DocSourceSpan]); [sourcePart] is the block's index among its blocks.
+  DocSourceSpan? source;
+  int sourcePart = 0;
+}
 
 class DocListInfo {
   DocListInfo({
@@ -417,7 +437,14 @@ class DocTable extends DocBlock {
   }
 }
 
-class DocPageBreak extends DocBlock {}
+class DocPageBreak extends DocBlock {
+  DocPageBreak({this.joinNext = false});
+
+  /// The break sat inside a paragraph whose text continues in the next
+  /// block (Word: a break run, RTF `\page`); writers may emit it as a leading
+  /// break of that paragraph. Otherwise it was a paragraph of its own.
+  bool joinNext;
+}
 
 /// End of a section; carries the page setup of the section it ends.
 class DocSectionBreak extends DocBlock {
@@ -547,6 +574,16 @@ class DocModel {
   final DocxSourceInfo? docx;
   final String? title;
 
+  /// [warnings] entry: the file holds content the parser skipped (headers,
+  /// footers, notes, comments, objects, list definitions, field codes) that
+  /// the writer for its own format can't reproduce, so overwriting the file
+  /// would delete it.
+  static const warnUnwritable = 'unwritableContent';
+
+  /// [warnings] entry: some text is in an encoding without bundled tables
+  /// and shows as U+FFFD.
+  static const warnEncoding = 'unsupportedEncoding';
+
   static Map<int, DocRunStyle> defaultHeadingStyles(DocRunStyle base) {
     final size = base.fontSize ?? 11;
     return {
@@ -599,60 +636,158 @@ class DocModel {
   }
 }
 
-/// Recomputes list labels after editing (or for formats without stored
-/// labels). Paragraphs that keep [DocListInfo.label] non-empty and have
-/// [keepExisting] are left untouched.
-void renumberLists(List<DocBlock> blocks, {bool keepExisting = false}) {
-  final counters = <int>[];
-  final kinds = <bool?>[];
-  var lastWasList = false;
-  for (final b in blocks) {
-    if (b is DocTable) {
-      for (final r in b.rows) {
-        for (final c in r.cells) {
-          renumberLists(c.blocks, keepExisting: keepExisting);
-        }
-      }
-      continue;
+/// A numbered list label split into its parts: `(iv)` is prefix `(`, value
+/// 4 in `lowerRoman`, suffix `)`.
+class ListLabel {
+  const ListLabel(this.prefix, this.value, this.format, this.suffix);
+
+  final String prefix;
+  final int value;
+
+  /// Word number format (`decimal`, `lowerLetter`, `upperRoman` …).
+  final String format;
+  final String suffix;
+
+  String get text => '$prefix${formatListNumber(value, format)}$suffix';
+
+  ListLabel withValue(int n) => ListLabel(prefix, n, format, suffix);
+
+  bool sameStyle(ListLabel o) =>
+      o.prefix == prefix && o.format == format && o.suffix == suffix;
+
+  static final _re = RegExp(r'^([(\[]?)([0-9]{1,4}|[A-Za-z]{1,6})([.):\]]?)$');
+
+  /// Parses `1.`, `a)`, `(iv)`, `B` …; null for bullets and labels that
+  /// aren't a single number (`1.2.`, `Step 1`). [previous] (the label before
+  /// it at the same level) tells letters from roman numerals (`i`, `v`, `c`).
+  static ListLabel? parse(String label, {ListLabel? previous}) {
+    final m = _re.firstMatch(label.trim());
+    if (m == null) return null;
+    final prefix = m.group(1)!;
+    final body = m.group(2)!;
+    final suffix = m.group(3)!;
+    final digit = body.codeUnitAt(0);
+    if (digit >= 0x30 && digit <= 0x39) {
+      return ListLabel(prefix, int.parse(body), 'decimal', suffix);
     }
+    if (body == 'o' || body == 'O') return null; // Courier "o" bullet
+    final lower = body == body.toLowerCase();
+    if (!lower && body != body.toUpperCase()) return null;
+    final roman = _romanValue(body);
+    final letter = _letterValue(body);
+    bool useRoman;
+    if (roman == null || letter == null) {
+      if (roman == null && letter == null) return null;
+      useRoman = roman != null;
+    } else if (previous != null && previous.format.endsWith('Letter')) {
+      useRoman = false;
+    } else if (previous != null && previous.format.endsWith('Roman')) {
+      useRoman = true;
+    } else {
+      // A list rarely starts at "c", "l" or "v"; it often starts at "i".
+      useRoman = body.length > 1 || body == 'i' || body == 'I';
+    }
+    final kind = useRoman ? 'Roman' : 'Letter';
+    return ListLabel(
+      prefix,
+      useRoman ? roman! : letter!,
+      lower ? 'lower$kind' : 'upper$kind',
+      suffix,
+    );
+  }
+
+  static int? _letterValue(String s) {
+    final c = s.toUpperCase().codeUnitAt(0);
+    for (var i = 1; i < s.length; i++) {
+      if (s.toUpperCase().codeUnitAt(i) != c) return null;
+    }
+    return (c - 0x40) + 26 * (s.length - 1);
+  }
+
+  static int? _romanValue(String s) {
+    const values = {
+      'I': 1,
+      'V': 5,
+      'X': 10,
+      'L': 50,
+      'C': 100,
+      'D': 500,
+      'M': 1000,
+    };
+    final u = s.toUpperCase();
+    var total = 0;
+    for (var i = 0; i < u.length; i++) {
+      final v = values[u[i]];
+      if (v == null) return null;
+      final next = i + 1 < u.length ? values[u[i + 1]] : null;
+      total += next != null && next > v ? -v : v;
+    }
+    // Only canonical numerals ("iiii" and "ic" are not).
+    return total > 0 && formatListNumber(total, 'upperRoman') == u
+        ? total
+        : null;
+  }
+}
+
+/// Fills in list labels after editing. Items keep the label they had
+/// (so letters, roman numerals, custom bullets and a list continuing at
+/// "4." survive); numbering continues from the previous item of the same
+/// list, so inserted or removed items renumber the ones after them; new
+/// items (empty label) follow their neighbours' style. Labels that aren't a
+/// single number (`1.2.`) are left as they are. Tables are skipped — their
+/// content isn't edited.
+void relabelLists(List<DocBlock> blocks) {
+  final numbers = <int, ListLabel>{};
+  final bullets = <int, String>{};
+  final kinds = <int, bool>{};
+  for (final b in blocks) {
     if (b is! DocParagraph) continue;
     final l = b.list;
     if (l == null) {
       if (!b.isEmpty) {
-        counters.clear();
-        lastWasList = false;
+        numbers.clear();
+        bullets.clear();
+        kinds.clear();
       }
       continue;
     }
-    if (!lastWasList) {
-      counters.clear();
-      kinds.clear();
-    }
-    lastWasList = true;
-    while (counters.length <= l.level) {
-      counters.add(0);
-      kinds.add(null);
+    final level = l.level;
+    for (final m in [numbers, bullets, kinds]) {
+      m.removeWhere((k, _) => k > level);
     }
     // A switch between bullets and numbers starts a new list.
-    if (kinds[l.level] != null && kinds[l.level] != l.ordered) {
-      counters[l.level] = 0;
+    if (kinds[level] != null && kinds[level] != l.ordered) {
+      numbers.remove(level);
+      bullets.remove(level);
     }
-    kinds[l.level] = l.ordered;
-    counters[l.level]++;
-    for (var i = l.level + 1; i < counters.length; i++) {
-      counters[i] = 0;
-      kinds[i] = null;
-    }
-    if (keepExisting && l.label.isNotEmpty) continue;
+    kinds[level] = l.ordered;
     if (!l.ordered) {
-      l.label = bulletForLevel(l.level);
+      if (l.label.isEmpty) l.label = bullets[level] ?? bulletForLevel(level);
       l.format = 'bullet';
-    } else {
-      if (l.format == 'bullet' || l.format == 'none') {
-        l.format = defaultOrderedFormat(l.level);
-      }
-      l.label = '${formatListNumber(counters[l.level], l.format)}.';
+      bullets[level] = l.label;
+      continue;
     }
+    final prev = numbers[level];
+    final own = l.label.isEmpty ? null : ListLabel.parse(l.label, previous: prev);
+    if (l.label.isNotEmpty && own == null) {
+      numbers.remove(level); // unknown style: keep the label as it is
+      continue;
+    }
+    ListLabel next;
+    if (prev != null && (own == null || own.sameStyle(prev))) {
+      next = (own ?? prev).withValue(prev.value + 1);
+    } else if (own != null) {
+      // First item, or a differently styled list right after another.
+      next = own;
+    } else {
+      final format = l.format == 'bullet' || l.format == 'none'
+          ? defaultOrderedFormat(level)
+          : l.format;
+      next = ListLabel('', 1, format, '.');
+    }
+    l.label = next.text;
+    l.format = next.format;
+    numbers[level] = next;
   }
 }
 

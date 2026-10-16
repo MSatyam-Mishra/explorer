@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:explorer/features/viewer_pdf/models/pdf_edit_models.dart';
+import 'package:explorer/features/viewer_pdf/services/pdf_document_ops.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_page_rasterizer.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_dialogs.dart';
 import 'package:explorer/shared/widgets/clear_glass_panel.dart';
@@ -30,6 +31,7 @@ class PdfPageCanvasScreen extends StatefulWidget {
     this.initialTool = PageCanvasTool.pen,
     this.start = PageCanvasStart.none,
     this.initialColor = const Color(0xFFF44336),
+    this.onApply,
   });
 
   final Uint8List documentBytes;
@@ -40,6 +42,10 @@ class PdfPageCanvasScreen extends StatefulWidget {
   final PageCanvasTool initialTool;
   final PageCanvasStart start;
   final Color initialColor;
+
+  /// Burns the marks into the document. The canvas only closes when this
+  /// returns true, so nothing drawn is lost when applying fails.
+  final Future<bool> Function(List<PageMark> marks)? onApply;
 
   @override
   State<PdfPageCanvasScreen> createState() => _PdfPageCanvasScreenState();
@@ -209,6 +215,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
   List<Offset>? _activeStroke;
   _Drag? _drag;
   bool _erasedInGesture = false;
+  bool _applying = false;
 
   /// Logical pixels per PDF point for the current layout.
   double _scale = 1;
@@ -641,7 +648,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
     _changed();
   }
 
-  List<PageMark> _marks() {
+  Future<List<PageMark>> _marks() async {
     final marks = <PageMark>[];
     for (final item in _items) {
       switch (item) {
@@ -656,15 +663,22 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
           );
         case _TextItem():
           marks.add(
-            TextMark(
-              position: item.position,
-              text: item.text,
-              fontSize: item.fontSize,
-              color: item.color,
-            ),
+            PdfDocumentOps.canEmbedText(item.text)
+                ? TextMark(
+                    position: item.position,
+                    text: item.text,
+                    fontSize: item.fontSize,
+                    color: item.color,
+                  )
+                : await _textAsImage(item),
           );
         case _ImageItem():
-          marks.add(ImageMark(rect: item.rect, bytes: item.bytes));
+          marks.add(
+            ImageMark(
+              rect: item.rect,
+              bytes: await PdfDocumentOps.imageForPdf(item.bytes, item.image),
+            ),
+          );
         case _SignatureItem():
           for (final stroke in item.absoluteStrokes()) {
             marks.add(
@@ -678,6 +692,64 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
       }
     }
     return marks;
+  }
+
+  /// Text the PDF fonts can't show (non-Latin scripts, emoji, or anything
+  /// beyond Latin-1 on iOS) is placed as an image drawn exactly like the
+  /// preview, at about 300 dpi.
+  static Future<ImageMark> _textAsImage(_TextItem item) async {
+    final painter = item.painter();
+    final size = painter.size;
+    final scale = math.min(
+      300 / 72,
+      4096 / math.max(1.0, math.max(size.width, size.height)),
+    );
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder)..scale(scale), Offset.zero);
+    painter.dispose();
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(
+      math.max(1, (size.width * scale).ceil()),
+      math.max(1, (size.height * scale).ceil()),
+    );
+    picture.dispose();
+    try {
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (png == null) throw const FormatException('Text could not be drawn');
+      return ImageMark(
+        rect: item.position & size,
+        bytes: png.buffer.asUint8List(png.offsetInBytes, png.lengthInBytes),
+      );
+    } finally {
+      image.dispose();
+    }
+  }
+
+  Future<void> _apply() async {
+    if (_applying || _items.isEmpty) return;
+    setState(() {
+      _applying = true;
+      _activeStroke = null;
+      _drag = null;
+    });
+    List<PageMark>? marks;
+    var applied = false;
+    try {
+      marks = await _marks();
+      final onApply = widget.onApply;
+      applied = onApply == null || await onApply(marks);
+    } catch (e) {
+      debugPrint('PdfPageCanvasScreen: preparing the page failed: $e');
+      _showMessage("Couldn't prepare what you added. Nothing was lost.");
+    }
+    if (!mounted) return;
+    if (applied) {
+      Navigator.pop(context, marks);
+      return;
+    }
+    // The owner reported the failure; keep everything so the user can retry
+    // or remove the item that fails.
+    setState(() => _applying = false);
   }
 
   Future<bool> _confirmDiscard() async {
@@ -697,9 +769,9 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
   Widget build(BuildContext context) {
     final iconColor = ClearGlassForeground.icon(context);
     return PopScope(
-      canPop: _items.isEmpty,
+      canPop: _items.isEmpty && !_applying,
       onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
+        if (didPop || _applying) return;
         if (await _confirmDiscard() && context.mounted) Navigator.pop(context);
       },
       child: ExplorerScaffold(
@@ -713,14 +785,21 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
           ),
           ExplorerTopBar.iconButton(
             context: context,
-            icon: Icon(Icons.check, color: iconColor),
+            icon: _applying
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: iconColor,
+                    ),
+                  )
+                : Icon(Icons.check, color: iconColor),
             tooltip: 'Apply to page',
-            onPressed: _items.isEmpty
-                ? null
-                : () => Navigator.pop(context, _marks()),
+            onPressed: _items.isEmpty || _applying ? null : _apply,
           ),
         ]),
-        body: _buildBody(context),
+        body: AbsorbPointer(absorbing: _applying, child: _buildBody(context)),
       ),
     );
   }
@@ -1246,33 +1325,40 @@ class _SignaturePadDialogState extends State<_SignaturePadDialog> {
               ),
             ),
             const SizedBox(height: 8),
+            // Compact swatches that wrap: a 360dp phone leaves ~248dp here.
             Row(
               children: [
-                for (final color in const [
-                  Color(0xFF000000),
-                  Color(0xFF1A237E),
-                  Color(0xFF2196F3),
-                  Color(0xFFF44336),
-                ])
-                  IconButton(
-                    tooltip: 'Ink colour',
-                    onPressed: () => setState(() => _color = color),
-                    icon: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _color == color
-                              ? scheme.primary
-                              : scheme.outline,
-                          width: _color == color ? 3 : 1,
+                Expanded(
+                  child: Wrap(
+                    children: [
+                      for (final color in const [
+                        Color(0xFF000000),
+                        Color(0xFF1A237E),
+                        Color(0xFF2196F3),
+                        Color(0xFFF44336),
+                      ])
+                        IconButton(
+                          tooltip: 'Ink colour',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => setState(() => _color = color),
+                          icon: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _color == color
+                                    ? scheme.primary
+                                    : scheme.outline,
+                                width: _color == color ? 3 : 1,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                    ],
                   ),
-                const Spacer(),
+                ),
                 TextButton(
                   onPressed: _strokes.isEmpty
                       ? null

@@ -1,12 +1,40 @@
 import 'dart:typed_data';
 
-import 'package:explorer/core/formats/cfb_reader.dart';
-
+import '../common/code_pages.dart';
 import 'doc_model.dart';
 import 'docx_parser.dart' show loadImageData, mapSymbolChar;
 
-/// Parses RTF into a [DocModel].
-DocModel parseRtfBytes(Uint8List bytes) => _RtfParser(bytes).parse();
+/// Parses RTF into a [DocModel]. [onPreview], when given, receives a model
+/// holding the first pages' blocks of a long document as soon as they're
+/// parsed (at most once).
+DocModel parseRtfBytes(
+  Uint8List bytes, {
+  void Function(DocModel preview)? onPreview,
+}) => _RtfParser(bytes, onPreview).parse();
+
+/// Offset of the opening `{\rtf` after leading whitespace, or -1 when
+/// [bytes] isn't RTF. Shared by the format sniffer and the parser.
+int rtfStart(List<int> bytes) {
+  var i = 0;
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xEF &&
+      bytes[1] == 0xBB &&
+      bytes[2] == 0xBF) {
+    i = 3; // UTF-8 BOM written by some tools
+  }
+  // Whitespace (as String.trimLeft sees it on the Latin-1 view) and stray
+  // control bytes.
+  while (i < bytes.length &&
+      (bytes[i] <= 0x20 || bytes[i] == 0x85 || bytes[i] == 0xA0)) {
+    i++;
+  }
+  const sig = [0x7B, 0x5C, 0x72, 0x74, 0x66]; // {\rtf
+  if (i + sig.length > bytes.length) return -1;
+  for (var k = 0; k < sig.length; k++) {
+    if (bytes[i + k] != sig[k]) return -1;
+  }
+  return i;
+}
 
 class _CharState {
   bool bold = false, italic = false, underline = false, strike = false;
@@ -94,9 +122,13 @@ class _CellDef {
 }
 
 class _RtfParser {
-  _RtfParser(Uint8List bytes) : s = String.fromCharCodes(bytes);
+  _RtfParser(Uint8List bytes, this.onPreview)
+    : s = String.fromCharCodes(bytes),
+      start = rtfStart(bytes);
 
   final String s;
+  final int start;
+  final void Function(DocModel preview)? onPreview;
   int pos = 0;
 
   final List<_Group> stack = [];
@@ -105,7 +137,16 @@ class _RtfParser {
   int codePage = 1252;
   final Map<int, String> fonts = {};
   final Map<int, int> fontCharset = {};
+  final Map<int, int> fontCodePage = {};
+  bool? _charsetsMeaningful;
   int defaultFont = 0;
+
+  /// Content the RTF writer can't reproduce was skipped (see
+  /// [DocModel.warnUnwritable]).
+  bool _unwritable = false;
+  bool _encodingLoss = false;
+  bool _previewSent = false;
+  int _chars = 0;
   final List<int?> colors = [];
   final Map<int, String> styleNames = {};
   final Map<String, DocImageData> images = {};
@@ -136,6 +177,13 @@ class _RtfParser {
   final StringBuffer _listLabel = StringBuffer();
   final List<int> _pendingBytes = [];
 
+  // Text of the run being collected; becomes a DocText when the formatting
+  // or link changes, before any other inline, and at paragraph end. (Growing
+  // DocText.text per character is quadratic in the paragraph length.)
+  final StringBuffer _runBuf = StringBuffer();
+  DocRunStyle? _runStyle;
+  String? _runLink;
+
   // Tables.
   List<_CellDef> _rowDefs = [];
   DocTable? _table;
@@ -148,9 +196,10 @@ class _RtfParser {
   double _pw = 612, _ph = 792, _ml = 90, _mr = 90, _mt = 72, _mb = 72;
 
   DocModel parse() {
-    if (!s.startsWith('{\\rtf')) {
+    if (start < 0) {
       throw const FormatException('Not an RTF document');
     }
+    pos = start;
     g = _Group(_CharState(), _ParaState(), _Dest.normal, 1);
     final len = s.length;
     while (pos < len) {
@@ -169,21 +218,53 @@ class _RtfParser {
         _control();
       } else if (c == 0x0D || c == 0x0A) {
         pos++;
-      } else {
-        if (g.dest == _Dest.pict) {
-          _pictHex.writeCharCode(c);
-        } else if (c >= 0x80) {
-          _pendingBytes.add(c);
-        } else {
-          _flushBytes();
-          _text(String.fromCharCode(c));
+      } else if (g.dest == _Dest.pict) {
+        // Hex picture data: copy up to the next control/group character.
+        var e = pos + 1;
+        while (e < len) {
+          final ch = s.codeUnitAt(e);
+          if (ch == 0x5C || ch == 0x7B || ch == 0x7D) break;
+          e++;
         }
+        _pictHex.write(s.substring(pos, e));
+        pos = e;
+      } else if (c >= 0x80) {
+        _pendingBytes.add(c);
         pos++;
+      } else if (c < 0x20 && c != 0x09 && !_awaitingTrailByte()) {
+        pos++; // stray control byte (e.g. a NUL after the final brace)
+      } else if (_awaitingTrailByte()) {
+        // DBCS trail byte written as a literal character (`\'82a`).
+        _pendingBytes.add(c);
+        pos++;
+      } else {
+        _flushBytes();
+        // Plain text runs to the next special character.
+        var e = pos + 1;
+        if (c >= 0x20) {
+          while (e < len) {
+            final ch = s.codeUnitAt(e);
+            if (ch < 0x20 ||
+                ch >= 0x80 ||
+                ch == 0x5C ||
+                ch == 0x7B ||
+                ch == 0x7D) {
+              break;
+            }
+            e++;
+          }
+        }
+        _text(s.substring(pos, e));
+        pos = e;
       }
     }
     _flushBytes();
     _finishParagraph(force: false);
     _closeTable();
+    return _model(blocks, images);
+  }
+
+  DocModel _model(List<DocBlock> blocks, Map<String, DocImageData> images) {
     page = DocPageSetup(
       width: _pw,
       height: _ph,
@@ -200,7 +281,23 @@ class _RtfParser {
       images: images,
       page: page,
       baseStyle: _commonBase(models) ?? base,
+      warnings: [
+        if (_unwritable) DocModel.warnUnwritable,
+        if (_encodingLoss) DocModel.warnEncoding,
+      ],
     );
+  }
+
+  /// Hands a long document's first blocks to [onPreview] once enough for
+  /// the first pages are parsed.
+  void _maybePreview() {
+    final cb = onPreview;
+    if (cb == null || _previewSent || _table != null) return;
+    if (blocks.length < 60 && _chars < 6000) return;
+    _previewSent = true;
+    // Only worth it when a good part of the file is still unparsed.
+    if (s.length - pos < 150000) return;
+    cb(_model(List.of(blocks), Map.of(images)));
   }
 
   /// Most common run size/font, used as the "Normal" style.
@@ -265,6 +362,45 @@ class _RtfParser {
     _curStyle = 0;
   }
 
+  int get _activeFont => g.char.font >= 0 ? g.char.font : defaultFont;
+
+  /// Code page of text in [font]: its `\cpg`, else its charset, else the
+  /// document's `\ansicpg`. Charset 0 means Western only when the writer
+  /// tags fonts with real charsets; some writers put `\fcharset0` on every
+  /// font of a non-Western document.
+  int _codePageFor(int font) {
+    final cpg = fontCodePage[font];
+    if (cpg != null && cpg > 0) return cpg;
+    final cs = fontCharset[font];
+    if (cs != null && cs != 0) {
+      final cp = codePageForCharset(cs);
+      if (cp != null) return cp;
+    }
+    if (cs == 0) {
+      final meaningful = _charsetsMeaningful ??= fontCharset.values.any(
+        (c) => c != 0 && c != 1 && c != 2,
+      );
+      if (meaningful) return 1252;
+    }
+    return codePage;
+  }
+
+  int get _textCodePage =>
+      _codePageFor(g.dest == _Dest.fontTable ? _curFont : _activeFont);
+
+  /// Whether the pending bytes end with a DBCS lead byte still missing its
+  /// trail byte.
+  bool _awaitingTrailByte() {
+    if (_pendingBytes.isEmpty) return false;
+    final cp = _textCodePage;
+    if (!isDbcsCodePage(cp)) return false;
+    var i = 0;
+    while (i < _pendingBytes.length) {
+      i += isDbcsLeadByte(cp, _pendingBytes[i]) ? 2 : 1;
+    }
+    return i > _pendingBytes.length;
+  }
+
   void _flushBytes() {
     if (_pendingBytes.isEmpty) return;
     final bytes = [
@@ -273,90 +409,21 @@ class _RtfParser {
     ];
     _pendingBytes.clear();
     if (bytes.isEmpty) return;
-    var cp = codePage;
-    final cs = fontCharset[g.char.font];
-    final fontName = fonts[g.char.font] ?? '';
+    final font = g.dest == _Dest.fontTable ? _curFont : _activeFont;
+    final cs = fontCharset[font];
+    final fontName = fonts[font] ?? '';
     final lower = fontName.toLowerCase();
     if (cs == 2 || lower.contains('symbol') || lower.contains('wingdings')) {
       _text(bytes.map((b) => mapSymbolChar(0xF000 + b, fontName)).join());
       return;
     }
-    if (cs == 204) cp = 1251;
-    if (cs == 0) cp = 1252;
-    _text(cp == 1251 ? _decode1251(bytes) : decodeCp1252(bytes));
-  }
-
-  static String _decode1251(List<int> bytes) {
-    const high = [
-      0x0402,
-      0x0403,
-      0x201A,
-      0x0453,
-      0x201E,
-      0x2026,
-      0x2020,
-      0x2021,
-      0x20AC,
-      0x2030,
-      0x0409,
-      0x2039,
-      0x040A,
-      0x040C,
-      0x040B,
-      0x040F, //
-      0x0452,
-      0x2018,
-      0x2019,
-      0x201C,
-      0x201D,
-      0x2022,
-      0x2013,
-      0x2014,
-      0x0098,
-      0x2122,
-      0x0459,
-      0x203A,
-      0x045A,
-      0x045C,
-      0x045B,
-      0x045F,
-      0x00A0,
-      0x040E,
-      0x045E,
-      0x0408,
-      0x00A4,
-      0x0490,
-      0x00A6,
-      0x00A7,
-      0x0401,
-      0x00A9,
-      0x0404,
-      0x00AB,
-      0x00AC,
-      0x00AD,
-      0x00AE,
-      0x0407,
-      0x00B0,
-      0x00B1,
-      0x0406,
-      0x0456,
-      0x0491,
-      0x00B5,
-      0x00B6,
-      0x00B7,
-      0x0451,
-      0x2116,
-      0x0454,
-      0x00BB,
-      0x0458,
-      0x0405,
-      0x0455,
-      0x0457,
-    ];
-    return String.fromCharCodes([
-      for (final b in bytes)
-        b < 0x80 ? b : (b < 0xC0 ? high[b - 0x80] : 0x0410 + (b - 0xC0)),
-    ]);
+    final cp = _codePageFor(font);
+    if (!canDecodeCodePage(cp) && g.dest == _Dest.normal) {
+      _encodingLoss = true;
+      // Saving would replace the characters with U+FFFD for good.
+      _unwritable = true;
+    }
+    _text(decodeCodePage(cp, bytes));
   }
 
   void _control() {
@@ -364,11 +431,11 @@ class _RtfParser {
     if (pos >= s.length) return;
     final c = s.codeUnitAt(pos);
     if (_isLetter(c)) {
-      final start = pos;
+      final wordStart = pos;
       while (pos < s.length && _isLetter(s.codeUnitAt(pos))) {
         pos++;
       }
-      final word = s.substring(start, pos);
+      final word = s.substring(wordStart, pos);
       int? param;
       if (pos < s.length) {
         final pc = s.codeUnitAt(pos);
@@ -382,7 +449,9 @@ class _RtfParser {
         }
       }
       if (pos < s.length && s.codeUnitAt(pos) == 0x20) pos++;
-      if (word != 'u' && word != 'bin') _flushBytes();
+      // Pending \'hh bytes precede this word in the text — including `\u`,
+      // whose character must come after them.
+      _flushBytes();
       _word(word, param);
       return;
     }
@@ -409,8 +478,12 @@ class _RtfParser {
       case 0x7B:
       case 0x7D:
       case 0x5C:
-        _flushBytes();
-        _text(String.fromCharCode(c));
+        if (_awaitingTrailByte()) {
+          _pendingBytes.add(c); // escaped DBCS trail byte (`\'83\\`)
+        } else {
+          _flushBytes();
+          _text(String.fromCharCode(c));
+        }
       case 0x7E:
         _flushBytes();
         _text('\u00A0');
@@ -537,11 +610,40 @@ class _RtfParser {
     'fname',
   };
 
+  /// Skipped destinations holding content the RTF writer can't write back.
+  static const _unwritableDestinations = {
+    'header',
+    'headerl',
+    'headerr',
+    'headerf',
+    'footer',
+    'footerl',
+    'footerr',
+    'footerf',
+    'footnote',
+    'annotation',
+    'shpinst',
+    'objdata',
+    // Word lists (listtable) are written back with their labels and start
+    // numbers; old-style WordPad numbering (\pn) isn't.
+    'pn',
+    'formfield',
+    'xe',
+    'tc',
+  };
+
+  /// Skips `\binN` data. Only ever forward: a negative N would move the
+  /// parser back onto the same token and loop forever.
+  void _skipBinary(int? p) {
+    if (p == null || p <= 0) return;
+    pos = p >= s.length - pos ? s.length : pos + p;
+  }
+
   void _word(String w, int? p) {
     final starred = _starred;
     _starred = false;
     if (g.dest == _Dest.skip) {
-      if (w == 'bin') pos += (p ?? 0);
+      if (w == 'bin') _skipBinary(p);
       return;
     }
 
@@ -573,6 +675,14 @@ class _RtfParser {
       case 'fldrslt':
         g.fieldResult = true;
         if (g.dest == _Dest.fieldInst) g.dest = _Dest.normal;
+        // Only hyperlinks are written back; other fields (page numbers,
+        // TOC, dates, references) would become static text.
+        final inst = _fieldInst.isEmpty
+            ? ''
+            : _fieldInst.last.toString().trim().toUpperCase();
+        if (inst.isNotEmpty && !inst.startsWith('HYPERLINK')) {
+          _unwritable = true;
+        }
         return;
       case 'field':
         g.isField = true;
@@ -587,10 +697,11 @@ class _RtfParser {
       case 'object':
         return;
       case 'bin':
-        pos += (p ?? 0);
+        _skipBinary(p);
         return;
     }
     if (_skipDestinations.contains(w)) {
+      if (_unwritableDestinations.contains(w)) _unwritable = true;
       g.dest = _Dest.skip;
       return;
     }
@@ -608,6 +719,9 @@ class _RtfParser {
           _curFont = p ?? 0;
         case 'fcharset':
           if (_curFont >= 0) fontCharset[_curFont] = p ?? 0;
+          _charsetsMeaningful = null;
+        case 'cpg':
+          if (_curFont >= 0 && p != null) fontCodePage[_curFont] = p;
       }
       return;
     }
@@ -748,8 +862,9 @@ class _RtfParser {
         _finishParagraph(force: false);
         blocks.add(DocPageBreak());
       case 'page':
+        // A break character inside the paragraph; its text continues after.
         _finishParagraph(force: false);
-        blocks.add(DocPageBreak());
+        blocks.add(DocPageBreak(joinNext: true));
       case 'line':
         _text('\n');
       case 'tab':
@@ -891,7 +1006,9 @@ class _RtfParser {
         _fontName.write(t);
         return;
       case _Dest.colorTable:
-        if (t.contains(';')) {
+        // One entry per ';' (text arrives in runs, e.g. ";;" for two).
+        for (var k = 0; k < t.length; k++) {
+          if (t.codeUnitAt(k) != 0x3B) continue;
           colors.add(_r < 0 ? null : 0xFF000000 | (_r << 16) | (_g << 8) | _b);
           _r = _g = _b = -1;
         }
@@ -924,11 +1041,28 @@ class _RtfParser {
         break;
       }
     }
+    _chars += t.length;
+    if (_runBuf.isNotEmpty && (style != _runStyle || link != _runLink)) {
+      _flushRun();
+    }
+    if (_runBuf.isEmpty) {
+      _runStyle = style;
+      _runLink = link;
+    }
+    _runBuf.write(t);
+  }
+
+  /// Turns the collected run text into an inline (merging with the previous
+  /// text inline when the formatting matches).
+  void _flushRun() {
+    if (_runBuf.isEmpty) return;
+    final text = _runBuf.toString();
+    _runBuf.clear();
     final last = inlines.isEmpty ? null : inlines.last;
-    if (last is DocText && last.style == style && last.link == link) {
-      last.text += t;
+    if (last is DocText && last.style == _runStyle && last.link == _runLink) {
+      last.text += text;
     } else {
-      inlines.add(DocText(t, style, link: link));
+      inlines.add(DocText(text, _runStyle!, link: _runLink));
     }
   }
 
@@ -954,6 +1088,7 @@ class _RtfParser {
   }
 
   void _finishParagraph({required bool force, bool intoCell = false}) {
+    _flushRun();
     if (!force && !intoCell && inlines.isEmpty && _listLabel.isEmpty) return;
     final pp = g.para;
     final styleName = (styleNames[pp.style] ?? '').toLowerCase();
@@ -966,14 +1101,13 @@ class _RtfParser {
     DocListInfo? list;
     final label = _listLabel.toString().replaceAll('\t', '').trim();
     if (pp.list > 0 || label.isNotEmpty) {
-      final ordered =
-          RegExp(r'^[(]?[0-9a-zA-Z]{1,6}[.)]?$').hasMatch(label) &&
-          !RegExp(r'^[oO]$').hasMatch(label);
+      final number = ListLabel.parse(label, previous: _lastLabel[pp.ilvl]);
+      _lastLabel[pp.ilvl] = number;
       list = DocListInfo(
-        ordered: ordered,
+        ordered: number != null,
         level: pp.ilvl,
         label: label.isEmpty ? '•' : label,
-        format: ordered ? 'decimal' : 'bullet',
+        format: number?.format ?? 'bullet',
       );
     }
     _listLabel.clear();
@@ -1010,10 +1144,15 @@ class _RtfParser {
       _cellBlocks.add(p);
     } else {
       _closeTable();
-      if (p.pageBreakBefore && blocks.isNotEmpty) blocks.add(DocPageBreak());
+      // \pagebb is kept on the paragraph; the layout and writers honour it.
       blocks.add(p);
+      _maybePreview();
     }
   }
+
+  /// Last numbered label per list level (to tell letters from roman
+  /// numerals).
+  final Map<int, ListLabel?> _lastLabel = {};
 
   void _endCell() {
     _row ??= DocTableRow();
@@ -1022,6 +1161,7 @@ class _RtfParser {
   }
 
   void _endRow() {
+    _flushRun();
     if (_cellBlocks.isNotEmpty || inlines.isNotEmpty) {
       _finishParagraph(force: false, intoCell: true);
       _endCell();
@@ -1130,6 +1270,7 @@ class _RtfParser {
     final saved = g.dest;
     g.dest = _Dest.normal;
     if (!g.char.hidden) {
+      _flushRun();
       inlines.add(DocImage(imageId: id, width: w, height: h));
     }
     g.dest = saved;

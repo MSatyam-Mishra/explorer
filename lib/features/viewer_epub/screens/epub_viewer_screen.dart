@@ -49,8 +49,19 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   String? _error;
   bool _retryable = false;
 
-  ReaderSettings _settings = const ReaderSettings();
-  ReaderPosition? _pendingStart;
+  ReaderSettings _settings = ReaderSettings.lastKnown ?? const ReaderSettings();
+
+  /// A load requested while the WebView didn't exist yet (it is created by
+  /// the first build, concurrently with opening the book, and recreated
+  /// after a renderer crash): `(spine index, target)`.
+  (int, Map<String, dynamic>)? _pending;
+
+  /// Renderer crashes of the same section with no successful load since.
+  int _crashSpine = -1;
+  int _crashes = 0;
+
+  /// The first page has been shown (deferred work may start).
+  bool _shownOnce = false;
 
   int _spine = 0;
   int _page = 0;
@@ -81,6 +92,16 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   String get _path => widget.epubFile.path;
   BookInfo? get _info => _source?.info;
 
+  /// The file name without its e-book extension, shown until the book's
+  /// own title is known.
+  String get _fileTitle => widget.epubFile.uri.pathSegments.last.replaceFirst(
+        RegExp(
+          r'\.(epub|kepub|fb2(\.zip)?|fbz|mobi|azw3?|prc|pdb|kf8)$',
+          caseSensitive: false,
+        ),
+        '',
+      );
+
   static bool get _platformSupported =>
       !kIsWeb &&
       (Platform.isAndroid ||
@@ -101,7 +122,10 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
     _savePosition();
     _session?.dispose();
     final source = _source;
-    if (source != null) unawaited(source.dispose());
+    if (source != null) {
+      unawaited(source.saveCache());
+      unawaited(source.dispose());
+    }
     _search.dispose();
     _focus.dispose();
     super.dispose();
@@ -124,37 +148,55 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       _session = null;
       _source = null;
       _web = null;
+      _pending = null;
+      _shownOnce = false;
       _loadId++;
       setState(() {
         _opening = true;
         _error = null;
         _docError = null;
+        _docLoading = true;
         _cover = null;
       });
     }
 
+    // Nothing here waits for anything it doesn't need: the WebView is
+    // already being created by the first build (behind the loading page),
+    // and the book is parsed (or restored from the structure cache) while
+    // settings and bookmarks load alongside.
+    final settingsFuture = ReaderSettings.load();
+    final savedFuture = _readSaved();
+    unawaited(settingsFuture.then((s) {
+      if (mounted && _session == null && s != _settings) {
+        setState(() => _settings = s);
+      }
+    }));
     try {
-      final settingsFuture = ReaderSettings.load();
-      final source = await BookSource.open(widget.epubFile);
+      final source = await BookSource.open(
+        widget.epubFile,
+        cacheDir: ReaderSession.cacheDirectory(),
+      );
       if (!mounted) {
         unawaited(source.dispose());
         return;
       }
       final session = ReaderSession(source);
+      final mounting = session.start();
+      final (saved, bookmarks) = await savedFuture;
+      final info = source.info;
+      final start = ReaderPosition.fromSaved(saved, info) ??
+          ReaderPosition(_firstLinear(info), 0);
+      // The first page is prepared while the server mount, the settings and
+      // the WebView finish; _openSpine below joins this work.
+      session.prepare(start.spine).ignore();
+      final ReaderSettings settings;
       try {
-        await session.start();
+        await mounting;
+        settings = await settingsFuture;
       } catch (_) {
+        session.dispose();
         unawaited(source.dispose());
         rethrow;
-      }
-      final settings = await settingsFuture;
-      dynamic saved;
-      var bookmarks = const <Bookmark>[];
-      try {
-        saved = await _bookmarkService.getLastReadPosition(_path);
-        bookmarks = await _bookmarkService.getBookmarks(_path);
-      } catch (e) {
-        debugPrint('EPUB reader: could not read saved position: $e');
       }
       if (!mounted) {
         session.dispose();
@@ -162,9 +204,6 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
         return;
       }
 
-      final info = source.info;
-      final start = ReaderPosition.fromSaved(saved, info) ??
-          ReaderPosition(_firstLinear(info), 0);
       final cumulative = <int>[0];
       var total = 0;
       for (final s in info.spine) {
@@ -178,7 +217,6 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
         _settings = settings;
         _bookmarks = bookmarks;
         _cumulative = cumulative;
-        _pendingStart = start;
         _spine = start.spine;
         _fraction = start.progress;
         _page = 0;
@@ -186,7 +224,7 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
         _docLoading = true;
         _opening = false;
       });
-      _loadCover();
+      _openSpine(start.spine, {'type': 'fraction', 'value': start.progress});
     } on BookOpenException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -211,6 +249,40 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
     return i < 0 ? 0 : i;
   }
 
+  /// Saved position and bookmarks; never throws.
+  Future<(dynamic, List<Bookmark>)> _readSaved() async {
+    try {
+      final r = await Future.wait<dynamic>([
+        _bookmarkService.getLastReadPosition(_path),
+        _bookmarkService.getBookmarks(_path),
+      ]);
+      return (r[0], r[1] as List<Bookmark>);
+    } catch (e) {
+      debugPrint('EPUB reader: could not read saved position: $e');
+      return (null, const <Bookmark>[]);
+    }
+  }
+
+  /// Loads [_pending] once both the book and the WebView are ready.
+  void _startIfReady() {
+    final pending = _pending;
+    if (pending == null || _web == null || _session == null) return;
+    _pending = null;
+    _openSpine(pending.$1, pending.$2);
+  }
+
+  /// Work the first page doesn't need waits until it is on screen.
+  void _onFirstPageShown() {
+    if (_shownOnce) return;
+    _shownOnce = true;
+    final source = _source;
+    Timer(const Duration(milliseconds: 600), () {
+      if (!mounted || !identical(source, _source)) return;
+      _loadCover();
+      unawaited(source?.saveCache());
+    });
+  }
+
   Future<void> _loadCover() async {
     final source = _source;
     final path = source?.info.metadata.coverPath;
@@ -229,12 +301,12 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
 
   Future<void> _openSpine(int index, Map<String, dynamic> target) async {
     final session = _session;
-    final web = _web;
     final info = _info;
-    if (session == null || web == null || info == null) return;
+    if (session == null || info == null) return;
     index = index.clamp(0, info.spine.length - 1);
     final loadId = ++_loadId;
     _lastTarget = target;
+    _pending = null;
     _readyTimer?.cancel();
     setState(() {
       _spine = index;
@@ -271,6 +343,13 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       return;
     }
     if (!mounted || loadId != _loadId || !identical(session, _session)) return;
+    final web = _web;
+    if (web == null) {
+      // The WebView is still starting (or restarting after a crash): it
+      // loads this as soon as it exists.
+      _pending = (index, target);
+      return;
+    }
 
     session.configJson =
         ReaderSession.encodeConfig(_configFor(index, loadId, target));
@@ -457,10 +536,15 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
         };
       }
       _docLoading = false;
+      // The current load reported in, so any error shown was stale (e.g. a
+      // superseded navigation of the same URL).
+      _docError = null;
     });
+    if (ready) _crashes = 0;
     if (wasLoading) {
       _readyTimer?.cancel();
       _prefetchNext();
+      _onFirstPageShown();
     }
     _scheduleSave();
   }
@@ -680,7 +764,9 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
     for (final b in _bookmarks) {
       final p = ReaderPosition.fromSaved(b.position, info);
       if (p == null || p.spine != _spine) continue;
-      final page = (p.progress * _pages + 1e-6).floor().clamp(0, _pages - 1);
+      // Same tolerance as the page script's goToFraction (older saves were
+      // rounded to 5 decimals).
+      final page = (p.progress * _pages + 0.01).floor().clamp(0, _pages - 1);
       if (page == _page) return b;
     }
     return null;
@@ -954,26 +1040,16 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   }
 
   Widget _buildContent(BuildContext context, bool docked, FoldInfo? fold) {
-    if (_opening) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Opening book…'),
-          ],
-        ),
-      );
-    }
     final error = _error;
-    if (error != null || _info == null) {
+    if (error != null || (!_opening && _info == null)) {
       return _ErrorView(
         message: error ?? 'Unknown error',
         onRetry: _retryable ? () => _open(retry: true) : null,
       );
     }
-
+    // While the book is still opening, the same layout is built (with the
+    // reader pane only) so the WebView starts immediately and survives the
+    // switch: the reader pane keeps its key when the docked panel appears.
     final hingeSplit = docked && fold != null && fold.isVertical;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final panelWidth = hingeSplit
@@ -1030,19 +1106,13 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
                   Positioned.fill(child: _buildWebView()),
                   if (_docLoading)
                     Positioned.fill(
-                      child: ColoredBox(
-                        color: theme.background,
-                        child: Center(
-                          child: SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: theme.foreground.withValues(alpha: 0.6),
+                      child: _shownOnce
+                          ? _LoadingPage(theme: theme, title: _chapterTitle)
+                          : _LoadingPage(
+                              theme: theme,
+                              title: _info?.metadata.title ?? _fileTitle,
+                              subtitle: _info?.metadata.authorLine,
                             ),
-                          ),
-                        ),
-                      ),
                     ),
                   if (_docError != null)
                     Positioned.fill(child: _buildDocError(theme, prev, next)),
@@ -1149,18 +1219,16 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
           handlerName: 'er',
           callback: _onJsMessage,
         );
-        final start = _pendingStart;
-        _pendingStart = null;
-        if (start != null) {
-          _openSpine(start.spine, {'type': 'fraction', 'value': start.progress});
-        } else {
-          _openSpine(_spine, {'type': 'fraction', 'value': _fraction});
-        }
+        _startIfReady();
       },
       shouldOverrideUrlLoading: _shouldOverride,
       onLoadStop: _onLoadStop,
       onReceivedError: (controller, request, error) {
         if (request.isForMainFrame != true || !mounted) return;
+        // Reloading the same URL while it loads cancels the first
+        // navigation (reported on Apple platforms and Windows); the new
+        // load carries on.
+        if (error.type == WebResourceErrorType.CANCELLED) return;
         final url = request.url.toString();
         final expected = _expectedUrl;
         if (expected == null || _stripFragment(url) != _stripFragment(expected)) {
@@ -1181,13 +1249,28 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
     );
   }
 
+  /// The renderer died (crash or out of memory): start a new WebView. A
+  /// section that kills it twice in a row isn't reloaded again; the error
+  /// view lets the reader skip it.
   void _recreateWebView() {
     if (!mounted) return;
+    _crashes = _crashSpine == _spine ? _crashes + 1 : 1;
+    _crashSpine = _spine;
+    final giveUp = _crashes >= 2;
+    _loadId++; // ignore the dead page's messages and timers
+    _readyTimer?.cancel();
     setState(() {
       _webGeneration++;
       _web = null;
-      _pendingStart = ReaderPosition(_spine, _fraction);
-      _docLoading = true;
+      if (giveUp) {
+        _pending = null;
+        _docLoading = false;
+        _docError =
+            'This section is too large or complex to display on this device.';
+      } else {
+        _pending = (_spine, {'type': 'fraction', 'value': _fraction});
+        _docLoading = true;
+      }
     });
   }
 
@@ -1232,6 +1315,133 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       ),
     );
   }
+}
+
+/// Shown over the WebView while a document loads: the title plus a page of
+/// placeholder lines in the reader theme, so even the very first frame of
+/// the screen looks like the book rather than a blank spinner.
+class _LoadingPage extends StatelessWidget {
+  const _LoadingPage({required this.theme, required this.title, this.subtitle});
+
+  final ReaderTheme theme;
+  final String title;
+  final String? subtitle;
+
+  static const _lines = [1.0, 0.96, 0.99, 0.93, 0.97, 0.62, 0.0, 0.98, 0.95, 0.7];
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = theme.foreground;
+    final placeholder = fg.withValues(alpha: theme.isDark ? 0.10 : 0.07);
+    final sub = subtitle;
+    return ColoredBox(
+      color: theme.background,
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: _DelayedProgress(color: fg.withValues(alpha: 0.35)),
+          ),
+          Align(
+            alignment: const Alignment(0, -0.35),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (title.isNotEmpty)
+                      Text(
+                        title,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: fg.withValues(alpha: 0.85),
+                          fontSize: 22,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    if (sub != null && sub.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        sub,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: fg.withValues(alpha: 0.6),
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 28),
+                    for (final width in _lines)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: FractionallySizedBox(
+                          widthFactor: width == 0 ? 0.01 : width,
+                          child: Container(
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: width == 0 ? null : placeholder,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A thin progress bar that only appears (and starts animating) when
+/// loading takes a while: quick loads don't render frames for it, leaving
+/// the CPU to the WebView and the parser.
+class _DelayedProgress extends StatefulWidget {
+  const _DelayedProgress({required this.color});
+
+  final Color color;
+
+  @override
+  State<_DelayedProgress> createState() => _DelayedProgressState();
+}
+
+class _DelayedProgressState extends State<_DelayedProgress> {
+  Timer? _timer;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _visible
+      ? LinearProgressIndicator(
+          minHeight: 2,
+          backgroundColor: Colors.transparent,
+          color: widget.color,
+        )
+      : const SizedBox(height: 2);
 }
 
 class _ErrorView extends StatelessWidget {

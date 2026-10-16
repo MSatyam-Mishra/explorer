@@ -12,6 +12,113 @@ import 'slide_model.dart';
 SlideDeck parsePptxBytes(Uint8List bytes) =>
     PptxParser(OfficePackage.decode(bytes)).parse();
 
+/// Read access to the parts of a PPTX package: an in-memory
+/// [OfficePackage], or a zip read on demand.
+abstract class PptxParts {
+  Uint8List? bytes(String name);
+
+  /// An image part to be read only when shown, or null to read [bytes] now.
+  SlideImageData? imageRef(String name) => null;
+
+  XmlDocument? xml(String name) {
+    final b = bytes(name);
+    if (b == null) return null;
+    try {
+      return XmlDocument.parse(decodeXmlBytes(b));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Relationships of [part] (empty string for the package rels).
+  List<OfficeRel> rels(String part) {
+    final doc = xml(
+      part.isEmpty ? '_rels/.rels' : OfficePackage.relsPathFor(part),
+    );
+    if (doc == null) return const [];
+    return [
+      for (final r in Ox.children(doc.rootElement, 'Relationship'))
+        if (Ox.attr(r, 'Id') != null && Ox.attr(r, 'Target') != null)
+          OfficeRel(
+            id: Ox.attr(r, 'Id')!,
+            type: Ox.attr(r, 'Type') ?? '',
+            target: Ox.attr(r, 'Target')!,
+            external:
+                (Ox.attr(r, 'TargetMode') ?? '').toLowerCase() == 'external',
+          ),
+    ];
+  }
+
+  Map<String, OfficeRel> relMap(String part) => {
+    for (final r in rels(part)) r.id: r,
+  };
+
+  String? mainPart() {
+    for (final r in rels('')) {
+      if (r.kind == 'officeDocument') {
+        return OfficePackage.resolve('', r.target);
+      }
+    }
+    return null;
+  }
+}
+
+class _PackageParts extends PptxParts {
+  _PackageParts(this.pkg);
+  final OfficePackage pkg;
+
+  @override
+  Uint8List? bytes(String name) => pkg.bytes(name);
+
+  @override
+  XmlDocument? xml(String name) => pkg.xml(name);
+
+  @override
+  List<OfficeRel> rels(String part) => pkg.rels(part);
+
+  @override
+  String? mainPart() => pkg.mainPart();
+}
+
+/// Stand-in for a slide that couldn't be read.
+Slide unreadableSlide(int index, double width, double height) => Slide(
+  index: index,
+  background: const SlideFill(color: 0xFFFFFFFF),
+  shapes: [
+    SlideAutoShape(
+      frame: SlideRect(0, 0, width, height),
+      fromSlide: false,
+      text: SlideTextBody(
+        anchor: 'ctr',
+        paragraphs: [
+          SlideParagraph(
+            align: SlideAlign.center,
+            runs: [
+              SlideRun(
+                text: 'This slide couldn\'t be read.',
+                size: math.max(12, height / 24),
+                italic: true,
+                color: 0x99000000,
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  ],
+);
+
+/// A slide as listed in `presentation.xml`.
+class PptxSlideEntry {
+  const PptxSlideEntry({this.relId, this.slideId, this.part});
+
+  /// Relationship id in `presentation.xml.rels`, `p:sldId` id, and the
+  /// slide part (null when the relationship is missing).
+  final String? relId;
+  final String? slideId;
+  final String? part;
+}
+
 class _Theme {
   final Map<String, int> colors = {};
   String? major;
@@ -74,9 +181,12 @@ class _Xf {
 }
 
 class PptxParser {
-  PptxParser(this.pkg);
+  PptxParser(OfficePackage pkg) : _src = _PackageParts(pkg);
 
-  final OfficePackage pkg;
+  /// Parses from parts read on demand (see [PptxParts]).
+  PptxParser.fromParts(this._src);
+
+  final PptxParts _src;
   final Map<String, _Master> _masters = {};
   final Map<String, _Layout> _layouts = {};
   final Map<String, SlideImageData> _images = {};
@@ -84,47 +194,88 @@ class PptxParser {
   XmlElement? _defaultTextStyle;
   final List<String> _warnings = [];
 
-  SlideDeck parse() {
-    final main = pkg.mainPart() ?? 'ppt/presentation.xml';
-    final pres = pkg.xml(main);
+  /// Slide size in points, valid after [open].
+  double width = 720;
+  double height = 540;
+
+  /// One entry per `p:sldId`, valid after [open]. Deck slide indices are
+  /// positions in this list (the editor addresses slides by them).
+  List<PptxSlideEntry> entries = const [];
+
+  /// Images referenced so far (grows as slides are parsed).
+  Map<String, SlideImageData> get images => _images;
+  List<String> get warnings => _warnings;
+
+  /// Reads `presentation.xml`: slide size, text defaults and the slide list.
+  void open() {
+    final main = _src.mainPart() ?? 'ppt/presentation.xml';
+    final pres = _src.xml(main);
     if (pres == null) {
       throw const FormatException('This presentation has no readable content.');
     }
     final root = pres.rootElement;
     final sz = Ox.child(root, 'sldSz');
-    final width = Units.emu(Ox.doubleAttr(sz, 'cx') ?? 9144000);
-    final height = Units.emu(Ox.doubleAttr(sz, 'cy') ?? 6858000);
+    width = Units.emu(Ox.doubleAttr(sz, 'cx') ?? 9144000);
+    height = Units.emu(Ox.doubleAttr(sz, 'cy') ?? 6858000);
     _defaultTextStyle = Ox.child(root, 'defaultTextStyle');
     _loadTableStyles(main);
 
-    final rels = pkg.relMap(main);
-    final slides = <Slide>[];
-    var n = 0;
-    for (final s in Ox.children(Ox.child(root, 'sldIdLst'), 'sldId')) {
-      final rid = Ox.attrQ(s, 'r:id');
-      final rel = rid == null ? null : rels[rid];
-      if (rel == null) continue;
-      final part = OfficePackage.resolve(main, rel.target);
-      n++;
-      try {
-        final slide = _parseSlide(part, n);
-        if (slide == null) continue;
-        slide
-          ..relId = rid
-          ..slideId = Ox.attr(s, 'id');
-        slides.add(slide);
-      } catch (e) {
-        slides.add(
-          Slide(
-            index: n - 1,
-            partName: part,
+    final rels = _src.relMap(main);
+    entries = [
+      for (final s in Ox.children(Ox.child(root, 'sldIdLst'), 'sldId'))
+        () {
+          final rid = Ox.attrQ(s, 'r:id');
+          final rel = rid == null ? null : rels[rid];
+          return PptxSlideEntry(
             relId: rid,
             slideId: Ox.attr(s, 'id'),
-          )..notes = '',
-        );
-        _warnings.add('Slide $n could not be fully read.');
+            part: rel == null || rel.external
+                ? null
+                : OfficePackage.resolve(main, rel.target),
+          );
+        }(),
+    ];
+  }
+
+  /// Parses slide [i] of [entries]. A slide that can't be read becomes a
+  /// placeholder so deck indices keep matching the slide list.
+  Slide slideAt(int i, {bool notes = true}) {
+    final e = entries[i];
+    final n = i + 1;
+    Slide? slide;
+    if (e.part != null) {
+      try {
+        slide = _parseSlide(e.part!, n, notes: notes);
+      } catch (_) {
+        slide = null;
       }
     }
+    if (slide == null) {
+      _warnings.add('Slide $n could not be read.');
+      slide = unreadableSlide(i, width, height)..partName = e.part;
+    }
+    return slide
+      ..relId = e.relId
+      ..slideId = e.slideId;
+  }
+
+  /// Speaker notes of slide [i] (for slides parsed with `notes: false`).
+  String notesAt(int i) {
+    final part = entries[i].part;
+    if (part == null) return '';
+    try {
+      for (final r in _src.rels(part)) {
+        if (r.kind == 'notesSlide') {
+          return _notes(OfficePackage.resolve(part, r.target));
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  SlideDeck parse() {
+    open();
+    final slides = [for (var i = 0; i < entries.length; i++) slideAt(i)];
     return SlideDeck(
       format: 'pptx',
       width: width,
@@ -142,7 +293,7 @@ class PptxParser {
     final t = _Theme();
     for (final r in rels.values) {
       if (r.kind != 'theme') continue;
-      final doc = pkg.xml(OfficePackage.resolve(masterPart, r.target));
+      final doc = _src.xml(OfficePackage.resolve(masterPart, r.target));
       if (doc == null) break;
       final elements = Ox.child(doc.rootElement, 'themeElements');
       final scheme = Ox.child(elements, 'clrScheme');
@@ -178,8 +329,8 @@ class PptxParser {
 
   _Master _master(String part) {
     return _masters.putIfAbsent(part, () {
-      final doc = pkg.xml(part) ?? XmlDocument.parse('<sldMaster/>');
-      final rels = pkg.relMap(part);
+      final doc = _src.xml(part) ?? XmlDocument.parse('<sldMaster/>');
+      final rels = _src.relMap(part);
       final m = _Master(part, doc, rels, _loadTheme(part, rels));
       final map = Ox.child(doc.rootElement, 'clrMap');
       if (map != null) {
@@ -194,9 +345,9 @@ class PptxParser {
   _Layout? _layout(String part) {
     final existing = _layouts[part];
     if (existing != null) return existing;
-    final doc = pkg.xml(part);
+    final doc = _src.xml(part);
     if (doc == null) return null;
-    final rels = pkg.relMap(part);
+    final rels = _src.relMap(part);
     String? masterPart;
     for (final r in rels.values) {
       if (r.kind == 'slideMaster') {
@@ -210,9 +361,9 @@ class PptxParser {
   }
 
   void _loadTableStyles(String main) {
-    for (final r in pkg.rels(main)) {
+    for (final r in _src.rels(main)) {
       if (r.kind != 'tableStyles') continue;
-      final doc = pkg.xml(OfficePackage.resolve(main, r.target));
+      final doc = _src.xml(OfficePackage.resolve(main, r.target));
       for (final s in Ox.children(doc?.rootElement, 'tblStyle')) {
         final id = Ox.attr(s, 'styleId');
         if (id != null) _tableStyles[id] = s;
@@ -463,7 +614,12 @@ class PptxParser {
     if (rel == null || rel.external) return null;
     final path = OfficePackage.resolve(c.part, rel.target);
     if (_images.containsKey(path)) return path;
-    final bytes = pkg.bytes(path);
+    final lazy = _src.imageRef(path);
+    if (lazy != null) {
+      _images[path] = lazy;
+      return path;
+    }
+    final bytes = _src.bytes(path);
     if (bytes == null) return null;
     var ext = sniffImageExtension(bytes) ?? path.split('.').last.toLowerCase();
     var data = bytes;
@@ -483,10 +639,10 @@ class PptxParser {
   // ---------------------------------------------------------------------------
   // Slides
 
-  Slide? _parseSlide(String part, int number) {
-    final doc = pkg.xml(part);
+  Slide? _parseSlide(String part, int number, {bool notes = true}) {
+    final doc = _src.xml(part);
     if (doc == null) return null;
-    final rels = pkg.relMap(part);
+    final rels = _src.relMap(part);
     _Layout? layout;
     String? notesPart;
     for (final r in rels.values) {
@@ -559,7 +715,7 @@ class PptxParser {
       index: number - 1,
       shapes: shapes,
       background: bg,
-      notes: notesPart == null ? '' : _notes(notesPart),
+      notes: notesPart == null || !notes ? '' : _notes(notesPart),
       hidden: Ox.attr(root, 'show') == '0',
       partName: part,
     );
@@ -588,7 +744,7 @@ class PptxParser {
   }
 
   String _notes(String part) {
-    final doc = pkg.xml(part);
+    final doc = _src.xml(part);
     if (doc == null) return '';
     for (final sp in Ox.descendants(doc.rootElement, 'sp')) {
       final ph = Ox.firstDescendant(Ox.child(sp, 'nvSpPr'), 'ph');
@@ -1067,19 +1223,19 @@ class PptxParser {
     final dmRel = dm == null ? null : c.rels[dm];
     String? drawingPart;
     if (dmRel != null) {
-      final data = pkg.xml(OfficePackage.resolve(c.part, dmRel.target));
+      final data = _src.xml(OfficePackage.resolve(c.part, dmRel.target));
       final ext = Ox.firstDescendant(data?.rootElement, 'dataModelExt');
       final rid = Ox.attr(ext, 'relId');
       final rel = rid == null ? null : c.rels[rid];
       if (rel != null) drawingPart = OfficePackage.resolve(c.part, rel.target);
     }
     if (drawingPart == null) return;
-    final doc = pkg.xml(drawingPart);
+    final doc = _src.xml(drawingPart);
     final tree = Ox.firstDescendant(doc?.rootElement, 'spTree');
     if (tree == null) return;
     final dctx = _Ctx(
       part: drawingPart,
-      rels: pkg.relMap(drawingPart),
+      rels: _src.relMap(drawingPart),
       master: c.master,
       layout: c.layout,
       fromSlide: false,

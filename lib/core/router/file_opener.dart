@@ -5,6 +5,7 @@ import 'package:explorer/core/files/file_types.dart';
 import 'package:explorer/features/viewer_3d/screens/three_d_viewer_screen.dart';
 import 'package:explorer/features/viewer_archive/screens/archive_viewer_screen.dart';
 import 'package:explorer/features/viewer_comic/screens/comic_viewer.dart';
+import 'package:explorer/features/viewer_design/screens/design_preview_screen.dart';
 import 'package:explorer/features/viewer_epub/screens/epub_viewer_screen.dart';
 import 'package:explorer/features/viewer_font/screens/font_viewer_screen.dart';
 import 'package:explorer/features/viewer_hex/screens/hex_viewer_screen.dart';
@@ -30,22 +31,40 @@ import 'package:path/path.dart' as p;
 /// Returns true when the viewer changed the folder contents (e.g. saved a
 /// copy) so the explorer should refresh.
 class FileOpener {
-  static Future<bool?> open(BuildContext context, File file) async {
+  ///
+  /// With [allowExternal] false (a file another app sent us), types without
+  /// an in-app viewer are never handed to another app, which could be the
+  /// sender and bounce the file straight back.
+  static Future<bool?> open(
+    BuildContext context,
+    File file, {
+    bool allowExternal = true,
+  }) async {
     final kind = await _refineKind(file, FileTypes.kindOf(file.path));
     if (!context.mounted) return null;
-    if (kind == FileKind.unknown) return showOpenWith(context, file);
-    return openAs(context, file, kind);
+    if (kind == FileKind.unknown ||
+        (!allowExternal && _screenFor(file, kind) == null)) {
+      return showOpenWith(context, file, allowExternal: allowExternal);
+    }
+    return openAs(context, file, kind, allowExternal: allowExternal);
   }
 
   /// Opens [file] with the viewer for [kind], regardless of its extension.
   static Future<bool?> openAs(
     BuildContext context,
     File file,
-    FileKind kind,
-  ) async {
+    FileKind kind, {
+    bool allowExternal = true,
+  }) async {
     final screen = _screenFor(file, kind);
     if (screen == null) {
-      await openExternally(context, file);
+      if (allowExternal) {
+        await openExternally(context, file);
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Explorer can't open ${p.basename(file.path)}"),
+        ));
+      }
       return null;
     }
     return Navigator.push<bool>(
@@ -55,7 +74,6 @@ class FileOpener {
   }
 
   static Widget? _screenFor(File file, FileKind kind) {
-    final ext = FileTypes.extensionOf(file.path);
     return switch (kind) {
       FileKind.image || FileKind.rasterImage => ImageViewerScreen(imageFile: file),
       FileKind.svg => SvgViewerScreen(filePath: file.path),
@@ -63,7 +81,7 @@ class FileOpener {
       FileKind.audio => AudioPlayerScreen(audioFile: file),
       FileKind.pdf => PdfViewerScreen(pdfFile: file),
       FileKind.epub || FileKind.ebook => EpubViewerScreen(epubFile: file),
-      FileKind.comic => ext == 'cbz' ? ComicViewerScreen(comicFile: file) : null,
+      FileKind.comic => ComicViewerScreen(comicFile: file),
       FileKind.word ||
       FileKind.legacyWord ||
       FileKind.richText ||
@@ -79,9 +97,11 @@ class FileOpener {
       FileKind.openDocumentPresentation =>
         PptViewerScreen(file: file),
       FileKind.model3d => ThreeDViewerScreen(file: file),
-      // RAR and 7-Zip need native decoders the archive package lacks.
-      FileKind.archive =>
-        ext == 'rar' || ext == '7z' ? null : ArchiveViewerScreen(archiveFile: file),
+      FileKind.archive ||
+      FileKind.diskImage =>
+        ArchiveViewerScreen(archiveFile: file),
+      FileKind.cameraRaw => ImageViewerScreen(imageFile: file),
+      FileKind.design => DesignPreviewScreen(file: file),
       FileKind.html => HtmlViewerScreen(file: file),
       FileKind.lottie => LottieViewerScreen(file: file),
       FileKind.rive => RiveViewerScreen(riveFile: file),
@@ -135,10 +155,14 @@ class FileOpener {
   }
 
   /// Lets the user pick how to open [file].
-  static Future<bool?> showOpenWith(BuildContext context, File file) async {
+  static Future<bool?> showOpenWith(
+    BuildContext context,
+    File file, {
+    bool allowExternal = true,
+  }) async {
     final kind = FileTypes.kindOf(file.path);
     final options = <(IconData, String, FileKind?)>[
-      if (kind != FileKind.unknown && kind != FileKind.package)
+      if (kind != FileKind.unknown && _screenFor(file, kind) != null)
         (Icons.auto_awesome, 'Default viewer (${FileTypes.describe(kind)})', kind),
       (Icons.edit_note, 'Text editor', FileKind.text),
       (Icons.memory, 'Hex viewer', FileKind.unknown),
@@ -146,7 +170,7 @@ class FileOpener {
       (Icons.view_in_ar_outlined, '3D viewer', FileKind.model3d),
       (Icons.folder_zip_outlined, 'Archive viewer', FileKind.archive),
       (Icons.play_circle_outline, 'Media player', FileKind.video),
-      (Icons.open_in_new, 'Another app', null),
+      if (allowExternal) (Icons.open_in_new, 'Another app', null),
     ];
     final choice = await showModalBottomSheet<(IconData, String, FileKind?)>(
       context: context,
@@ -179,6 +203,6 @@ class FileOpener {
       await openExternally(context, file);
       return null;
     }
-    return openAs(context, file, target);
+    return openAs(context, file, target, allowExternal: allowExternal);
   }
 }

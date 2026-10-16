@@ -35,8 +35,9 @@ class _HexViewerScreenState extends State<HexViewerScreen> {
   }
 
   Future<void> _open() async {
+    RandomAccessFile? raf;
     try {
-      final raf = await widget.file.open();
+      raf = await widget.file.open();
       final length = await raf.length();
       if (!mounted) {
         await raf.close();
@@ -47,13 +48,28 @@ class _HexViewerScreenState extends State<HexViewerScreen> {
         _length = length;
       });
     } catch (e) {
+      if (_raf == null) {
+        try {
+          await raf?.close();
+        } catch (_) {}
+      }
       if (mounted) setState(() => _error = '$e');
     }
   }
 
   @override
   void dispose() {
-    _raf?.close();
+    // A read may be in flight, and RandomAccessFile refuses to close while
+    // one is pending ("An async operation is currently pending"), which
+    // leaked the handle. Close after the queued work instead; queued reads
+    // see `_raf == null` and skip.
+    final raf = _raf;
+    _raf = null;
+    _pending.catchError((Object _) {}).whenComplete(() async {
+      try {
+        await raf?.close();
+      } catch (_) {}
+    });
     _scroll.dispose();
     super.dispose();
   }
@@ -71,12 +87,42 @@ class _HexViewerScreenState extends State<HexViewerScreen> {
   // chained.
   Future<void> _pending = Future.value();
 
+  /// Bytes per row and row height of the current layout, to tell whether a
+  /// queued page is still near the viewport.
+  int _bytesPerRow = 16;
+  double _rowHeight = 22;
+
+  bool _isNearViewport(int index) {
+    if (!_scroll.hasClients) return true;
+    final position = _scroll.position;
+    final firstRow = (position.pixels / _rowHeight).floor();
+    final lastRow = ((position.pixels + position.viewportDimension) / _rowHeight).ceil();
+    final firstPage = firstRow * _bytesPerRow ~/ _pageSize;
+    final lastPage = lastRow * _bytesPerRow ~/ _pageSize;
+    return index >= firstPage - 1 && index <= lastPage + 1;
+  }
+
   void _readPage(int index) {
     _pending = _pending.then((_) async {
-      final raf = _raf;
-      if (raf == null || !mounted) return;
-      await raf.setPosition(index * _pageSize);
-      final bytes = await raf.read(_pageSize);
+      if (_raf == null || !mounted) return;
+      // Fast scrolling queues many pages; skip the ones scrolled past (the
+      // row asks again if it comes back into view).
+      if (!_isNearViewport(index)) {
+        _loading.remove(index);
+        return;
+      }
+      Uint8List bytes;
+      try {
+        final raf = _raf;
+        if (raf == null) return;
+        await raf.setPosition(index * _pageSize);
+        if (!mounted || _raf == null) return;
+        bytes = await raf.read(_pageSize);
+      } catch (e) {
+        // Keep the chain alive; show the error rather than retrying forever.
+        if (mounted) setState(() => _error = '$e');
+        return;
+      }
       if (!mounted) return;
       if (_pages.length > 64) _pages.remove(_pages.keys.first);
       setState(() {
@@ -130,6 +176,8 @@ class _HexViewerScreenState extends State<HexViewerScreen> {
     final width = MediaQuery.sizeOf(context).width;
     final bytesPerRow = width >= 720 ? 16 : 8;
     const rowHeight = 22.0;
+    _bytesPerRow = bytesPerRow;
+    _rowHeight = rowHeight;
     final iconColor = ClearGlassForeground.icon(context);
     final rows = (_length + bytesPerRow - 1) ~/ bytesPerRow;
     final topInset = DockedGlossyTopBar.contentTopInset(context);

@@ -155,9 +155,93 @@ class Evaluator {
     return RangeValue(target, ref.top, ref.left, ref.bottom, ref.right);
   }
 
-  Object? _binary(String op, FNode l, FNode r) {
-    final a = scalar(l);
-    final b = scalar(r);
+  Object? _binary(String op, FNode l, FNode r) => binaryValues(op, scalar(l), scalar(r));
+
+  /// Evaluates [node] element by element, as Excel does for SUMPRODUCT
+  /// arguments and array formulas (`(A2:A9="x")*B2:B9`). Function calls over
+  /// multi-cell ranges would need array-aware functions, so they throw
+  /// [UnsupportedFormula] and the cell keeps its cached value.
+  List<List<Object?>> arrayGrid(FNode node) {
+    switch (node) {
+      case RefNode() || RangeOpNode() || ArrayNode():
+        final v = eval(node);
+        if (v is CellError) {
+          return [
+            [v],
+          ];
+        }
+        return grid(v);
+      case UnaryNode(:final op, :final operand):
+        return _mapGrid(arrayGrid(operand), (v) {
+          if (v is CellError) return v;
+          try {
+            final x = number(v);
+            return op == '-' ? -x : x;
+          } on FormulaException catch (e) {
+            return e.error;
+          }
+        });
+      case PercentNode(:final operand):
+        return _mapGrid(arrayGrid(operand), (v) {
+          if (v is CellError) return v;
+          try {
+            return number(v) / 100;
+          } on FormulaException catch (e) {
+            return e.error;
+          }
+        });
+      case BinNode(:final op, :final left, :final right):
+        return _zipGrids(arrayGrid(left), arrayGrid(right), (a, b) => binaryValues(op, a, b));
+      case FuncNode():
+        final v = eval(node);
+        if (v is RangeValue || v is ArrayValue) return grid(v);
+        var overRange = false;
+        visitRefs(node, (r) {
+          if (r.kind != RefKind.cell) overRange = true;
+        });
+        if (overRange) throw const UnsupportedFormula('Array evaluation of a function');
+        return [
+          [v],
+        ];
+      case NameNode(:final name):
+        throw UnsupportedFormula('Name $name');
+      default:
+        return [
+          [eval(node)],
+        ];
+    }
+  }
+
+  static List<List<Object?>> _mapGrid(List<List<Object?>> g, Object? Function(Object?) f) => [
+        for (final row in g) [for (final v in row) f(v)],
+      ];
+
+  /// Combines two arrays like Excel: a single row/column/value is repeated,
+  /// positions missing from the smaller array give #N/A.
+  static List<List<Object?>> _zipGrids(
+      List<List<Object?>> a, List<List<Object?>> b, Object? Function(Object?, Object?) f) {
+    final ra = a.length;
+    final rb = b.length;
+    if (ra == 0 || rb == 0) return const [];
+    final ca = a.first.length;
+    final cb = b.first.length;
+    final rows = ra > rb ? ra : rb;
+    final cols = ca > cb ? ca : cb;
+    Object? pick(List<List<Object?>> g, int r, int c, int y, int x) {
+      final yy = r == 1 ? 0 : y;
+      final xx = c == 1 ? 0 : x;
+      if (yy >= r || xx >= c) return CellError.na;
+      return g[yy][xx];
+    }
+
+    return [
+      for (var y = 0; y < rows; y++)
+        [for (var x = 0; x < cols; x++) f(pick(a, ra, ca, y, x), pick(b, rb, cb, y, x))],
+    ];
+  }
+
+  /// Applies a binary operator to two values.
+  Object? binaryValues(String op, Object? a, Object? b) {
     if (a is CellError) return a;
     if (b is CellError) return b;
     try {
@@ -504,6 +588,13 @@ class _Prec {
   final CellRange range;
 }
 
+class _FormulaInfo {
+  _FormulaInfo(this.formula, this.ast, this.precs);
+  final String formula;
+  final FNode? ast;
+  final List<_Prec> precs;
+}
+
 class _BigDep {
   _BigDep(this.sheet, this.range, this.id);
   final SheetData sheet;
@@ -525,7 +616,9 @@ class FormulaEngine {
   static const Object _syntaxError = Object();
 
   bool _built = false;
-  final Map<CellId, List<_Prec>> _precOf = {};
+  /// Precedents of each formula cell, with its parsed formula so
+  /// recalculation doesn't parse every formula a second time.
+  final Map<CellId, _FormulaInfo> _precOf = {};
   final Map<CellId, Set<CellId>> _dependents = {};
   final Map<SheetData, Map<int, List<_BigDep>>> _colBuckets = {};
   final Map<SheetData, List<_BigDep>> _wide = {};
@@ -584,7 +677,7 @@ class FormulaEngine {
         if (_volatileFunctions.contains(f.name)) _volatile.add(id);
       });
     }
-    _precOf[id] = precs;
+    _precOf[id] = _FormulaInfo(formula, ast, precs);
     for (final p in precs) {
       if (p.range.area <= 64) {
         for (var r = p.range.r1; r <= p.range.r2; r++) {
@@ -607,7 +700,7 @@ class FormulaEngine {
   }
 
   void _removeFormula(CellId id) {
-    final precs = _precOf.remove(id);
+    final precs = _precOf.remove(id)?.precs;
     _volatile.remove(id);
     if (precs == null) return;
     for (final p in precs) {
@@ -655,7 +748,7 @@ class FormulaEngine {
 
   Iterable<CellId> _dirtyPrecedents(
       CellId id, Map<SheetData, Map<int, Set<int>>> index) sync* {
-    final precs = _precOf[id];
+    final precs = _precOf[id]?.precs;
     if (precs == null) return;
     for (final p in precs) {
       final s = p.sheet;
@@ -796,16 +889,18 @@ class FormulaEngine {
         s.cells[k] = cell.withValue(CellError.circular);
         continue;
       }
-      final result = evaluateCell(s, k, cell);
+      final known = _precOf[id];
+      final parsed = known != null && known.formula == cell.formula;
+      final result = evaluateCell(s, k, cell, ast: parsed ? known.ast : null, parsed: parsed);
       if (!identical(result, _keepCached)) s.cells[k] = cell.withValue(result);
     }
   }
 
   /// Evaluates a formula cell; returns a sentinel when the cached value
   /// should be kept.
-  Object? evaluateCell(SheetData s, int key, Cell cell) {
+  Object? evaluateCell(SheetData s, int key, Cell cell, {FNode? ast, bool parsed = false}) {
     if (cell.arrayRef != null) return _keepCached;
-    final ast = parse(cell.formula!);
+    if (!parsed) ast = parse(cell.formula!);
     if (ast == null) return _keepCached;
     try {
       return Evaluator(this, s, keyRow(key), keyCol(key)).evaluateTop(ast);

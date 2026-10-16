@@ -24,7 +24,19 @@ class MarkdownPreview extends StatefulWidget {
   static String toHtml(String markdown) => md.markdownToHtml(
         markdown,
         extensionSet: md.ExtensionSet.gitHubWeb,
+        // GFM tag filter: <script>, <iframe>, <style>... are escaped.
+        enableTagfilter: true,
       );
+
+  /// The page never runs its own scripts: content is pushed in from Dart
+  /// with evaluateJavascript, which a page CSP doesn't apply to. This blocks
+  /// `<script>`, inline handlers (`<img onerror>`), fetch/XHR and forms, so a
+  /// hostile document can't read files next to it through the loopback
+  /// mount. Remote images (badges) still load.
+  static const _csp = "default-src 'none'; script-src 'none'; "
+      "img-src * data: blob:; media-src * data: blob:; font-src * data:; "
+      "style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; "
+      "frame-src 'none'; object-src 'none'; base-uri 'none'";
 
   @override
   State<MarkdownPreview> createState() => _MarkdownPreviewState();
@@ -39,8 +51,12 @@ class _MarkdownPreviewState extends State<MarkdownPreview> {
   @override
   void initState() {
     super.initState();
+    // Relative links only need images/media; nothing else is served.
     LocalContentServer.instance
-        .mountDirectory(widget.file.parent.path)
+        .mountDirectory(
+          widget.file.parent.path,
+          allowedExtensions: LocalContentServer.imageAndMediaExtensions,
+        )
         .then((base) {
       if (!mounted) {
         LocalContentServer.instance.unmount(base);
@@ -85,6 +101,7 @@ class _MarkdownPreviewState extends State<MarkdownPreview> {
         '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
     final dark = Theme.of(context).brightness == Brightness.dark;
     return '''<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${MarkdownPreview._csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }

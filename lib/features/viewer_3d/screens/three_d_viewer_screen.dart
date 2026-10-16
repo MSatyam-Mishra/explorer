@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -21,10 +20,16 @@ import 'package:path/path.dart' as p;
 
 /// Offline 3D model viewer built on three.js running in a WebView.
 ///
-/// The bundled viewer (`assets/viewer3d`) and the model's folder are served
-/// by [LocalContentServer], so external resources referenced by the model
-/// (glTF `.bin` buffers, OBJ `.mtl` libraries, textures) load with their
-/// relative paths.
+/// The bundled viewer (`assets/viewer3d`) and the model's folder (or, for a
+/// model in a project subfolder, that folder's parent, see [_servedRootFor])
+/// are served by [LocalContentServer], so external resources referenced by
+/// the model (glTF `.bin` buffers, OBJ `.mtl` libraries, textures, also in
+/// sibling folders like `../Textures`) load with their relative paths.
+///
+/// Opening is parallel: the WebView is created on the first frame while the
+/// server mounts the folders, the page starts downloading the model before
+/// its scripts load, and the folder index used for fuzzy texture lookups is
+/// built meanwhile and only awaited right before parsing.
 ///
 /// Pops with `true` when a screenshot was saved next to the model, so the
 /// caller can refresh its file listing.
@@ -47,17 +52,40 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
   /// references have the wrong case or absolute author paths).
   static const _indexMaxEntries = 4000;
   static const _indexMaxDepth = 3;
+  static const _indexTimeLimit = Duration(milliseconds: 1500);
+
+  /// Share of the index left for the parent folder's other files.
+  static const _siblingMaxEntries = 1000;
+  static const _siblingMaxDepth = 2;
+
+  /// Formats whose files can name other files (buffers, materials, textures),
+  /// so the page needs the folder index. Self-contained formats (glb, stl,
+  /// ply, zip-based ones...) skip it.
+  static const _formatsWithExternalFiles = {
+    'gltf', 'obj', 'fbx', 'dae', '3ds', 'wrl', 'vrml', 'lwo', 'md2', 'usda',
+    'usd',
+  };
+
+  /// The bundled viewer is mounted once per run and kept, so every viewer
+  /// uses the same URLs for the three.js scripts.
+  static Future<Uri>? _assetsMount;
 
   final LocalContentServer _server = LocalContentServer.instance;
   late final ThreeDViewerController _viewer;
 
-  Uri? _assetsMount;
   Uri? _modelMount;
+  Uri? _filesMount;
   WebUri? _pageUrl;
-  List<String> _folderIndex = const [];
+  double _pageInset = 0;
   int? _fileSize;
-  int _reloadToken = 0;
+  bool _started = false;
+
+  /// Keeps the WebView's element (and the native view) when the layout
+  /// around it changes; replaced only by [_reload].
+  GlobalKey _webViewKey = GlobalKey(debugLabel: 'viewer3d');
   Widget? _webView;
+  InAppWebViewController? _web;
+  InAppWebViewController? _loadedBy;
 
   bool _showDockedPanel = true;
   bool _screenshotSaved = false;
@@ -76,12 +104,24 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     _viewer = ThreeDViewerController()
       ..onScreenshot = _onScreenshot
       ..onLoaded = _onModelLoaded;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _prepare());
+    // Created on the first frame: starting the browser engine is the slowest
+    // step, so it runs while the server mounts the folders.
+    _webView = _buildWebView();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_started) {
+      _started = true;
+      _prepare();
+    }
   }
 
   @override
   void dispose() {
     _screenshotTimeout?.cancel();
+    _web = null;
     _unmount();
     _viewer.dispose();
     super.dispose();
@@ -99,26 +139,50 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     final topInset = DockedGlossyTopBar.contentTopInset(context);
     try {
       final file = widget.file;
-      if (!await file.exists()) {
-        if (mounted) _viewer.fail('This file no longer exists.');
-        return;
-      }
-      _fileSize = await file.length();
+      final modelDir = Directory(p.normalize(p.absolute(file.parent.path)));
+      final served = _servedRootFor(modelDir);
+      final widened = !p.equals(served.path, modelDir.path);
 
-      final assetsFuture = _server.mountAssets(_assetPrefix);
-      final modelFuture = _server.mountDirectory(file.parent.path);
-      final indexFuture = _indexFolder(file.parent);
-      _assetsMount = await assetsFuture;
+      // Everything starts at once; only the stat and the mounts gate the
+      // page. The index is served to the page when ready (it waits for it
+      // only right before parsing).
+      final statFuture = file.stat();
+      final assetsFuture = _viewerAssets(_server);
+      final modelFuture = _server.mountDirectory(served.path);
+      Future<Uri>? filesFuture;
+      if (_formatsWithExternalFiles.contains(_extension)) {
+        final index = _indexFolder(
+          modelDir,
+          widened ? served : null,
+        ).catchError((Object _) => const <String>[]);
+        filesFuture = _server.mount(
+          (path) async => path == 'files.json'
+              ? Uint8List.fromList(utf8.encode(jsonEncode(await index)))
+              : null,
+        );
+      }
       _modelMount = await modelFuture;
-      final index = await indexFuture;
+      _filesMount = await filesFuture;
+      final assets = await assetsFuture;
+      final stat = await statFuture;
       if (!mounted) {
         _unmount();
         return;
       }
+      if (stat.type == FileSystemEntityType.notFound) {
+        _viewer.fail('This file no longer exists.');
+        return;
+      }
+      _fileSize = stat.size;
 
-      final src = _modelMount!.resolve(Uri.encodeComponent(_fileName));
-      final page = _assetsMount!.replace(
-        path: '${_assetsMount!.path}index.html',
+      final folder = widened
+          ? '${Uri.encodeComponent(p.basename(modelDir.path))}/'
+          : '';
+      final src = _modelMount!.resolve(
+        '$folder${Uri.encodeComponent(_fileName)}',
+      );
+      final page = assets.replace(
+        path: '${assets.path}index.html',
         queryParameters: {
           'src': src.toString(),
           'ext': _extension,
@@ -126,20 +190,17 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
           'size': '${_fileSize ?? 0}',
           'bg': background.id,
           'inset': topInset.toStringAsFixed(1),
+          if (_filesMount != null)
+            'files': _filesMount!.resolve('files.json').toString(),
         },
       );
-      _viewer.initialTopInset(topInset);
-      setState(() {
-        _folderIndex = index;
-        _pageUrl = WebUri.uri(page);
-        _webView = _buildWebView();
-      });
+      _pageUrl = WebUri.uri(page);
+      _pageInset = topInset;
+      _loadPage();
     } catch (e, st) {
       debugPrint('3D viewer: setup failed: $e\n$st');
-      if (!mounted) {
-        _unmount();
-        return;
-      }
+      _unmount();
+      if (!mounted) return;
       _viewer.fail(
         "Couldn't start the 3D viewer.",
         detail: '$e',
@@ -148,65 +209,147 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     }
   }
 
-  void _unmount() {
-    final assets = _assetsMount;
-    final model = _modelMount;
-    _assetsMount = null;
-    _modelMount = null;
-    if (assets != null) _server.unmount(assets);
-    if (model != null) _server.unmount(model);
+  static Future<Uri> _viewerAssets(LocalContentServer server) async {
+    try {
+      return await (_assetsMount ??= server.mountAssets(_assetPrefix));
+    } catch (_) {
+      _assetsMount = null;
+      rethrow;
+    }
   }
 
-  /// Relative paths (with `/`) of files near the model, breadth first.
-  static Future<List<String>> _indexFolder(Directory root) async {
-    final out = <String>[];
-    final queue = <(Directory, int)>[(root, 0)];
-    final watch = Stopwatch()..start();
-    while (queue.isNotEmpty &&
-        out.length < _indexMaxEntries &&
-        watch.elapsedMilliseconds < 1500) {
-      final (dir, depth) = queue.removeAt(0);
-      try {
-        await for (final entity in dir.list(followLinks: false)) {
-          final name = p.basename(entity.path);
-          if (name.startsWith('.')) continue;
-          if (entity is File) {
-            out.add(p.relative(entity.path, from: root.path).replaceAll(r'\', '/'));
-            if (out.length >= _indexMaxEntries) break;
-          } else if (entity is Directory && depth < _indexMaxDepth) {
-            queue.add((entity, depth + 1));
-          }
-        }
-      } catch (_) {
-        // Unreadable folder: skip it.
+  /// Points the current WebView at the viewer page once both exist.
+  void _loadPage() {
+    final web = _web;
+    final url = _pageUrl;
+    if (web == null || url == null || identical(_loadedBy, web)) return;
+    if (_viewer.phase == ViewerPhase.error) return;
+    _loadedBy = web;
+    _viewer.initialTopInset(_pageInset);
+    web.loadUrl(urlRequest: URLRequest(url: url)).catchError((Object e) {
+      if (mounted) {
+        _viewer.fail(
+          "Couldn't load the 3D viewer.",
+          detail: '$e',
+          code: 'page_load',
+        );
       }
+    });
+  }
+
+  void _unmount() {
+    final model = _modelMount;
+    final files = _filesMount;
+    _modelMount = null;
+    _filesMount = null;
+    if (model != null) _server.unmount(model);
+    if (files != null) _server.unmount(files);
+  }
+
+  /// Folder served to the page: the model's parent, so references into
+  /// sibling folders (`../Textures/wood.png`, common in asset packs laid out
+  /// as Models/ + Textures/) load. It stays at the model's own folder when
+  /// that parent is a broad location (a storage, drive or filesystem root,
+  /// the home or temp folder), so a model in Downloads doesn't expose or
+  /// index the rest of the user's storage. Never more than one level up.
+  static Directory _servedRootFor(Directory modelDir) {
+    final dir = modelDir.path;
+    final parent = p.dirname(dir);
+    if (parent == dir || _isBroadFolder(parent)) return modelDir;
+    return Directory(parent);
+  }
+
+  static bool _isBroadFolder(String path) {
+    if (p.dirname(path) == path) return true;
+    bool same(String? other) =>
+        other != null &&
+        other.isNotEmpty &&
+        p.equals(p.normalize(p.absolute(other)), path);
+    if (same(Platform.environment['HOME']) ||
+        same(Platform.environment['USERPROFILE']) ||
+        same(Directory.systemTemp.path)) {
+      return true;
+    }
+    // Android volumes: /storage, /storage/emulated/0, /storage/1A2B-3C4D,
+    // /mnt/media_rw/1A2B-3C4D, /sdcard.
+    final parts = p.split(path);
+    if (parts.length < 2 || parts.first != '/') return false;
+    switch (parts[1]) {
+      case 'storage':
+        final volumeDepth = parts.length > 2 && parts[2] == 'emulated' ? 4 : 3;
+        return parts.length <= volumeDepth;
+      case 'mnt':
+        return parts.length <= 4;
+      case 'sdcard':
+        return parts.length <= 2;
+    }
+    return false;
+  }
+
+  /// Paths relative to the model's folder (with `/`) of files near it,
+  /// breadth first: the model's folder, then (when [parent] is served) the
+  /// parent's other files and folders as `../Textures/a.png`.
+  static Future<List<String>> _indexFolder(
+    Directory modelDir,
+    Directory? parent,
+  ) async {
+    final out = <String>[];
+    final watch = Stopwatch()..start();
+
+    Future<void> walk(Directory root, int maxDepth, int maxEntries) async {
+      final limit = out.length + maxEntries;
+      final queue = <(Directory, int)>[(root, 0)];
+      bool full() =>
+          out.length >= limit ||
+          out.length >= _indexMaxEntries ||
+          watch.elapsed >= _indexTimeLimit;
+      while (queue.isNotEmpty && !full()) {
+        final (dir, depth) = queue.removeAt(0);
+        try {
+          await for (final entity in dir.list(followLinks: false)) {
+            final name = p.basename(entity.path);
+            if (name.startsWith('.')) continue;
+            if (entity is File) {
+              out.add(
+                p
+                    .relative(entity.path, from: modelDir.path)
+                    .replaceAll(r'\', '/'),
+              );
+              if (full()) break;
+            } else if (entity is Directory &&
+                depth < maxDepth &&
+                !p.equals(entity.path, modelDir.path)) {
+              queue.add((entity, depth + 1));
+            }
+          }
+        } catch (_) {
+          // Unreadable folder: skip it.
+        }
+      }
+    }
+
+    await walk(modelDir, _indexMaxDepth, _indexMaxEntries);
+    if (parent != null) {
+      await walk(parent, _siblingMaxDepth, _siblingMaxEntries);
     }
     return out;
   }
 
   void _reload() {
-    if (_pageUrl == null) {
-      _viewer.resetForReload();
-      _prepare();
-      return;
-    }
     _viewer.resetForReload();
+    _web = null;
     setState(() {
-      _reloadToken++;
+      _webViewKey = GlobalKey(debugLabel: 'viewer3d');
       _webView = _buildWebView();
     });
+    if (_pageUrl == null) _prepare();
   }
 
   Widget _buildWebView() {
+    // No initial URL: the page is loaded by [_loadPage] once the server is
+    // ready, which is usually before the native view finishes starting.
     return InAppWebView(
-      key: ValueKey('viewer3d-$_reloadToken'),
-      initialUrlRequest: URLRequest(url: _pageUrl),
-      initialUserScripts: UnmodifiableListView([
-        UserScript(
-          source: 'window.__viewer3dFiles = ${jsonEncode(_folderIndex)};',
-          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-        ),
-      ]),
+      key: _webViewKey,
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
         transparentBackground: true,
@@ -237,6 +380,8 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
           },
         );
         _viewer.attach(controller);
+        _web = controller;
+        _loadPage();
       },
       onReceivedError: (controller, request, error) {
         if (!_isMainFrame(request)) return;
@@ -424,31 +569,46 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     );
   }
 
+  /// The canvas is always the first child of the same Row, whether or not
+  /// the details pane is docked: moving the WebView to another place in the
+  /// tree destroys the native view and reloads the model.
   Widget _buildBody(BuildContext context, bool split) {
     final canvas = _buildCanvasArea(context);
-    if (!split || !_showDockedPanel) return canvas;
-    return AdaptiveSplitView(
-      minWidthForSplit: _splitWidth,
-      secondaryOnLeading: false,
-      secondaryWidth: 320,
-      divider: false,
-      primary: canvas,
-      secondary: ClearGlassPanel(
-        borderRadius: 24,
-        margin: EdgeInsets.fromLTRB(
-          0,
-          DockedGlossyTopBar.contentTopInset(context),
-          12,
-          12 + MediaQuery.paddingOf(context).bottom,
-        ),
-        child: ModelInfoPanel(
-          controller: _viewer,
-          fileName: _fileName,
-          fileSize: _fileSize,
-          onScreenshot: _takeScreenshot,
-          onClose: () => setState(() => _showDockedPanel = false),
-        ),
-      ),
+    final showPanel = split && _showDockedPanel;
+    final fold = FoldInfo.of(context);
+    final hinge = fold != null && fold.isVertical ? fold.bounds : null;
+    final panel = !showPanel
+        ? null
+        : ClearGlassPanel(
+            borderRadius: 24,
+            margin: EdgeInsets.fromLTRB(
+              0,
+              DockedGlossyTopBar.contentTopInset(context),
+              12,
+              12 + MediaQuery.paddingOf(context).bottom,
+            ),
+            child: ModelInfoPanel(
+              controller: _viewer,
+              fileName: _fileName,
+              fileSize: _fileSize,
+              onScreenshot: _takeScreenshot,
+              onClose: () => setState(() => _showDockedPanel = false),
+            ),
+          );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: canvas),
+        if (panel != null && hinge != null) ...[
+          // Book posture: canvas left of the hinge, pane right of it.
+          SizedBox(width: hinge.width),
+          SizedBox(
+            width: MediaQuery.sizeOf(context).width - hinge.right,
+            child: panel,
+          ),
+        ] else if (panel != null)
+          SizedBox(width: 320, child: panel),
+      ],
     );
   }
 

@@ -35,17 +35,27 @@ class PdfPageRasterizer {
         '${_counter++}';
     final dir = await Directory.systemTemp.createTemp('pdf_pages_');
     final file = File(p.join(dir.path, '$id.pdf'));
-    await file.writeAsBytes(bytes, flush: true);
-    final pageCount = await PdfViewerPlatform.instance.loadPdfFromFile(
-      file.path,
-      id,
-    );
+    String? pageCount;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      pageCount = await PdfViewerPlatform.instance.loadPdfFromFile(
+        file.path,
+        id,
+      );
+    } catch (_) {
+      await _deleteQuietly(dir);
+      rethrow;
+    }
     if (pageCount == null || (int.tryParse(pageCount) ?? 0) <= 0) {
       await _deleteQuietly(dir);
       throw const FileSystemException(
         'The page renderer could not open the PDF',
       );
     }
+    // Android's PdfRenderer keeps its own file descriptor, so the copy can go
+    // now and isn't left behind if the app is killed. Other platforms may
+    // read the file lazily; their copy is removed in [close].
+    if (Platform.isAndroid) await _deleteQuietly(dir);
     return PdfPageRasterizer._(id, dir);
   }
 

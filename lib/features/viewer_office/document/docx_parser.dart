@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
@@ -115,37 +116,172 @@ class DocxParser {
   final Map<String, int?> _headingCache = {};
   final Map<String, DocRunStyle> _baseCache = {};
 
-  DocModel parse() {
+  /// Parses the document. The body is pull-parsed element by element; for a
+  /// long document [onPreview] receives a model of the first pages' blocks
+  /// as soon as they're ready (at most once).
+  DocModel parse({void Function(DocModel preview)? onPreview}) {
     final main = pkg.mainPart() ?? 'word/document.xml';
-    final doc = pkg.xml(main);
-    if (doc == null) {
+    final text = pkg.text(main);
+    if (text == null) {
       throw const FormatException('This document has no readable body.');
     }
     _loadTheme(main);
     _loadStyles(main);
     _loadNumbering(main);
-
-    final root = doc.rootElement;
-    final body = Ox.child(root, 'body');
-    if (body == null) {
-      throw const FormatException('This document has no body.');
-    }
     final mainRels = pkg.relMap(main);
     final ctx = _PartCtx(main, mainRels);
 
-    final blocks = _parseBlocks(body, ctx, null);
-    final sectPr = Ox.child(body, 'sectPr');
-    final page = _pageSetup(sectPr);
+    // The final section's properties (page size, header, footer) close the
+    // body; read them first so the first pages can be shown early.
+    final last = _lastSectPr(text);
+    var hf = _headerFooter(last?.$1, mainRels, main);
 
-    // Header & footer of the final section.
-    final header = <DocBlock>[];
-    final footer = <DocBlock>[];
-    if (sectPr != null) {
-      final h = _headerFooterPart(sectPr, 'headerReference', mainRels, main);
-      if (h != null) header.addAll(h);
-      final f = _headerFooterPart(sectPr, 'footerReference', mainRels, main);
-      if (f != null) footer.addAll(f);
+    final blocks = <DocBlock>[];
+    XmlElement? bodySectPr;
+    var bodySectPrStart = -1;
+    var sawBody = false;
+    DocSourceSpan? lastSpan;
+    int? pendingStart; // markup with no blocks, travelling with the next
+    var pendingEnd = 0;
+    streamXmlChildren(text, const ['body'], (e, start, end) {
+      sawBody = true;
+      if (e.name.local == 'sectPr') {
+        bodySectPr = e;
+        bodySectPrStart = start;
+        return;
+      }
+      final before = blocks.length;
+      _parseBlock(e, ctx, null, blocks);
+      final made = [
+        for (var i = before; i < blocks.length; i++)
+          if (blocks[i] is! DocFrame) blocks[i],
+      ];
+      if (made.isEmpty) {
+        // Bookmarks, comment ranges, permissions … stay next to a
+        // neighbour so it can carry them when written back verbatim.
+        if (lastSpan != null && e.name.local.endsWith('End')) {
+          lastSpan!.end = end;
+        } else {
+          pendingStart ??= start;
+          pendingEnd = end;
+        }
+        return;
+      }
+      final span = DocSourceSpan(pendingStart ?? start, end, made.length);
+      pendingStart = null;
+      for (var k = 0; k < made.length; k++) {
+        made[k]
+          ..source = span
+          ..sourcePart = k;
+      }
+      lastSpan = span;
+      if (onPreview != null && _previewDue(blocks, end, text.length)) {
+        onPreview(
+          _model(
+            List.of(blocks),
+            Map.of(_images),
+            last?.$1,
+            hf,
+            List.of(_warnings),
+            '',
+          ),
+        );
+      }
+    });
+    if (!sawBody) {
+      throw const FormatException('This document has no body.');
     }
+    // Trailing markup without blocks goes with the last element (unless the
+    // section properties sit in between).
+    if (pendingStart != null &&
+        lastSpan != null &&
+        (bodySectPrStart < lastSpan!.end || bodySectPrStart > pendingEnd)) {
+      lastSpan!.end = pendingEnd;
+    }
+    if (bodySectPrStart != (last?.$2 ?? -1)) {
+      hf = _headerFooter(bodySectPr, mainRels, main);
+    }
+    final prefix = RegExp(
+      r'<([A-Za-z_][\w.\-]*):document\b',
+    ).firstMatch(text)?.group(1);
+    return _model(blocks, _images, bodySectPr, hf, _warnings, prefix ?? '');
+  }
+
+  bool _previewSent = false;
+
+  bool _previewDue(List<DocBlock> blocks, int offset, int length) {
+    if (_previewSent) return false;
+    if (blocks.length < 40 && offset < 40000) return false;
+    _previewSent = true;
+    // Only worth it when a good part of the body is still unparsed.
+    return length - offset > 150000;
+  }
+
+  /// The last `sectPr` in the main part (the body's own, normally) and its
+  /// offset, found without parsing the body.
+  (XmlElement, int)? _lastSectPr(String text) {
+    final starts = RegExp(r'<([A-Za-z_][\w.\-]*:)?sectPr[\s/>]');
+    RegExpMatch? m;
+    for (final x in starts.allMatches(
+      text,
+      math.max(0, text.length - 200000),
+    )) {
+      m = x;
+    }
+    if (m == null) return null;
+    final close = '</${m.group(1) ?? ''}sectPr>';
+    final selfEnd = text.indexOf('>', m.start);
+    int end;
+    if (selfEnd > 0 && text.codeUnitAt(selfEnd - 1) == 0x2F) {
+      end = selfEnd + 1;
+    } else {
+      final c = text.indexOf(close, m.start);
+      if (c < 0) return null;
+      end = c + close.length;
+    }
+    try {
+      final e = XmlDocument.parse(text.substring(m.start, end)).rootElement;
+      return (e, m.start);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  ({List<DocBlock> header, List<DocBlock> footer}) _headerFooter(
+    XmlElement? sectPr,
+    Map<String, OfficeRel> rels,
+    String main,
+  ) {
+    if (sectPr == null) return (header: const [], footer: const []);
+    // Header lists must not advance the body's numbering.
+    final counters = {
+      for (final e in _counters.entries) e.key: List.of(e.value),
+    };
+    final seen = Set.of(_seenNums);
+    final header = _headerFooterPart(sectPr, 'headerReference', rels, main);
+    final footer = _headerFooterPart(sectPr, 'footerReference', rels, main);
+    _counters
+      ..clear()
+      ..addAll(counters);
+    _seenNums
+      ..clear()
+      ..addAll(seen);
+    return (header: header ?? const [], footer: footer ?? const []);
+  }
+
+  DocModel _model(
+    List<DocBlock> blocks,
+    Map<String, DocImageData> images,
+    XmlElement? sectPr,
+    ({List<DocBlock> header, List<DocBlock> footer}) hf,
+    List<String> warnings,
+    String wPrefix,
+  ) {
+    final main = pkg.mainPart() ?? 'word/document.xml';
+    final mainRels = pkg.relMap(main);
+    final page = _pageSetup(sectPr);
+    final header = List.of(hf.header);
+    final footer = List.of(hf.footer);
 
     final headingIds = <int, String>{};
     final headingSet = <String>{};
@@ -184,19 +320,19 @@ class DocxParser {
     return DocModel(
       format: 'docx',
       blocks: blocks,
-      images: _images,
+      images: images,
       page: page,
       baseStyle: base,
       headingStyles: headingStyles,
       headingSpacing: headingSpacing,
       header: header,
       footer: footer,
-      warnings: _warnings,
+      warnings: warnings,
       docx: DocxSourceInfo(
         mainPart: main,
         headingStyleIds: headingIds,
         normalStyleId: _defaultParaStyle,
-        wPrefix: root.name.prefix ?? '',
+        wPrefix: wPrefix,
         bodySectPr: sectPr?.toXmlString(),
         hyperlinkTargets: hyperlinks,
         headingStyleSet: headingSet,
@@ -679,27 +815,36 @@ class DocxParser {
   ) {
     final out = <DocBlock>[];
     for (final e in Ox.elements(container)) {
-      switch (e.name.local) {
-        case 'p':
-          _parseParagraph(e, ctx, t, out);
-        case 'tbl':
-          final table = _parseTable(e, ctx);
-          if (table != null) out.add(table);
-        case 'sdt':
-          final c = Ox.child(e, 'sdtContent');
-          if (c != null) out.addAll(_parseBlocks(c, ctx, t));
-        case 'customXml':
-        case 'ins':
-        case 'moveTo':
-        case 'smartTag':
-          out.addAll(_parseBlocks(e, ctx, t));
-        case 'altChunk':
-          if (!_warnings.contains('altChunk')) {
-            _warnings.add('altChunk');
-          }
-      }
+      _parseBlock(e, ctx, t, out);
     }
     return out;
+  }
+
+  void _parseBlock(
+    XmlElement e,
+    _PartCtx ctx,
+    _TableCtx? t,
+    List<DocBlock> out,
+  ) {
+    switch (e.name.local) {
+      case 'p':
+        _parseParagraph(e, ctx, t, out);
+      case 'tbl':
+        final table = _parseTable(e, ctx);
+        if (table != null) out.add(table);
+      case 'sdt':
+        final c = Ox.child(e, 'sdtContent');
+        if (c != null) out.addAll(_parseBlocks(c, ctx, t));
+      case 'customXml':
+      case 'ins':
+      case 'moveTo':
+      case 'smartTag':
+        out.addAll(_parseBlocks(e, ctx, t));
+      case 'altChunk':
+        if (!_warnings.contains('altChunk')) {
+          _warnings.add('altChunk');
+        }
+    }
   }
 
   void _parseParagraph(
@@ -764,20 +909,27 @@ class DocxParser {
 
     var cur = make()..list = list;
     final frames = <DocBlock>[];
-    var broke = false;
+    // The last break, until we know whether the paragraph's text goes on
+    // after it.
+    DocPageBreak? lastBreak;
 
     void onPageBreak() {
       _mergeRuns(cur.inlines);
-      if (cur.inlines.isNotEmpty) out.add(cur);
-      out.add(DocPageBreak());
-      broke = true;
+      if (cur.inlines.isNotEmpty) {
+        lastBreak?.joinNext = true;
+        out.add(cur);
+      }
+      out.add(lastBreak = DocPageBreak());
       cur = make();
     }
 
     final sink = _InlineSink(() => cur.inlines, onPageBreak);
     _parseInlines(p, ctx, base, sink, frames);
     _mergeRuns(cur.inlines);
-    if (!(broke && cur.inlines.isEmpty)) out.add(cur);
+    if (lastBreak == null || cur.inlines.isNotEmpty) {
+      lastBreak?.joinNext = true;
+      out.add(cur);
+    }
     out.addAll(frames);
     if (sectPr != null) {
       out.add(

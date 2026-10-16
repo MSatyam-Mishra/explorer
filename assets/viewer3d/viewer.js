@@ -7,10 +7,13 @@
 //   size - file size in bytes, used for progress (optional)
 //   bg   - initial background: dark | light | gradient | transparent
 //   inset - CSS px at the top hidden behind the app's floating bar (optional)
+//   files - URL of a JSON array of paths relative to the model's folder
+//           (optional; may include `../Sibling/x.png` entries)
 //
-// The app may define `window.__viewer3dFiles` (array of paths relative to the
-// model's folder) so references with wrong case, backslashes or absolute
-// author paths can still be resolved to sibling files.
+// The file list (or `window.__viewer3dFiles`, same format) lets references
+// with wrong case, backslashes or absolute author paths still resolve to
+// nearby files. index.html starts fetching `src` and `files` before the
+// modules load; see `window.__v3dModelRequest` / `window.__v3dFilesRequest`.
 //
 // Events go to Flutter through `window.__v3dPost(type, payload)` (see
 // index.html). Commands come in through `window.viewer.command(name, arg)`.
@@ -32,6 +35,7 @@ const SRC = params.get('src') || '';
 const EXT = (params.get('ext') || extensionOf(SRC)).toLowerCase().replace(/^\./, '');
 const NAME = params.get('name') || safeDecode(SRC.split(/[?#]/)[0].split('/').pop() || 'model');
 const SIZE_HINT = Number(params.get('size')) || 0;
+const FILES_URL = params.get('files') || '';
 const MODEL_BASE = SRC ? new URL('./', new URL(SRC, location.href)).href : location.href;
 const LIBS_BASE = new URL('./three/jsm/libs/', location.href).href;
 
@@ -236,8 +240,8 @@ const fileIndex = new Map(); // lower-case relative path -> actual path
 const baseIndex = new Map(); // lower-case basename -> shallowest actual path
 let indexBuilt = false;
 
-// Built on first use: the app injects the list at document start, but some
-// WebViews only run that script after the page started executing.
+// Built on first use from the list loadFileIndex() fetched (or one the page
+// was given as `window.__viewer3dFiles`).
 function ensureIndex() {
   if (indexBuilt) return;
   const files = window.__viewer3dFiles;
@@ -251,6 +255,22 @@ function ensureIndex() {
     fileIndex.set(lower, f);
     const base = lower.split('/').pop();
     if (!baseIndex.has(base)) baseIndex.set(base, f);
+  }
+}
+
+// The app builds the file list while the model downloads; it's needed only
+// once loaders start resolving resources, so wait for it just before parsing.
+async function loadFileIndex() {
+  if (Array.isArray(window.__viewer3dFiles) || !FILES_URL) return;
+  const request = window.__v3dFilesRequest ||
+    fetch(FILES_URL).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  window.__v3dFilesRequest = null;
+  postProgress('resources', null, 'Looking for textures');
+  const timeout = new Promise((resolve) => setTimeout(resolve, 4000, null));
+  const files = await Promise.race([request, timeout]);
+  if (Array.isArray(files)) {
+    window.__viewer3dFiles = files;
+    indexBuilt = false;
   }
 }
 
@@ -269,7 +289,9 @@ function lookupFile(path) {
   for (const s of path.split('/')) {
     if (!s || s === '.') continue;
     if (s === '..') {
-      segs.pop();
+      // Leading '..' stay: the index lists sibling folders as '../x/y.png'.
+      if (segs.length && segs[segs.length - 1] !== '..') segs.pop();
+      else segs.push('..');
       continue;
     }
     segs.push(s);
@@ -391,10 +413,11 @@ function postProgress(stage, fraction, label, force = false) {
   });
 }
 
-async function fetchBuffer(url, { progress = false, optional = false } = {}) {
+// `request` is an already started fetch() for `url` (see index.html).
+async function fetchBuffer(url, { progress = false, optional = false, request = null } = {}) {
   let res;
   try {
-    res = await fetch(url);
+    res = await (request || fetch(url));
   } catch (e) {
     if (optional) return null;
     throw new ViewerError('read_failed', `Couldn't read "${displayNameOf(url)}".`, String(e));
@@ -460,13 +483,28 @@ function makePointsMaterial(geometry) {
   });
 }
 
-function meshOrPoints(geometry) {
-  const hasFaces = geometry.index ? geometry.index.count >= 3 : false;
+// `soupHasFaces`: the file has faces even if the geometry has no index.
+// PLYLoader (per-face UVs/colours) and VTKLoader (cell colours) return such
+// faces as a non-indexed triangle list.
+function meshOrPoints(geometry, soupHasFaces = false) {
+  const position = geometry.attributes.position;
+  const hasFaces = geometry.index
+    ? geometry.index.count >= 3
+    : soupHasFaces && !!position && position.count >= 3 && position.count % 3 === 0;
   if (hasFaces) {
     if (!geometry.attributes.normal) geometry.computeVertexNormals();
     return new THREE.Mesh(geometry, makeDefaultMaterial(geometry));
   }
+  // An empty index (no faces) would make the points draw nothing.
+  if (geometry.index) geometry.setIndex(null);
   return new THREE.Points(geometry, makePointsMaterial(geometry));
+}
+
+// Whether a PLY header declares faces (`element face N`, N > 0).
+function plyHasFaces(buffer) {
+  const head = decodeText(new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 65536)));
+  const end = head.indexOf('end_header');
+  return /^element\s+face\s+[1-9]\d*/m.test(end >= 0 ? head.slice(0, end) : head);
 }
 
 function materialsOf(material) {
@@ -632,8 +670,9 @@ const FORMAT_LOADERS = {
   async ply(buffer) {
     const { PLYLoader } = await import('three/addons/loaders/PLYLoader.js');
     postProgress('parse', null, 'Processing model', true);
+    const hasFaces = plyHasFaces(buffer);
     const geometry = new PLYLoader(manager).parse(buffer);
-    return { object: meshOrPoints(geometry) };
+    return { object: meshOrPoints(geometry, hasFaces) };
   },
 
   async off(buffer) {
@@ -667,7 +706,9 @@ const FORMAT_LOADERS = {
       buffer = padded.buffer;
     }
     const geometry = new VTKLoader(manager).parse(buffer);
-    return { object: meshOrPoints(geometry) };
+    // Every VTKLoader path sets an index except the one for per-cell colours,
+    // which expands the polygons into a triangle list.
+    return { object: meshOrPoints(geometry, true) };
   },
 
   async drc(buffer) {
@@ -1545,9 +1586,12 @@ async function main() {
   }
 
   postProgress('download', 0, 'Reading file', true);
-  const buffer = await fetchBuffer(SRC, { progress: true });
+  const request = window.__v3dModelRequest || null;
+  window.__v3dModelRequest = null;
+  const buffer = await fetchBuffer(SRC, { progress: true, request });
   if (!buffer.byteLength) throw new ViewerError('empty', 'This file is empty.');
 
+  await loadFileIndex();
   const result = await load(buffer);
   if (!result || !result.object) throw new ViewerError('empty', 'Nothing could be read from this file.');
 

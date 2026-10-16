@@ -337,9 +337,23 @@ class FileActionsService {
     return 0; // Placeholder
   }
 
+  /// Anchor for the iPad share popover: the widget that triggered the
+  /// share, or the middle of the screen.
+  static Rect _shareOrigin(BuildContext context) {
+    final box = context.findRenderObject();
+    if (box is RenderBox && box.attached && box.hasSize) {
+      return box.localToGlobal(Offset.zero) & box.size;
+    }
+    final size = MediaQuery.sizeOf(context);
+    return Rect.fromCenter(center: size.center(Offset.zero), width: 1, height: 1);
+  }
+
   void share(BuildContext context, FileSystemEntity entity) {
     if (entity is File) {
-      Share.shareXFiles([XFile(entity.path)]);
+      SharePlus.instance.share(ShareParams(
+        files: [XFile(entity.path)],
+        sharePositionOrigin: _shareOrigin(context),
+      ));
     } else if (entity is Directory) {
       shareZippedFolder(context, entity);
     }
@@ -349,6 +363,7 @@ class FileActionsService {
     BuildContext context,
     Directory directory,
   ) async {
+    final origin = _shareOrigin(context);
     // Show a loading indicator
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Zipping folder for sharing...')),
@@ -372,10 +387,13 @@ class FileActionsService {
       encoder.close();
 
       // Share the created ZIP file
-      await Share.shareXFiles([
-        XFile(zipPath),
-      ], text: 'Sharing folder: ${p.basename(directory.path)}');
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(zipPath)],
+        text: 'Sharing folder: ${p.basename(directory.path)}',
+        sharePositionOrigin: origin,
+      ));
     } catch (e) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to zip folder: $e'),

@@ -1,3 +1,4 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:explorer/core/formats/cfb_reader.dart';
@@ -11,11 +12,49 @@ import 'rtf_parser.dart';
 
 export 'doc_binary_parser.dart' show DocumentEncryptedException;
 
+/// Parses [bytes] in a background isolate.
+///
+/// For long documents the parsers hand over the first pages' blocks early;
+/// [onPreview] receives that partial model (read-only: never edit or save
+/// it) while the rest is still being parsed. The returned future completes
+/// with the full model, transferred back without copying.
+Future<DocModel> parseDocumentInBackground(
+  Uint8List bytes,
+  String extension, {
+  void Function(DocModel preview)? onPreview,
+}) async {
+  if (onPreview == null) return _parseIsolate(bytes, extension, null);
+  var done = false;
+  final port = RawReceivePort((Object? message) {
+    if (!done && message is DocModel) onPreview(message);
+  });
+  try {
+    return await _parseIsolate(bytes, extension, port.sendPort);
+  } finally {
+    done = true;
+    port.close();
+  }
+}
+
+// Kept separate so the isolate closure captures only sendable values.
+Future<DocModel> _parseIsolate(
+  Uint8List bytes,
+  String extension,
+  SendPort? previews,
+) => Isolate.run(
+  () => parseAnyDocument(bytes, extension, onPreview: previews?.send),
+);
+
 /// Parses any supported word-processing file, sniffing the real format
 /// from its bytes (a `.doc` that is really RTF or DOCX still opens).
+/// [onPreview]: see [parseDocumentInBackground].
 ///
-/// Pure Dart; call through `Isolate.run`.
-DocModel parseAnyDocument(Uint8List bytes, String extension) {
+/// Pure Dart; call through an isolate.
+DocModel parseAnyDocument(
+  Uint8List bytes,
+  String extension, {
+  void Function(DocModel preview)? onPreview,
+}) {
   final ext = extension.toLowerCase().replaceFirst('.', '');
   if (bytes.isEmpty) {
     return DocModel(format: _formatForExt(ext), blocks: [DocParagraph()]);
@@ -25,9 +64,9 @@ DocModel parseAnyDocument(Uint8List bytes, String extension) {
     final mime = pkg.text('mimetype')?.trim() ?? '';
     if (mime.contains('opendocument') ||
         (pkg.has('content.xml') && !pkg.has('[Content_Types].xml'))) {
-      return parseOdtBytes(bytes);
+      return parseOdtPackage(pkg, onPreview: onPreview);
     }
-    return DocxParser(pkg).parse();
+    return DocxParser(pkg).parse(onPreview: onPreview);
   }
   if (CfbReader.isCfb(bytes)) {
     final cfb = CfbReader(bytes);
@@ -35,12 +74,16 @@ DocModel parseAnyDocument(Uint8List bytes, String extension) {
       throw const DocumentEncryptedException();
     }
     if (cfb.find('WordDocument') != null) {
-      return parseDocBytes(bytes, format: ext == 'wps' ? 'wps' : 'doc');
+      return parseDocBytes(
+        bytes,
+        format: ext == 'wps' ? 'wps' : 'doc',
+        onPreview: onPreview,
+      );
     }
     return _worksText(cfb, ext);
   }
+  if (rtfStart(bytes) >= 0) return parseRtfBytes(bytes, onPreview: onPreview);
   final head = String.fromCharCodes(bytes.take(64)).trimLeft();
-  if (head.startsWith('{\\rtf')) return parseRtfBytes(bytes);
   if (head.startsWith('<?xml') || head.startsWith('<office:document')) {
     try {
       return parseOdtBytes(bytes);

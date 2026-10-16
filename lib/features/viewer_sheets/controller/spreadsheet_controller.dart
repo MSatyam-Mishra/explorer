@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 
 import '../formula/evaluator.dart';
 import '../formula/ref_rewriter.dart';
+import '../formula/tokenizer.dart' show carryFunctionPrefixes;
 import '../model/input_parser.dart';
 import '../model/number_format.dart';
 import '../model/workbook.dart';
@@ -93,7 +94,52 @@ class SpreadsheetController extends ChangeNotifier {
   final FormulaEngine engine;
   final TextEditingController editText = TextEditingController();
 
-  bool dirty = false;
+  bool _dirty = false;
+
+  /// Bumped on every change that makes the workbook unsaved, so a save can
+  /// tell whether the user edited while it was being written.
+  int _editSerial = 0;
+
+  bool get dirty => _dirty;
+  set dirty(bool value) {
+    if (value) _editSerial++;
+    _dirty = value;
+  }
+
+  int get editSerial => _editSerial;
+
+  /// Set while this controller shows a quick preview of a big file whose
+  /// full contents are still loading: viewing works, changes are refused.
+  bool readOnly = false;
+
+  /// Called when a change is refused because of [readOnly].
+  VoidCallback? onReadOnly;
+
+  /// True (after telling [onReadOnly]) when changes aren't allowed now.
+  bool _refuseEdit() {
+    if (!readOnly) return false;
+    onReadOnly?.call();
+    return true;
+  }
+
+  /// Takes over what the user did in a preview controller: active sheet,
+  /// selection and zoom.
+  void adoptViewFrom(SpreadsheetController o) {
+    zoom = o.zoom;
+    if (o.workbook.sheets.length == workbook.sheets.length) {
+      workbook.activeSheet = o.workbook.activeSheet.clamp(0, workbook.sheets.length - 1);
+    }
+    anchorRow = o.anchorRow;
+    anchorCol = o.anchorCol;
+    selRow = o.selRow;
+    selCol = o.selCol;
+    layoutVersion++;
+    _recomputeDisplaySize();
+    _ensureCapacity(math.max(selRow, anchorRow < kMaxRows - 1 ? anchorRow : 0),
+        math.max(selCol, anchorCol < kMaxCols - 1 ? anchorCol : 0));
+    _syncEditText();
+  }
+
   double zoom = 1.0;
 
   /// Bumped when extents, merges, panes or the active sheet change.
@@ -342,6 +388,7 @@ class SpreadsheetController extends ChangeNotifier {
   // Editing
 
   void beginEdit({String? initial, EditOrigin origin = EditOrigin.cell}) {
+    if (_refuseEdit()) return;
     if (editing) {
       if (editOrigin != origin) {
         editOrigin = origin;
@@ -380,10 +427,17 @@ class SpreadsheetController extends ChangeNotifier {
     final text = editText.text;
     if (text != _editOriginal) {
       final existing = activeCell;
-      final cell = parseCellInput(text, existing?.style ?? CellStyle.plain,
+      var cell = parseCellInput(text, existing?.style ?? CellStyle.plain,
           date1904: workbook.date1904);
       if (cell?.formula != null && !engine.isValid(cell!.formula!)) {
         return 'There\'s a problem with this formula.';
+      }
+      final before = existing?.formula;
+      if (cell?.formula != null && before != null) {
+        // Keep `_xlfn.` on functions the file had prefixed (even ones newer
+        // than this app knows about).
+        final f = carryFunctionPrefixes(cell!.formula!, before);
+        if (f != cell.formula) cell = Cell(value: cell.value, formula: f, style: cell.style);
       }
       editing = false;
       _pointStart = null;
@@ -475,7 +529,7 @@ class SpreadsheetController extends ChangeNotifier {
 
   /// Writes cells with undo support.
   void setCells(SheetData s, Map<int, Cell?> after, String label) {
-    if (after.isEmpty) return;
+    if (after.isEmpty || _refuseEdit()) return;
     final before = <int, Cell?>{for (final k in after.keys) k: s.cells[k]};
     final selBefore = _selState;
     _writeCells(s, after);
@@ -541,9 +595,11 @@ class SpreadsheetController extends ChangeNotifier {
   }
 
   /// Runs a structural change, snapshotting [snapshot] sheets and the sheet
-  /// list for undo. Redo replays [mutate].
+  /// list for undo. Redo replays [mutate]; [restore] puts back any other
+  /// state [mutate] changed (it runs on undo after the snapshots).
   void _structural(String label, Iterable<SheetData> snapshot, void Function() mutate,
-      {SheetData? focus}) {
+      {SheetData? focus, VoidCallback? restore}) {
+    if (_refuseEdit()) return;
     if (editing) commitEdit();
     final list = List<SheetData>.of(workbook.sheets);
     final clones = {for (final s in snapshot.toSet()) s: s.clone()};
@@ -562,6 +618,7 @@ class SpreadsheetController extends ChangeNotifier {
           ..clear()
           ..addAll(list);
         clones.forEach((s, c) => s.restoreFrom(c));
+        restore?.call();
         workbook.activeSheet = active.clamp(0, workbook.sheets.length - 1);
         engine.invalidate();
       },
@@ -669,6 +726,10 @@ class SpreadsheetController extends ChangeNotifier {
 
   /// Live column resize; [record] adds an undo step from [from].
   void setColumnWidth(int col, double width, {double? from, bool record = false}) {
+    if (readOnly) {
+      if (record) _refuseEdit();
+      return;
+    }
     final s = sheet;
     final w = width.clamp(4.0, 2000.0).toDouble();
     s.colWidths[col] = w;
@@ -701,6 +762,7 @@ class SpreadsheetController extends ChangeNotifier {
   }
 
   void setFrozen(int rows, int cols) {
+    if (_refuseEdit()) return;
     final s = sheet;
     final before = (s.frozenRows, s.frozenCols);
     if (before == (rows, cols)) return;
@@ -724,6 +786,7 @@ class SpreadsheetController extends ChangeNotifier {
 
   /// Recalculates every formula (volatile functions like TODAY included).
   void recalculate() {
+    if (_refuseEdit()) return;
     if (editing) commitEdit();
     try {
       engine.recalcAll();
@@ -733,14 +796,17 @@ class SpreadsheetController extends ChangeNotifier {
     _notify();
   }
 
-  /// Marks the workbook as saved.
-  void markSaved() {
-    dirty = false;
+  /// Marks the workbook as saved. With [atSerial] (the [editSerial] taken
+  /// when the save started) it stays unsaved if anything changed since.
+  void markSaved({int? atSerial}) {
+    if (atSerial != null && atSerial != _editSerial) return;
+    _dirty = false;
     _notify();
   }
 
   /// CSV only: show the first row as a header (frozen, bold).
   void setCsvHeader(bool value) {
+    if (_refuseEdit()) return;
     final csv = workbook.csv;
     if (csv == null) return;
     csv.hasHeader = value;

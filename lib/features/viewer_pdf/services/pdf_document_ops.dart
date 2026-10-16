@@ -114,6 +114,67 @@ abstract final class PdfDocumentOps {
     int pageIndex,
     List<PageMark> marks,
   ) => Isolate.run(() => _drawOnPage(bytes, pageIndex, marks));
+
+  /// Whether [drawOnPage] can write [text] as real PDF text: Latin-1 with the
+  /// standard font, or Latin, Greek and Cyrillic when a system TrueType font
+  /// is available. Other scripts and emoji have to be placed as an image.
+  static bool canEmbedText(String text) {
+    var latin1 = true;
+    for (final rune in text.runes) {
+      if (rune <= 0xFF) continue;
+      latin1 = false;
+      if (!_coveredBySystemFont(rune)) return false;
+    }
+    return latin1 || _systemFontPath() != null;
+  }
+
+  /// Bytes to embed for an image picked on the page canvas.
+  ///
+  /// PNG files and upright JPEGs are kept as they are. Anything else (HEIC,
+  /// AVIF, WebP, camera JPEGs with an EXIF rotation...) is re-encoded from
+  /// [decoded], which the platform decoder already turned the right way up;
+  /// PDF ignores EXIF orientation and the PDF library can't read those
+  /// formats.
+  static Future<Uint8List> imageForPdf(Uint8List bytes, Image decoded) async {
+    final isJpeg = _isJpeg(bytes);
+    if (_isPng(bytes) || (isJpeg && _jpegOrientation(bytes) <= 1)) {
+      return bytes;
+    }
+    const maxSide = 2400;
+    final longest = math.max(decoded.width, decoded.height);
+    Image? scaled;
+    if (longest > maxSide) {
+      final k = maxSide / longest;
+      final width = math.max(1, (decoded.width * k).round());
+      final height = math.max(1, (decoded.height * k).round());
+      final recorder = PictureRecorder();
+      Canvas(recorder).drawImageRect(
+        decoded,
+        Rect.fromLTWH(0, 0, decoded.width.toDouble(), decoded.height.toDouble()),
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      final picture = recorder.endRecording();
+      scaled = await picture.toImage(width, height);
+      picture.dispose();
+    }
+    try {
+      final source = scaled ?? decoded;
+      final data = await source.toByteData(
+        format: ImageByteFormat.rawStraightRgba,
+      );
+      if (data == null) throw const FormatException('Unsupported image');
+      final rgba = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      final width = source.width;
+      final height = source.height;
+      return await Isolate.run(() => _encodeRgba(rgba, width, height));
+    } finally {
+      scaled?.dispose();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -396,22 +457,56 @@ void _drawText(PdfGraphics graphics, TextMark mark) {
 }
 
 /// Helvetica covers Latin-1. Anything else needs an embedded TrueType font,
-/// taken from the platform's system fonts when one can be read.
+/// taken from the platform's system fonts when one can be read. Callers
+/// check [PdfDocumentOps.canEmbedText] first: Helvetica throws on characters
+/// it doesn't have.
 PdfFont _fontFor(String text, double size) {
   final latin1 = text.runes.every((r) => r <= 0xFF);
   if (!latin1) {
+    final path = _systemFontPath();
+    if (path != null) {
+      try {
+        return PdfTrueTypeFont(File(path).readAsBytesSync(), size);
+      } catch (_) {
+        // Fall back to Helvetica below.
+      }
+    }
+  }
+  return PdfStandardFont(PdfFontFamily.helvetica, size);
+}
+
+/// Ranges the [_systemFontCandidates] all cover beyond Latin-1: Latin
+/// Extended, Greek, Cyrillic, Vietnamese, punctuation and currency signs.
+bool _coveredBySystemFont(int rune) =>
+    (rune >= 0x0100 && rune <= 0x024F) ||
+    (rune >= 0x0370 && rune <= 0x03FF) ||
+    (rune >= 0x0400 && rune <= 0x04FF) ||
+    (rune >= 0x1E00 && rune <= 0x1EFF) ||
+    (rune >= 0x2010 && rune <= 0x205E) ||
+    (rune >= 0x20A0 && rune <= 0x20BF) ||
+    rune == 0x2116 ||
+    rune == 0x2122;
+
+String? _cachedSystemFontPath;
+bool _systemFontLooked = false;
+
+/// First readable system font of [_systemFontCandidates], or null (always on
+/// iOS, where system fonts can't be read).
+String? _systemFontPath() {
+  if (!_systemFontLooked) {
+    _systemFontLooked = true;
     for (final path in _systemFontCandidates()) {
       try {
-        final file = File(path);
-        if (file.existsSync()) {
-          return PdfTrueTypeFont(file.readAsBytesSync(), size);
+        if (File(path).existsSync()) {
+          _cachedSystemFontPath = path;
+          break;
         }
       } catch (_) {
         // Try the next candidate.
       }
     }
   }
-  return PdfStandardFont(PdfFontFamily.helvetica, size);
+  return _cachedSystemFontPath;
 }
 
 List<String> _systemFontCandidates() {
@@ -447,17 +542,50 @@ void _drawImage(PdfGraphics graphics, ImageMark mark) {
   graphics.drawImage(PdfBitmap(encoded), mark.rect);
 }
 
+bool _isPng(Uint8List bytes) =>
+    bytes.length > 8 &&
+    bytes[0] == 0x89 &&
+    bytes[1] == 0x50 &&
+    bytes[2] == 0x4E &&
+    bytes[3] == 0x47;
+
+bool _isJpeg(Uint8List bytes) =>
+    bytes.length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8;
+
+/// EXIF orientation of a JPEG (1 = upright), or 1 when there is none.
+int _jpegOrientation(Uint8List bytes) {
+  try {
+    return img.decodeJpgExif(bytes)?.imageIfd.orientation ?? 1;
+  } catch (_) {
+    return 1;
+  }
+}
+
+/// Straight RGBA pixels as JPEG when fully opaque (photos), else PNG.
+Uint8List _encodeRgba(Uint8List rgba, int width, int height) {
+  var opaque = true;
+  for (var i = 3; i < rgba.length; i += 4) {
+    if (rgba[i] != 0xFF) {
+      opaque = false;
+      break;
+    }
+  }
+  final image = img.Image.fromBytes(
+    width: width,
+    height: height,
+    bytes: rgba.buffer,
+    bytesOffset: rgba.offsetInBytes,
+    numChannels: 4,
+  );
+  return opaque ? img.encodeJpg(image, quality: 88) : img.encodePng(image);
+}
+
 /// PdfBitmap reads PNG and JPEG. Other formats are re-encoded, and big
 /// photos are scaled down so a stamp doesn't add megabytes to the file.
 Uint8List _pdfFriendlyImage(Uint8List bytes) {
   const maxSide = 2400;
-  final isPng =
-      bytes.length > 8 &&
-      bytes[0] == 0x89 &&
-      bytes[1] == 0x50 &&
-      bytes[2] == 0x4E &&
-      bytes[3] == 0x47;
-  final isJpeg = bytes.length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8;
+  final isPng = _isPng(bytes);
+  final isJpeg = _isJpeg(bytes);
   if ((isPng || isJpeg) && bytes.length <= 1536 * 1024) return bytes;
 
   var decoded = img.decodeImage(bytes);

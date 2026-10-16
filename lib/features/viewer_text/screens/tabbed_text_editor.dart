@@ -22,9 +22,13 @@ class TabbedTextEditorScreen extends StatefulWidget {
 }
 
 class _EditorTab {
-  _EditorTab(this.file);
+  _EditorTab(this.file, {this.isCopy = false});
 
   final File file;
+
+  /// [file] is the file picker's temporary copy, not the user's file, so
+  /// saving goes through "Save a copy" instead of overwriting it.
+  final bool isCopy;
   final GlobalKey<TextEditorPaneState> key = GlobalKey();
   bool dirty = false;
 }
@@ -38,35 +42,96 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
 
   Future<void> _addFile() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.any);
-    final path = result?.files.single.path;
-    if (path == null || !mounted) return;
-    final existing = _tabs.indexWhere((t) => t.file.path == path);
+    final picked = result?.files.single;
+    final path = picked?.path;
+    if (picked == null || path == null || !mounted) return;
+    var file = File(path);
+    var isCopy = false;
+    // On Android and iOS the picker hands back a copy in the app's cache;
+    // edits saved there would never reach the real file.
+    if (Platform.isAndroid || Platform.isIOS) {
+      final real = await _realPathFor(picked);
+      if (real != null) {
+        file = File(real);
+      } else {
+        isCopy = true;
+      }
+    }
+    if (!mounted) return;
+    final existing = _tabs.indexWhere((t) => p.equals(t.file.path, file.path));
     setState(() {
       if (existing >= 0) {
         _index = existing;
       } else {
-        _tabs.add(_EditorTab(File(path)));
+        _tabs.add(_EditorTab(file, isCopy: isCopy));
         _index = _tabs.length - 1;
       }
     });
   }
 
+  /// Maps an Android document URI back to the file it names when the
+  /// provider exposes one (internal/SD storage, "raw:" downloads) and the app
+  /// can read it. Returns null otherwise (other providers, iOS).
+  static Future<String?> _realPathFor(PlatformFile picked) async {
+    if (!Platform.isAndroid) return null;
+    final uri = Uri.tryParse(picked.identifier ?? '');
+    if (uri == null || uri.scheme != 'content') return null;
+    final segments = uri.pathSegments; // decoded: "primary:Documents/a.txt"
+    final docIndex = segments.lastIndexOf('document');
+    if (docIndex < 0 || docIndex + 1 >= segments.length) return null;
+    final docId = segments[docIndex + 1];
+    String? candidate;
+    switch (uri.authority) {
+      case 'com.android.externalstorage.documents':
+        final colon = docId.indexOf(':');
+        if (colon <= 0) return null;
+        final volume = docId.substring(0, colon);
+        final relative = docId.substring(colon + 1);
+        final root = volume.toLowerCase() == 'primary'
+            ? '/storage/emulated/0'
+            : '/storage/$volume';
+        candidate = relative.isEmpty ? null : '$root/$relative';
+      case 'com.android.providers.downloads.documents':
+        if (docId.startsWith('raw:')) candidate = docId.substring(4);
+    }
+    if (candidate == null) return null;
+    try {
+      // Same size as the copy we were given, so it's the same file.
+      if (await File(candidate).length() != picked.size) return null;
+    } catch (_) {
+      return null;
+    }
+    return candidate;
+  }
+
+  /// Saves or discards [tab]'s edits after asking. Returns false if the
+  /// user cancelled or the save failed.
+  Future<bool> _resolveUnsaved(_EditorTab tab) async {
+    // Loop: keystrokes typed while a save is running leave the tab dirty.
+    while (tab.dirty) {
+      final choice = await _confirmDiscard(p.basename(tab.file.path));
+      if (choice == null) return false;
+      if (!choice) return true;
+      if (!(await tab.key.currentState?.save() ?? false)) return false;
+      if (!mounted) return false;
+    }
+    return true;
+  }
+
   Future<void> _closeTab(int index) async {
     final tab = _tabs[index];
-    if (tab.dirty) {
-      final choice = await _confirmDiscard(p.basename(tab.file.path));
-      if (choice == null) return;
-      if (choice && !(await tab.key.currentState?.save() ?? false)) return;
-    }
+    if (!await _resolveUnsaved(tab)) return;
     if (!mounted) return;
     if (_tabs.length == 1) {
       Navigator.pop(context);
       return;
     }
     setState(() {
-      _tabs.removeAt(index);
+      final position = _tabs.indexOf(tab);
+      if (position < 0) return;
+      _tabs.removeAt(position);
+      if (position < _index) _index--;
       if (_index >= _tabs.length) _index = _tabs.length - 1;
-      if (index < _index) _index--;
     });
   }
 
@@ -96,19 +161,19 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
   }
 
   Future<void> _saveCurrent() async {
-    final ok = await _current.key.currentState?.save() ?? false;
+    final tab = _current;
+    final ok = await tab.key.currentState?.save() ?? false;
     if (ok && mounted) {
+      final name = p.basename(tab.file.path);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved ${p.basename(_current.file.path)}')),
+        SnackBar(content: Text(tab.isCopy ? 'Saved a copy of $name' : 'Saved $name')),
       );
     }
   }
 
   Future<void> _handlePop() async {
     for (final tab in _tabs.where((t) => t.dirty).toList()) {
-      final choice = await _confirmDiscard(p.basename(tab.file.path));
-      if (choice == null) return;
-      if (choice && !(await tab.key.currentState?.save() ?? false)) return;
+      if (!await _resolveUnsaved(tab)) return;
     }
     if (mounted) Navigator.pop(context);
   }
@@ -166,6 +231,7 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
                         TextEditorPane(
                           key: tab.key,
                           file: tab.file,
+                          saveAsCopy: tab.isCopy,
                           onDirtyChanged: (dirty) {
                             if (tab.dirty != dirty) {
                               setState(() => tab.dirty = dirty);

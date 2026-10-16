@@ -29,6 +29,8 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
   Future<void> _initPlayer() async {
     try {
       await _player.setFilePath(widget.audioFile.path);
+      // Left the screen while loading: the player is already disposed.
+      if (!mounted) return;
       _duration = _player.duration ?? Duration.zero;
 
       _player.playerStateStream.listen((state) {

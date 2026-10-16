@@ -34,6 +34,11 @@ dependencies:
   flutter_animate: ^4.5.2
   flutter_inappwebview: ^6.1.5
   archive: ^3.6.1 # Avoid 4.0.0 for now unless necessary as it's a major bump
+  # Pure-Dart RAR4/RAR5 and 7z readers (archive viewer, CBR/CB7 comics).
+  koni_archive_core: ^0.9.0
+  koni_rar:
+    path: third_party/koni_rar # 0.9.0 with fixes, see PATCHES.md there
+  koni_sevenz: ^0.9.0
   share_plus: ^12.0.1
   filesize: ^2.0.1
   intl: ^0.20.2
@@ -80,6 +85,11 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    # File and folder icons (lib/shared/file_icons)
+    - assets/iocns/file_type/icon_1/
+    - assets/iocns/file_type/icon_2/
+    - assets/iocns/programming/
+    - assets/iocns/glass/
     # Offline three.js 3D viewer (lib/features/viewer_3d)
     - assets/viewer3d/
     - assets/viewer3d/three/

@@ -144,8 +144,9 @@ extension SheetOperations on SpreadsheetController {
     final after = <int, Cell?>{};
     for (var c = sel.c1; c <= sel.c2; c++) {
       final cell = s.cell(src, c);
+      final shifter = cell?.formula == null ? null : FormulaShifter(cell!.formula!);
       for (var r = from; r <= sel.r2; r++) {
-        after[cellKey(r, c)] = _shifted(cell, r - src, 0);
+        after[cellKey(r, c)] = _shifted(cell, r - src, 0, shifter);
       }
     }
     setCells(s, after, 'Fill down');
@@ -161,17 +162,19 @@ extension SheetOperations on SpreadsheetController {
     final after = <int, Cell?>{};
     for (var r = sel.r1; r <= sel.r2; r++) {
       final cell = s.cell(r, src);
+      final shifter = cell?.formula == null ? null : FormulaShifter(cell!.formula!);
       for (var c = from; c <= sel.c2; c++) {
-        after[cellKey(r, c)] = _shifted(cell, 0, c - src);
+        after[cellKey(r, c)] = _shifted(cell, 0, c - src, shifter);
       }
     }
     setCells(s, after, 'Fill right');
   }
 
-  Cell? _shifted(Cell? cell, int dr, int dc) {
+  Cell? _shifted(Cell? cell, int dr, int dc, [FormulaShifter? shifter]) {
     if (cell == null) return null;
     if (cell.formula == null) return cell;
-    return Cell(value: cell.value, formula: FormulaRefs.shift(cell.formula!, dr, dc), style: cell.style);
+    final f = shifter != null ? shifter.shift(dr, dc) : FormulaRefs.shift(cell.formula!, dr, dc);
+    return Cell(value: cell.value, formula: f, style: cell.style);
   }
 
   /// Sorts the selected rows (or the data region) by the active column.
@@ -422,6 +425,7 @@ extension SheetOperations on SpreadsheetController {
 
   /// Pastes from the system clipboard. Returns an error message or null.
   Future<String?> paste() async {
+    if (readOnly) return 'Still opening the file. You can edit in a moment.';
     if (editing) commitEdit();
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
@@ -436,8 +440,17 @@ extension SheetOperations on SpreadsheetController {
       rows = clip.range.rowCount;
       cols = clip.range.colCount;
       final fillAll = rows == 1 && cols == 1 && !sel.isSingle;
-      final targetRows = fillAll ? sel.rowCount : rows;
-      final targetCols = fillAll ? sel.colCount : cols;
+      var targetRows = fillAll ? sel.rowCount : rows;
+      var targetCols = fillAll ? sel.colCount : cols;
+      if (fillAll) {
+        // Whole rows/columns (or Select All) fill only the used area, like
+        // clear and format do; an empty area still gets its first cell.
+        if (sel.r2 >= kMaxRows - 1) targetRows = math.max(1, math.min(sel.rowCount, s.usedRows - sel.r1));
+        if (sel.c2 >= kMaxCols - 1) targetCols = math.max(1, math.min(sel.colCount, s.usedCols - sel.c1));
+      }
+      if (targetRows * targetCols > 2000000) return 'The selection is too large to paste into.';
+      // Formulas are tokenized once and shifted per target cell.
+      final shifters = <(int, int), FormulaShifter>{};
       if (clip.cut && identical(clip.sheet, s)) {
         // Clear the source first so overlapping moves work.
         for (final e in clip.cells.entries) {
@@ -446,13 +459,20 @@ extension SheetOperations on SpreadsheetController {
       }
       for (var dr = 0; dr < targetRows; dr++) {
         for (var dc = 0; dc < targetCols; dc++) {
-          final src = clip.cells[(fillAll ? 0 : dr, fillAll ? 0 : dc)];
+          final at = (fillAll ? 0 : dr, fillAll ? 0 : dc);
+          final src = clip.cells[at];
           final r = sel.r1 + dr;
           final c = sel.c1 + dc;
           if (r >= kMaxRows || c >= kMaxCols) continue;
-          final shiftR = r - (clip.range.r1 + (fillAll ? 0 : dr));
-          final shiftC = c - (clip.range.c1 + (fillAll ? 0 : dc));
-          after[cellKey(r, c)] = clip.cut ? src : _shifted(src, shiftR, shiftC);
+          final shiftR = r - (clip.range.r1 + at.$1);
+          final shiftC = c - (clip.range.c1 + at.$2);
+          final f = src?.formula;
+          if (clip.cut || src == null || f == null) {
+            after[cellKey(r, c)] = src;
+          } else {
+            final shifter = shifters.putIfAbsent(at, () => FormulaShifter(f));
+            after[cellKey(r, c)] = Cell(value: src.value, formula: shifter.shift(shiftR, shiftC), style: src.style);
+          }
         }
       }
       rows = targetRows;
@@ -486,8 +506,7 @@ extension SheetOperations on SpreadsheetController {
           final c = sel.c1 + dc;
           if (r >= kMaxRows || c >= kMaxCols) continue;
           final existing = s.cell(r, c);
-          after[cellKey(r, c)] = parseCellInput(row[dc], existing?.style ?? CellStyle.plain,
-              date1904: workbook.date1904);
+          after[cellKey(r, c)] = _parseLenient(row[dc], existing?.style ?? CellStyle.plain);
         }
       }
     }
@@ -554,10 +573,21 @@ extension SheetOperations on SpreadsheetController {
     if (!_matches(raw, query, o)) return null;
     final next = _replaceIn(raw, query, replacement, o);
     if (next == raw) return null;
-    return parseCellInput(next, c.style, date1904: workbook.date1904) ?? Cell(style: c.style);
+    return _parseLenient(next, c.style) ?? Cell(style: c.style);
+  }
+
+  /// Like typing [text], except that text starting with `=` which isn't a
+  /// valid formula is kept as text (as Excel does for pasted text) instead of
+  /// becoming a formula that can't be calculated or saved.
+  Cell? _parseLenient(String text, CellStyle style) {
+    final cell = parseCellInput(text, style, date1904: workbook.date1904);
+    final f = cell?.formula;
+    if (f != null && !engine.isValid(f)) return Cell(value: text, style: style);
+    return cell;
   }
 
   bool replaceOne(FindMatch m, String query, String replacement, FindOptions o) {
+    if (_refuseEdit()) return false;
     final cell = _replacedCell(m.sheet, m, query, replacement, o);
     if (cell == null) return false;
     setCells(m.sheet, {cellKey(m.row, m.col): cell}, 'Replace');
@@ -565,6 +595,7 @@ extension SheetOperations on SpreadsheetController {
   }
 
   int replaceAll(String query, String replacement, FindOptions o) {
+    if (_refuseEdit()) return 0;
     final matches = findAll(query, o);
     final bySheet = <SheetData, Map<int, Cell?>>{};
     for (final m in matches) {
@@ -604,7 +635,9 @@ extension SheetOperations on SpreadsheetController {
     final other = workbook.sheetByName(n);
     if (other != null && !identical(other, s)) return 'A sheet with this name already exists';
     final old = s.name;
-    _structural('Rename sheet', _formulaSheets, () {
+    // The renamed sheet is snapshotted too, so undo restores its name even
+    // when it holds no formulas.
+    _structural('Rename sheet', [s, ..._formulaSheets], () {
       s.name = n;
       for (final sh in workbook.sheets) {
         final updates = <int, Cell>{};
@@ -692,14 +725,14 @@ extension SheetOperations on SpreadsheetController {
     }
     final before = s.visibility;
     final after = hidden ? SheetVisibility.hidden : SheetVisibility.visible;
+    if (before == after) return null;
     _structural(hidden ? 'Hide sheet' : 'Unhide sheet', const [], () {
       s.visibility = after;
       if (hidden && identical(sheet, s)) {
         final v = workbook.sheets.indexWhere((x) => x.visibility == SheetVisibility.visible);
         if (v >= 0) workbook.activeSheet = v;
       }
-    });
-    if (before == after) return null;
+    }, restore: () => s.visibility = before);
     return null;
   }
 }

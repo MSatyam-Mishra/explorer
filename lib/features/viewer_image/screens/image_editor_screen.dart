@@ -2,7 +2,9 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/core/files/safe_write.dart';
 import 'package:explorer/features/viewer_image/image_codec.dart';
+import 'package:explorer/features/viewer_image/raw_image.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
@@ -33,7 +35,14 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   double? _aspect; // width / height in pixels; null = free
 
   late final String _ext = FileTypes.extensionOf(widget.file.path);
-  bool get _canOverwrite => ImageCodec.writable.contains(_ext);
+
+  /// Only formats we can write byte-for-byte as their own format are saved
+  /// in place; the rest are saved as a PNG copy with a .png name.
+  bool get _canOverwrite => ImageCodec.canWrite(_ext);
+
+  /// Camera raws are edited through their embedded preview and only ever
+  /// saved as a JPEG or PNG copy; the raw file is never touched.
+  late final bool _isRaw = RawImages.isRaw(widget.file.path);
 
   @override
   void initState() {
@@ -74,15 +83,16 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     });
   }
 
-  Future<void> _save({required bool asCopy}) async {
+  /// [format] forces the copy's format ('jpg' or 'png').
+  Future<void> _save({required bool asCopy, String? format}) async {
     final source = _source;
     if (source == null) return;
     setState(() => _saving = true);
     try {
-      final ext = _canOverwrite ? _ext : 'png';
+      final ext = format ?? (_canOverwrite ? _ext : 'png');
       final bytes = await ImageCodec.applyAndEncode(source, _edits, ext);
       final File target;
-      if (asCopy || !_canOverwrite) {
+      if (asCopy || !_canOverwrite || format != null) {
         final dir = widget.file.parent.path;
         final base = p.basenameWithoutExtension(widget.file.path);
         var candidate = File(p.join(dir, '${base}_edited.$ext'));
@@ -93,7 +103,13 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       } else {
         target = widget.file;
       }
-      await target.writeAsBytes(bytes, flush: true);
+      if (identical(target, widget.file) && !_isRaw) {
+        // Overwrite via temp file + rename: a failed write can't truncate
+        // the original photo.
+        await writeFileAtomically(target, bytes);
+      } else {
+        await target.writeAsBytes(bytes, flush: true);
+      }
       if (mounted) Navigator.pop(context, target.path);
     } catch (e) {
       if (mounted) {
@@ -160,18 +176,31 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                     })
                 : null,
           ),
-          PopupMenuButton<bool>(
-            enabled: ready && !_edits.isIdentity,
+          PopupMenuButton<String>(
+            // A raw's preview is worth exporting even without edits.
+            enabled: ready && (_isRaw || !_edits.isIdentity),
             tooltip: 'Save',
             icon: Icon(Icons.save_outlined, color: iconColor),
-            onSelected: (asCopy) => _save(asCopy: asCopy),
+            onSelected: (choice) => switch (choice) {
+              'save' => _save(asCopy: false),
+              'jpg' => _save(asCopy: true, format: 'jpg'),
+              'png' => _save(asCopy: true, format: 'png'),
+              _ => _save(asCopy: true),
+            },
             itemBuilder: (_) => [
-              if (_canOverwrite)
-                const PopupMenuItem(value: false, child: Text('Save')),
-              PopupMenuItem(
-                value: true,
-                child: Text(_canOverwrite ? 'Save as copy' : 'Save as PNG copy'),
-              ),
+              if (_isRaw) ...const [
+                PopupMenuItem(value: 'jpg', child: Text('Save as JPEG copy')),
+                PopupMenuItem(value: 'png', child: Text('Save as PNG copy')),
+              ] else ...[
+                if (_canOverwrite)
+                  const PopupMenuItem(value: 'save', child: Text('Save')),
+                PopupMenuItem(
+                  value: 'copy',
+                  child: Text(
+                    _canOverwrite ? 'Save as copy' : 'Save as PNG copy',
+                  ),
+                ),
+              ],
             ],
           ),
         ]),
@@ -225,10 +254,16 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   Widget _buildPreview() {
     final matrix = _edits.colorMatrix();
     final size = _orientedSize;
+    // The preview only needs screen resolution; the edits are applied to the
+    // full-size pixels in [_source].
+    final previewSide = (MediaQuery.sizeOf(context).longestSide *
+            MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(1024, 4096);
     Widget image = RotatedBox(
       quarterTurns: _edits.quarterTurns,
       child: Image(
-        image: ImageCodec.providerFor(widget.file),
+        image: ImageCodec.displayProviderFor(widget.file, previewSide),
         fit: BoxFit.fill,
         gaplessPlayback: true,
       ),
@@ -290,6 +325,24 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     return Column(
       mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
       children: [
+        if (_isRaw)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Editing the embedded preview '
+                    '(${_source!.width} × ${_source!.height}). '
+                    'The raw file is not changed; edits are saved as a copy.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: SegmentedButton<_Tool>(

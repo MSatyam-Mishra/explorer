@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/clear_glass_panel.dart';
@@ -21,9 +22,6 @@ import '../document/layout/doc_render_context.dart';
 import '../document/rtf_writer.dart';
 import '../document/widgets/doc_editor.dart';
 import '../document/widgets/doc_views.dart';
-
-Future<DocModel> _parseInBackground(Uint8List bytes, String ext) =>
-    Isolate.run(() => parseAnyDocument(bytes, ext));
 
 Future<Uint8List> _docxInBackground(DocModel model, Uint8List? original) =>
     Isolate.run(() => writeDocx(model, original: original));
@@ -57,9 +55,15 @@ class WordViewerScreen extends StatefulWidget {
 class _WordViewerScreenState extends State<WordViewerScreen> {
   late File _file;
 
-  /// Bytes of the document as opened; DOCX saves rebuild from this package.
+  /// Bytes [_model] was parsed from. DOCX saves rebuild from this package
+  /// (the model's verbatim spans point into it), so it changes only together
+  /// with the model.
   Uint8List? _originalBytes;
   DocModel? _model;
+
+  /// [_model] holds only the first pages of a long document whose full
+  /// parse is still running: view-only.
+  bool _partial = false;
   DocImageCache? _images;
   String? _error;
   bool _loading = true;
@@ -68,7 +72,12 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   double _layoutProgress = 0;
   int _layoutGen = 0;
   final DocViewController _viewController = DocViewController();
-  Map<DocParagraph, int> _topIndex = {};
+
+  // Derived from the model on first use, not while opening.
+  Map<DocParagraph, int>? _topIndexCache;
+  List<(int, DocParagraph)>? _headingList;
+  Map<DocParagraph, int> get _topIndex =>
+      _topIndexCache ??= _indexParagraphs(_model!);
 
   bool _darkPage = false;
   bool? _printLayout;
@@ -82,10 +91,16 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   Map<DocParagraph, List<DocHighlight>> _highlights = const {};
 
   DocEditorSession? _session;
+  Completer<void>? _editingDone;
 
   /// Format future "Save" writes in, or null when the source can't be
   /// written faithfully (DOC, ODT, WPS, text → "Save as .docx").
   String? _saveFormat;
+
+  /// False when the file holds content its writer can't reproduce (an RTF
+  /// with headers, footers, notes, lists or fields): edits then go to a
+  /// copy instead of replacing it.
+  bool _overwriteAllowed = true;
   Uint8List? _lastSaved;
   bool _createdNewFile = false;
   bool _saving = false;
@@ -99,6 +114,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
 
   @override
   void dispose() {
+    _editingDone?.complete();
+    _editingDone = null;
     _session?.dispose();
     _searchCtrl.dispose();
     _searchFocus.dispose();
@@ -115,19 +132,32 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   Future<void> _load() async {
     try {
       final bytes = await _file.readAsBytes();
-      final model = await _parseInBackground(bytes, _ext);
+      // Long documents arrive in two steps: the first pages (shown at once)
+      // and then the whole model.
+      final model = await parseDocumentInBackground(
+        bytes,
+        _ext,
+        onPreview: (preview) {
+          if (!mounted || _model != null) return;
+          _partial = true;
+          _setModel(preview);
+        },
+      );
       if (!mounted) return;
       _originalBytes = bytes;
+      _partial = false;
       _saveFormat = _overwriteFormatFor(model.format, _ext);
-      _setModel(model);
-      if (model.warnings.contains('plainText') && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Showing the text only — formatting in this file isn\'t supported.',
-            ),
-          ),
-        );
+      _overwriteAllowed = !model.warnings.contains(DocModel.warnUnwritable);
+      _setModel(model, keepLayout: true);
+      final note = model.warnings.contains('plainText')
+          ? 'Showing the text only — formatting in this file isn\'t supported.'
+          : model.warnings.contains(DocModel.warnEncoding)
+          ? 'Some text uses an encoding that can\'t be shown here (shown as �).'
+          : null;
+      if (note != null && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(note)));
       }
     } on DocumentEncryptedException {
       if (!mounted) return;
@@ -159,15 +189,19 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     return null;
   }
 
-  void _setModel(DocModel model) {
+  /// Shows [model]. With [keepLayout] the current pages stay up until the
+  /// new layout's first page is ready (the full model replacing its
+  /// preview lays out the same first pages).
+  void _setModel(DocModel model, {bool keepLayout = false}) {
     setState(() {
       _model = model;
       _images = DocImageCache(model);
       _loading = false;
       _error = null;
-      _layout = null;
+      if (!keepLayout) _layout = null;
       _layoutProgress = 0;
-      _topIndex = _indexParagraphs(model);
+      _topIndexCache = null;
+      _headingList = null;
       _matches = [];
       _matchIndex = -1;
       _highlights = const {};
@@ -176,6 +210,31 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       _runSearch(_searchCtrl.text);
     }
     _relayout();
+  }
+
+  /// Headings for the outline, collected after the first frame so opening
+  /// doesn't wait for them (empty until then).
+  List<(int, DocParagraph)> _headings() {
+    final cached = _headingList;
+    if (cached != null) return cached;
+    final model = _model;
+    if (model == null || _partial) return const [];
+    _headingList = const [];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_model, model)) return;
+      final out = <(int, DocParagraph)>[];
+      for (var i = 0; i < model.blocks.length; i++) {
+        final b = model.blocks[i];
+        if (b is DocParagraph &&
+            b.headingLevel != null &&
+            b.plainText.trim().isNotEmpty) {
+          out.add((i, b));
+        }
+      }
+      if (out.isEmpty) return;
+      setState(() => _headingList = out);
+    });
+    return const [];
   }
 
   static Map<DocParagraph, int> _indexParagraphs(DocModel m) {
@@ -201,20 +260,44 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     onLink: _openLink,
   );
 
+  /// Paginates the model a slice at a time between frames, showing the
+  /// first page as soon as it's done and further pages as they're ready.
   Future<void> _relayout() async {
     final model = _model;
     if (model == null) return;
     final gen = ++_layoutGen;
-    final result = await layoutDocument(
+    final pager = DocPaginator(
       model,
       DocRenderContext(model: model, images: _images!),
-      onProgress: (v) {
-        if (mounted && gen == _layoutGen) setState(() => _layoutProgress = v);
-      },
-      cancelled: () => !mounted || gen != _layoutGen,
     );
-    if (!mounted || gen != _layoutGen) return;
-    setState(() => _layout = result);
+    var shown = -1;
+    final sinceShown = Stopwatch()..start();
+    while (true) {
+      final done = pager.step(Duration(milliseconds: shown < 0 ? 8 : 12));
+      if (!mounted || gen != _layoutGen) return;
+      final pages = pager.result.pages.length;
+      if (done ||
+          (pages > 0 &&
+              pages != shown &&
+              (shown < 0 || sinceShown.elapsedMilliseconds > 300))) {
+        shown = pages;
+        sinceShown.reset();
+        // A preview's pages are only the start of the document.
+        if (done && _partial) pager.result.complete = false;
+        setState(() {
+          _layout = pager.result;
+          _layoutProgress = pager.progress;
+        });
+      }
+      if (done) return;
+      // Let a frame (scrolling, the first pages) through between slices.
+      await Future<void>.delayed(Duration.zero);
+      // Pause while the editor is up so typing stays smooth.
+      while (_editingDone != null) {
+        await _editingDone!.future;
+      }
+      if (!mounted || gen != _layoutGen) return;
+    }
   }
 
   void _openLink(String url) => showLinkSheet(context, url);
@@ -300,10 +383,24 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
 
   bool get _dirty => _session?.dirty ?? false;
 
+  /// What "Save" means here: replace the file, or — when that would lose
+  /// content or the format can't be written — a copy or a new .docx.
+  _SaveKind get _primarySave => _saveFormat == null
+      ? _SaveKind.asDocx
+      : (_overwriteAllowed ? _SaveKind.overwrite : _SaveKind.copy);
+
+  String get _primarySaveLabel => switch (_primarySave) {
+    _SaveKind.overwrite => 'Save',
+    _SaveKind.copy => 'Save as copy',
+    _SaveKind.asDocx => 'Save as .docx',
+  };
+
   void _startEditing() {
     final model = _model;
-    if (model == null) return;
+    if (model == null || _partial) return;
     final session = DocEditorSession(model)..onDirty = () => setState(() {});
+    _lastSaved = null;
+    _editingDone = Completer<void>();
     setState(() {
       _session = session;
       _searchOpen = false;
@@ -312,6 +409,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       if (session.hasPreservedObjects)
         'Tables, pictures and other objects are kept but can\'t be edited here.',
       if (_saveFormat == null) 'Your edits will be saved as a new .docx file.',
+      if (_saveFormat != null && !_overwriteAllowed)
+        'This file has headers, footers, notes, lists or fields this editor '
+            'can\'t keep, so your edits will be saved as a copy.',
     ];
     if (notes.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -329,27 +429,36 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     if (session.dirty) {
       final choice = await askUnsavedChanges(
         context,
-        saveLabel: _saveFormat == null ? 'Save as .docx' : 'Save',
+        saveLabel: _primarySaveLabel,
       );
       if (!mounted || choice == UnsavedChoice.cancel) return;
       if (choice == UnsavedChoice.save) {
-        await _save(
-          _saveFormat == null ? _SaveKind.asDocx : _SaveKind.overwrite,
-        );
+        await _save(_primarySave);
         if (!mounted || session.dirty) return;
       }
     }
     final saved = _lastSaved;
     final savedFormat = _saveFormat;
     final changed = session.changed;
+    final edited = changed && saved != null ? session.snapshot() : null;
     session.dispose();
     setState(() => _session = null);
-    if (changed && saved != null && savedFormat != null) {
-      // Show exactly what is on disk now.
+    _editingDone?.complete();
+    _editingDone = null;
+    if (edited != null && savedFormat != null) {
+      // Show exactly what is on disk now; later DOCX saves build on it.
+      DocModel model;
       try {
-        final model = await _parseInBackground(saved, savedFormat);
-        if (mounted) _setModel(model);
-      } catch (_) {}
+        model = await parseDocumentInBackground(saved!, savedFormat);
+        _originalBytes = saved;
+      } catch (_) {
+        // Keep the edits on screen; saves keep building on the bytes the
+        // session started from, which [edited] still refers to.
+        model = edited;
+      }
+      if (!mounted) return;
+      _overwriteAllowed = !model.warnings.contains(DocModel.warnUnwritable);
+      _setModel(model);
     }
   }
 
@@ -359,6 +468,7 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     setState(() => _saving = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
+      final revision = session.revision;
       final edited = session.snapshot();
       final format = kind == _SaveKind.asDocx
           ? 'docx'
@@ -367,6 +477,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       if (format == 'rtf') {
         out = await _rtfInBackground(edited);
       } else {
+        // The session's model was parsed from _originalBytes; it stays the
+        // base for every save until the session ends.
         out = await _docxInBackground(
           edited,
           edited.docx != null ? _originalBytes : null,
@@ -383,12 +495,14 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       }
       await writeFileSafely(target, out);
       if (!mounted) return;
-      session.dirty = false;
+      // Edits typed while saving aren't in [out].
+      if (session.revision == revision) session.dirty = false;
       if (target.path != _file.path) _createdNewFile = true;
       if (kind == _SaveKind.asDocx) {
         // Continue working on the new .docx.
         _file = target;
         _saveFormat = 'docx';
+        _overwriteAllowed = true;
       }
       if (kind != _SaveKind.copy) _lastSaved = out;
       setState(() {});
@@ -406,13 +520,11 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     if (_dirty) {
       final choice = await askUnsavedChanges(
         context,
-        saveLabel: _saveFormat == null ? 'Save as .docx' : 'Save',
+        saveLabel: _primarySaveLabel,
       );
       if (!mounted || choice == UnsavedChoice.cancel) return;
       if (choice == UnsavedChoice.save) {
-        await _save(
-          _saveFormat == null ? _SaveKind.asDocx : _SaveKind.overwrite,
-        );
+        await _save(_primarySave);
         if (!mounted || _dirty) return;
       }
     }
@@ -422,9 +534,37 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   // ---------------------------------------------------------------------------
   // Menu actions
 
+  final GlobalKey _moreKey = GlobalKey();
+
+  /// Shares the file. iPad needs an anchor for the share popover: the More
+  /// button the action came from, else the top-right corner.
+  Future<void> _share() async {
+    Rect origin;
+    final box = _moreKey.currentContext?.findRenderObject();
+    if (box is RenderBox && box.attached && box.hasSize) {
+      origin = box.localToGlobal(Offset.zero) & box.size;
+    } else {
+      final size = MediaQuery.sizeOf(context);
+      origin = Rect.fromLTWH(
+        size.width - 56,
+        MediaQuery.paddingOf(context).top,
+        48,
+        48,
+      );
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(_file.path)], sharePositionOrigin: origin),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Couldn\'t share: $e')));
+    }
+  }
+
   Future<void> _convertToDocx() async {
     final model = _model;
-    if (model == null) return;
+    if (model == null || _partial) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
       final out = await _docxInBackground(
@@ -433,7 +573,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       );
       final target = await uniqueSibling(_file, 'docx');
       await writeFileSafely(target, out);
-      _createdNewFile = true;
+      // Rebuild so PopScope routes Back through _onPop, which pops `true`
+      // and makes the explorer list the new file.
+      if (mounted) setState(() => _createdNewFile = true);
       messenger.showSnackBar(
         SnackBar(content: Text('Saved ${p.basename(target.path)}')),
       );
@@ -448,7 +590,7 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     final stats = DocStats.of(model);
     final size = _originalBytes?.length ?? 0;
     final pg = model.page;
-    final pages = _layout?.pages.length;
+    final pages = _layout?.complete == true ? _layout!.pages.length : null;
     String cm(double pt) => (pt / 72 * 2.54).toStringAsFixed(1);
     final rows = <(String, String)>[
       ('Name', p.basename(_file.path)),
@@ -524,21 +666,6 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     _ => 'Plain text',
   };
 
-  List<(int, DocParagraph)> _headings() {
-    final model = _model;
-    if (model == null) return const [];
-    final out = <(int, DocParagraph)>[];
-    for (var i = 0; i < model.blocks.length; i++) {
-      final b = model.blocks[i];
-      if (b is DocParagraph &&
-          b.headingLevel != null &&
-          b.plainText.trim().isNotEmpty) {
-        out.add((i, b));
-      }
-    }
-    return out;
-  }
-
   void _showOutlineSheet() {
     final headings = _headings();
     showModalBottomSheet<void>(
@@ -581,7 +708,7 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
           ).showSnackBar(const SnackBar(content: Text('Text copied')));
         }
       case 'share':
-        await SharePlus.instance.share(ShareParams(files: [XFile(_file.path)]));
+        await _share();
       case 'convert':
         await _convertToDocx();
       case 'open':
@@ -615,7 +742,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   Widget _viewActions(BuildContext context, bool compact) {
     final color = ClearGlassForeground.icon(context);
     final model = _model;
-    final ready = model != null && _error == null;
+    // Not while only the first pages of a long document are in.
+    final ready = model != null && _error == null && !_partial;
     final split = AdaptiveSplitView.isSplit(context);
     return ExplorerTopBar.actions(context, [
       if (ready)
@@ -637,6 +765,7 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
         ),
       if (ready)
         PopupMenuButton<String>(
+          key: _moreKey,
           tooltip: 'More',
           icon: Icon(Icons.more_vert, color: color),
           onSelected: _onMenu,
@@ -703,7 +832,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   Widget _editActions(BuildContext context) {
     final color = ClearGlassForeground.icon(context);
     final options = <(_SaveKind, String)>[
-      if (_saveFormat != null) (_SaveKind.overwrite, 'Save'),
+      if (_saveFormat != null && _overwriteAllowed)
+        (_SaveKind.overwrite, 'Save'),
       if (_saveFormat != null) (_SaveKind.copy, 'Save as copy'),
       if (_saveFormat != 'docx') (_SaveKind.asDocx, 'Save as .docx'),
     ];
@@ -745,7 +875,8 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   Widget _body(BuildContext context) {
     final top = DockedGlossyTopBar.contentTopInset(context);
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      // First frame: a page outline right away while the file is parsed.
+      return _PageSkeleton(topPadding: top, darkPage: _darkPage);
     }
     if (_error != null) {
       return Padding(
@@ -771,8 +902,13 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     Widget view;
     if (_printLayout ?? true) {
       final layout = _layout;
-      view = layout == null
-          ? _LayoutProgress(progress: _layoutProgress)
+      view = layout == null || layout.pages.isEmpty
+          ? _PageSkeleton(
+              topPadding: top + searchHeight,
+              page: _model!.page,
+              progress: _layoutProgress,
+              darkPage: _darkPage,
+            )
           : DocPagesView(
               result: layout,
               ctx: ctx,
@@ -827,29 +963,102 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   }
 }
 
-class _LayoutProgress extends StatelessWidget {
-  const _LayoutProgress({required this.progress});
+/// Shown from the very first frame until the first page is laid out: an
+/// empty page of the document's size with placeholder text lines, placed
+/// like the first page of [DocPagesView], so opening never starts on a bare
+/// spinner.
+class _PageSkeleton extends StatelessWidget {
+  const _PageSkeleton({
+    required this.topPadding,
+    this.page = DocPageSetup.letter,
+    this.progress = 0,
+    this.darkPage = false,
+  });
+
+  final double topPadding;
+  final DocPageSetup page;
   final double progress;
+  final bool darkPage;
+
+  // Line widths of a few paragraphs (fractions of the text width; 0 = gap).
+  static const _pattern = [
+    0.55, 0, 1.0, 1.0, 1.0, 0.7, 0, 1.0, 1.0, 0.85, 0, //
+    1.0, 1.0, 1.0, 1.0, 0.4, 0, 0.45, 0, 1.0, 1.0, 0.9,
+  ];
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 160,
-            child: LinearProgressIndicator(
-              value: progress > 0 ? progress : null,
+    final shadow = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0x66000000)
+        : const Color(0x33000000);
+    final paper = darkPage ? const Color(0xFF1F1F22) : Colors.white;
+    final ink = darkPage ? const Color(0x1FFFFFFF) : const Color(0x12000000);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final readable = math.min(c.maxWidth - 24, 900.0);
+        final scale = math.max(0.05, readable / page.width);
+        final w = page.width * scale;
+        final h = page.height * scale;
+        final lineGap = 11 * 1.9 * scale;
+        final bottom = h - page.marginBottom * scale;
+        final bars = <Widget>[];
+        var y = page.marginTop * scale;
+        for (var i = 0; y + lineGap < bottom; i++) {
+          final f = _pattern[i % _pattern.length];
+          if (f > 0) {
+            bars.add(
+              Positioned(
+                left: page.marginLeft * scale,
+                top: y,
+                width: page.contentWidth * scale * f,
+                height: lineGap * 0.45,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: ink,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            );
+          }
+          y += lineGap;
+        }
+        return Stack(
+          children: [
+            Positioned(
+              top: topPadding + 16,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  width: w,
+                  height: h,
+                  decoration: BoxDecoration(
+                    color: paper,
+                    boxShadow: [
+                      BoxShadow(
+                        color: shadow,
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Stack(children: bars),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Laying out pages…',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
-      ),
+            Positioned(
+              top: topPadding,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                value: progress > 0 ? progress : null,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:explorer/core/theme/app_color_theme.dart';
 import 'package:explorer/core/theme/explorer_theme_extension.dart';
+import 'package:explorer/shared/liquid_glass/on_demand_liquid_glass_view.dart';
 import 'package:explorer/shared/widgets/explorer_screen_background.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -192,12 +193,10 @@ class ExplorerLiquidGlassLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = ExplorerLiquidGlass.styleOf(context);
-    return LiquidGlassView(
+    return OnDemandLiquidGlassView(
       controller: controller,
       pixelRatio: pixelRatio ?? style.pixelRatio,
-      realTimeCapture: realTimeCapture,
-      useSync: true,
-      refreshRate: LiquidGlassRefreshRate.medium,
+      autoCapture: realTimeCapture,
       backgroundWidget: background,
       children: lenses,
     );

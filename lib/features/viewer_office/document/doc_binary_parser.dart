@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:explorer/core/formats/cfb_reader.dart';
@@ -13,8 +14,13 @@ class DocumentEncryptedException implements Exception {
 }
 
 /// Parses Word 97–2003 binary documents (`.doc`, `.dot`, and `.wps` files
-/// that are really Word documents) from their OLE2 container.
-DocModel parseDocBytes(Uint8List bytes, {String format = 'doc'}) {
+/// that are really Word documents) from their OLE2 container. [onPreview]
+/// receives a long document's first pages' blocks early (at most once).
+DocModel parseDocBytes(
+  Uint8List bytes, {
+  String format = 'doc',
+  void Function(DocModel preview)? onPreview,
+}) {
   final cfb = CfbReader(bytes);
   if (cfb.find('EncryptedPackage') != null) {
     throw const DocumentEncryptedException();
@@ -23,7 +29,7 @@ DocModel parseDocBytes(Uint8List bytes, {String format = 'doc'}) {
   if (wd == null) {
     throw const FormatException('Not a Word document (no WordDocument stream)');
   }
-  return _DocParser(cfb, wd, format).parse();
+  return _DocParser(cfb, wd, format, onPreview).parse();
 }
 
 class _Sprm {
@@ -183,12 +189,14 @@ const _icoColors = [
 ];
 
 class _DocParser {
-  _DocParser(this.cfb, this.wd, this.format) : bd = ByteData.sublistView(wd);
+  _DocParser(this.cfb, this.wd, this.format, this.onPreview)
+    : bd = ByteData.sublistView(wd);
 
   final CfbReader cfb;
   final Uint8List wd;
   final ByteData bd;
   final String format;
+  final void Function(DocModel preview)? onPreview;
   Uint8List table = Uint8List(0);
   late ByteData tb;
   Uint8List? data;
@@ -281,18 +289,26 @@ class _DocParser {
     if (lcbClx == 0 || fcClx + lcbClx > table.length) return;
     var i = fcClx;
     final end = fcClx + lcbClx;
+    // Everything is bounded by the Clx's own size: a damaged one must not
+    // loop forever or allocate millions of pieces.
     while (i < end) {
       final type = table[i];
       if (type == 1) {
+        // Prc: cbGrpprl is non-negative and must fit.
+        if (i + 3 > end) return;
         final cb = tb.getInt16(i + 1, Endian.little);
+        if (cb < 0 || i + 3 + cb > end) return;
         i += 3 + cb;
       } else if (type == 2) {
-        final lcb = tu32(i + 1);
+        if (i + 5 > end) return;
         final plc = i + 5;
+        final lcb = math.min(tu32(i + 1), end - plc);
         final n = (lcb - 4) ~/ 12;
+        if (n <= 0) return;
         for (var k = 0; k < n; k++) {
           final cpStart = tu32(plc + k * 4);
           final cpEnd = tu32(plc + (k + 1) * 4);
+          if (cpEnd <= cpStart) continue;
           final pcd = plc + (n + 1) * 4 + k * 8;
           final fcRaw = tu32(pcd + 2);
           final compressed = (fcRaw & 0x40000000) != 0;
@@ -330,9 +346,14 @@ class _DocParser {
     return sb.toString();
   }
 
+  _Piece? _lastPiece;
+
   _Piece? _pieceAt(int cp) {
+    // Text is walked in order, so the previous piece almost always matches.
+    final last = _lastPiece;
+    if (last != null && cp >= last.cpStart && cp < last.cpEnd) return last;
     for (final p in pieces) {
-      if (cp >= p.cpStart && cp < p.cpEnd) return p;
+      if (cp >= p.cpStart && cp < p.cpEnd) return _lastPiece = p;
     }
     return null;
   }
@@ -459,8 +480,11 @@ class _DocParser {
   }
 
   void _readLists(int fcLst, int lcbLst, int fcLfo, int lcbLfo) {
-    if (lcbLst == 0 || fcLst + lcbLst > table.length) return;
-    final cLst = tb.getInt16(fcLst, Endian.little);
+    if (lcbLst < 2 || fcLst + lcbLst > table.length) return;
+    // Counts are clamped to what the structures can actually hold.
+    final cLst = tb
+        .getInt16(fcLst, Endian.little)
+        .clamp(0, math.max(0, (lcbLst - 2) ~/ 28));
     final lstIds = <int>[];
     final simple = <bool>[];
     var pos = fcLst + 2;
@@ -492,8 +516,8 @@ class _DocParser {
       }
       lists[lstIds[i]] = levels;
     }
-    if (lcbLfo == 0 || fcLfo + lcbLfo > table.length) return;
-    final lfoMac = ti32(fcLfo);
+    if (lcbLfo < 4 || fcLfo + lcbLfo > table.length) return;
+    final lfoMac = ti32(fcLfo).clamp(0, (lcbLfo - 4) ~/ 16);
     for (var i = 0; i < lfoMac; i++) {
       lfoLsid.add(ti32(fcLfo + 4 + i * 16));
     }
@@ -910,9 +934,21 @@ class _DocParser {
         continue;
       }
       if (table != null) flushTable();
-      if (pp.pageBreakBefore) blocks.add(DocPageBreak());
+      if (pp.pageBreakBefore) blocks.add(DocPageBreak(joinNext: true));
       if (para != null) blocks.addAll(para);
-      if (ch == 0x0C) blocks.add(DocPageBreak());
+      // A page break character; the paragraph's text continues after it.
+      if (ch == 0x0C) blocks.add(DocPageBreak(joinNext: true));
+      final preview = onPreview;
+      if (preview != null &&
+          !_previewSent &&
+          table == null &&
+          blocks.length >= 60) {
+        _previewSent = true;
+        // Only worth it when a good part of the text is still to come.
+        if (text.length - cp > 20000) {
+          preview(_model(List.of(blocks), Map.of(images)));
+        }
+      }
     }
     flushTable();
     // Column widths must match the widest row.
@@ -925,7 +961,12 @@ class _DocParser {
         if (b.columnWidths.length != max) b.columnWidths = [];
       }
     }
+    return _model(blocks, images);
+  }
 
+  bool _previewSent = false;
+
+  DocModel _model(List<DocBlock> blocks, Map<String, DocImageData> images) {
     final normal = _runStyle(_styleChar(0));
     final headings = <int, DocRunStyle>{};
     for (var l = 1; l <= 6; l++) {
@@ -963,6 +1004,19 @@ class _DocParser {
     var lastRun = -1;
     _FcRun? run;
     _CharProps props = styleChar;
+    _CharProps? styleOf;
+    var style = DocRunStyle.plain;
+
+    // Text of the current run; appending to DocText.text per character
+    // would be quadratic in the paragraph length.
+    final buf = StringBuffer();
+    DocRunStyle? bufStyle;
+    String? bufLink;
+    void flush() {
+      if (buf.isEmpty) return;
+      inlines.add(DocText(buf.toString(), bufStyle!, link: bufLink));
+      buf.clear();
+    }
 
     for (var cp = start; cp < end; cp++) {
       final ch = text.codeUnitAt(cp);
@@ -1006,13 +1060,19 @@ class _DocParser {
       }
       if (props.deleted || props.vanish) continue;
 
-      final style = _runStyle(props);
+      if (!identical(props, styleOf)) {
+        style = _runStyle(props);
+        styleOf = props;
+      }
       String? out;
       switch (ch) {
         case 0x01:
           if (props.special && props.picLocation >= 0) {
             final img = _picture(props.picLocation);
-            if (img != null) inlines.add(img);
+            if (img != null) {
+              flush();
+              inlines.add(img);
+            }
           }
           continue;
         case 0x08:
@@ -1025,6 +1085,7 @@ class _DocParser {
           continue;
         case 0x02:
           _footnote++;
+          flush();
           inlines.add(
             DocObject(
               kind: 'Footnote',
@@ -1051,13 +1112,14 @@ class _DocParser {
             out = String.fromCharCode(ch);
           }
       }
-      final last = inlines.isEmpty ? null : inlines.last;
-      if (last is DocText && last.style == style && last.link == link) {
-        last.text += out;
-      } else {
-        inlines.add(DocText(out, style, link: link));
+      if (buf.isNotEmpty && (bufStyle != style || bufLink != link)) flush();
+      if (buf.isEmpty) {
+        bufStyle = style;
+        bufLink = link;
       }
+      buf.write(out);
     }
+    flush();
 
     final heading = _headingOf(pp.istd, pp);
     DocListInfo? list;

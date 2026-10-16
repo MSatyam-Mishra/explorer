@@ -11,15 +11,28 @@ import 'docx_parser.dart' show loadImageData;
 /// Parses OpenDocument text (`.odt`, `.ott`) or flat XML (`.fodt`).
 DocModel parseOdtBytes(Uint8List bytes) {
   if (OfficePackage.isZip(bytes)) {
-    final pkg = OfficePackage.decode(bytes);
-    final content = pkg.xml('content.xml');
-    if (content == null) {
-      throw const FormatException('This OpenDocument file has no content.');
-    }
-    return _OdtParser(pkg, content, pkg.xml('styles.xml')).parse();
+    return parseOdtPackage(OfficePackage.decode(bytes));
   }
   final doc = XmlDocument.parse(decodeXmlBytes(bytes));
   return _OdtParser(null, doc, doc).parse();
+}
+
+/// Parses an OpenDocument text package. The body is pull-parsed; for a long
+/// document [onPreview] receives the first pages' blocks early (at most
+/// once).
+DocModel parseOdtPackage(
+  OfficePackage pkg, {
+  void Function(DocModel preview)? onPreview,
+}) {
+  final content = pkg.text('content.xml');
+  if (content == null) {
+    throw const FormatException('This OpenDocument file has no content.');
+  }
+  return _OdtParser(
+    pkg,
+    null,
+    pkg.xml('styles.xml'),
+  ).parseStreaming(content, onPreview);
 }
 
 class _TextProps {
@@ -137,7 +150,7 @@ class _OdtParser {
   _OdtParser(this.pkg, this.content, this.styles);
 
   final OfficePackage? pkg;
-  final XmlDocument content;
+  final XmlDocument? content;
   final XmlDocument? styles;
 
   final Map<String, _Style> _styles = {};
@@ -151,19 +164,21 @@ class _OdtParser {
   int _imageNo = 0;
   int _noteNo = 0;
 
+  void _readStylesPart() {
+    final sroot = styles?.rootElement;
+    if (sroot == null) return;
+    _readFontFaces(Ox.child(sroot, 'font-face-decls'));
+    _readStyles(Ox.child(sroot, 'styles'), _styles);
+    _readStyles(Ox.child(sroot, 'automatic-styles'), _styles);
+    _readPage(sroot);
+  }
+
   DocModel parse() {
     final sroot = styles?.rootElement;
-    final croot = content.rootElement;
-    for (final root in [sroot, croot]) {
-      if (root == null) continue;
-      _readFontFaces(Ox.child(root, 'font-face-decls'));
-    }
-    if (sroot != null) {
-      _readStyles(Ox.child(sroot, 'styles'), _styles);
-      _readStyles(Ox.child(sroot, 'automatic-styles'), _styles);
-      _readPage(sroot);
-    }
+    final croot = content!.rootElement;
+    _readStylesPart();
     if (!identical(sroot, croot)) {
+      _readFontFaces(Ox.child(croot, 'font-face-decls'));
       _readStyles(Ox.child(croot, 'styles'), _styles);
     }
     _readStyles(Ox.child(croot, 'automatic-styles'), _autoStyles);
@@ -173,7 +188,56 @@ class _OdtParser {
       throw const FormatException('This OpenDocument file has no text body.');
     }
     final base = _baseRun();
-    final blocks = _blocks(text, base, const []);
+    return _model(_blocks(text, base, const []), _images, base);
+  }
+
+  /// Like [parse] for a package's `content.xml`, pull-parsing the body.
+  DocModel parseStreaming(
+    String contentXml,
+    void Function(DocModel preview)? onPreview,
+  ) {
+    _readStylesPart();
+    final base = _baseRun();
+    final blocks = <DocBlock>[];
+    var sawText = false;
+    var previewSent = false;
+    streamXmlChildren(
+      contentXml,
+      const ['body', 'text'],
+      (e, start, end) {
+        sawText = true;
+        _block(e, base, const [], blocks);
+        if (onPreview != null && !previewSent && blocks.length >= 40) {
+          previewSent = true;
+          // Only worth it when a good part of the body is still unparsed.
+          if (contentXml.length - end > 150000) {
+            onPreview(_model(List.of(blocks), Map.of(_images), base));
+          }
+        }
+      },
+      collect: const {'font-face-decls', 'styles', 'automatic-styles'},
+      onCollected: (e) {
+        switch (e.name.local) {
+          case 'font-face-decls':
+            _readFontFaces(e);
+          case 'styles':
+            _readStyles(e, _styles);
+          case 'automatic-styles':
+            _readStyles(e, _autoStyles);
+        }
+      },
+    );
+    if (!sawText && !contentXml.contains(RegExp(r':text[\s/>]'))) {
+      throw const FormatException('This OpenDocument file has no text body.');
+    }
+    return _model(blocks, _images, base);
+  }
+
+  DocModel _model(
+    List<DocBlock> blocks,
+    Map<String, DocImageData> images,
+    DocRunStyle base,
+  ) {
     final headings = <int, DocRunStyle>{};
     for (var l = 1; l <= 6; l++) {
       final st = _findStyle('Heading_20_$l') ?? _findStyle('Heading $l');
@@ -186,7 +250,7 @@ class _OdtParser {
     return DocModel(
       format: 'odt',
       blocks: blocks.isEmpty ? [DocParagraph()] : blocks,
-      images: _images,
+      images: images,
       page: _page,
       baseStyle: base,
       headingStyles: headings,
@@ -304,7 +368,8 @@ class _OdtParser {
                   _ => 'decimal',
                 },
                 Ox.attr(l, 'num-prefix') ?? '',
-                Ox.attr(l, 'num-suffix') ?? '.',
+                // ODF's default suffix is empty ("1", "(a)" styles).
+                Ox.attr(l, 'num-suffix') ?? '',
                 '',
                 int.tryParse(Ox.attr(l, 'start-value') ?? '1') ?? 1,
               );
@@ -469,34 +534,46 @@ class _OdtParser {
   ) {
     final out = <DocBlock>[];
     for (final e in Ox.elements(container)) {
-      switch (e.name.local) {
-        case 'p':
-        case 'h':
-          _paragraph(e, base, lists, out);
-        case 'list':
-          _list(e, base, lists, out);
-        case 'table':
-          final t = _table(e, base);
-          if (t != null) out.add(t);
-        case 'section':
-        case 'index-body':
-        case 'table-of-content':
-        case 'alphabetical-index':
-        case 'illustration-index':
-        case 'object-index':
-        case 'user-index':
-        case 'bibliography':
-        case 'table-index':
-        case 'deletion':
-          if (e.name.local != 'deletion') {
-            out.addAll(_blocks(e, base, lists));
-          }
-        case 'soft-page-break':
-          break;
-      }
+      _block(e, base, lists, out);
     }
     return out;
   }
+
+  void _block(
+    XmlElement e,
+    DocRunStyle base,
+    List<_ListCtx> lists,
+    List<DocBlock> out,
+  ) {
+    switch (e.name.local) {
+      case 'p':
+      case 'h':
+        _paragraph(e, base, lists, out);
+      case 'list':
+        _list(e, base, lists, out);
+      case 'table':
+        final t = _table(e, base);
+        if (t != null) out.add(t);
+      case 'section':
+      case 'index-body':
+      case 'table-of-content':
+      case 'alphabetical-index':
+      case 'illustration-index':
+      case 'object-index':
+      case 'user-index':
+      case 'bibliography':
+      case 'table-index':
+        out.addAll(_blocks(e, base, lists));
+      case 'deletion':
+      case 'soft-page-break':
+        break;
+    }
+  }
+
+  /// Counters of top-level lists by `xml:id`, and of the last top-level
+  /// list per list style, for lists that continue an earlier one.
+  final Map<String, List<int?>> _listById = {};
+  final Map<String?, List<int?>> _lastListByStyle = {};
 
   void _list(
     XmlElement list,
@@ -508,7 +585,28 @@ class _OdtParser {
         Ox.attr(list, 'style-name') ??
         (parents.isEmpty ? null : parents.last.style);
     final ctx = _ListCtx(styleName, parents.length);
-    if (parents.isNotEmpty) ctx.counters = parents.last.counters;
+    if (parents.isNotEmpty) {
+      ctx.counters = parents.last.counters;
+    } else {
+      // A list interrupted by a plain paragraph or table is saved as two
+      // lists, the second continuing the first's numbering.
+      final continues = Ox.attr(list, 'continue-list');
+      final reused = continues != null
+          ? _listById[continues]
+          : (Ox.attr(list, 'continue-numbering') == 'true'
+                ? _lastListByStyle[styleName]
+                : null);
+      if (reused != null) {
+        // Sub-levels restart.
+        for (var k = 1; k < reused.length; k++) {
+          reused[k] = null;
+        }
+        ctx.counters = reused;
+      }
+      final id = Ox.attr(list, 'id');
+      if (id != null) _listById[id] = ctx.counters;
+      _lastListByStyle[styleName] = ctx.counters;
+    }
     final chain = [...parents, ctx];
     for (final item in Ox.elements(list)) {
       if (item.name.local != 'list-item' && item.name.local != 'list-header') {
@@ -516,6 +614,7 @@ class _OdtParser {
       }
       ctx.header = item.name.local == 'list-header';
       ctx.firstInItem = true;
+      ctx.startValue = int.tryParse(Ox.attr(item, 'start-value') ?? '');
       out.addAll(_blocks(item, base, chain));
     }
   }
@@ -554,17 +653,20 @@ class _OdtParser {
         final bullet = def?.bullet ?? true;
         final counters = ctx.counters;
         while (counters.length <= level) {
-          counters.add(0);
+          counters.add(null);
         }
-        counters[level] = counters[level] == 0
-            ? (def?.start ?? 1)
-            : counters[level] + 1;
+        final n =
+            ctx.takeStartValue() ??
+            (counters[level] == null
+                ? (def?.start ?? 1)
+                : counters[level]! + 1);
+        counters[level] = n;
         for (var k = level + 1; k < counters.length; k++) {
-          counters[k] = 0;
+          counters[k] = null;
         }
         final label = bullet
             ? (def?.bulletChar ?? '•')
-            : '${def?.prefix ?? ''}${formatListNumber(counters[level], def?.format ?? 'decimal')}${def?.suffix ?? '.'}';
+            : '${def?.prefix ?? ''}${formatListNumber(n, def?.format ?? 'decimal')}${def?.suffix ?? '.'}';
         list = DocListInfo(
           ordered: !bullet,
           level: level,
@@ -580,7 +682,9 @@ class _OdtParser {
       left = 36.0 * (list.level + 1);
       first = -18;
     }
-    if (pp.breakBefore == true && out.isNotEmpty) out.add(DocPageBreak());
+    if (pp.breakBefore == true && out.isNotEmpty) {
+      out.add(DocPageBreak(joinNext: true));
+    }
     out.add(
       DocParagraph(
         inlines: inlines,
@@ -835,7 +939,18 @@ class _ListCtx {
   _ListCtx(this.style, this.depth);
   final String? style;
   final int depth;
-  List<int> counters = [];
+
+  /// Current number per level; null until the level's first item.
+  List<int?> counters = [];
   bool header = false;
   bool firstInItem = true;
+
+  /// `text:start-value` of the current item, applied to its first paragraph.
+  int? startValue;
+
+  int? takeStartValue() {
+    final v = startValue;
+    startValue = null;
+    return v;
+  }
 }

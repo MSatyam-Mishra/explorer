@@ -21,6 +21,7 @@ class DocEditorSession {
     );
     _sub = controller.document.changes.listen((_) {
       changed = true;
+      revision++;
       if (!dirty) {
         dirty = true;
         onDirty?.call();
@@ -33,6 +34,10 @@ class DocEditorSession {
   late final QuillController controller;
   late final StreamSubscription<DocChange> _sub;
   bool dirty = false;
+
+  /// Counts edits; a save clears [dirty] only if nothing changed since its
+  /// [snapshot] was taken.
+  int revision = 0;
 
   /// Whether anything was edited during the session (survives saving).
   bool changed = false;

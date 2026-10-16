@@ -52,8 +52,9 @@ class CfbReader {
     return reader;
   }
 
-  int _u32(int offset) =>
-      ByteData.sublistView(_data, offset, offset + 4).getUint32(0, Endian.little);
+  late final ByteData _view = ByteData.sublistView(_data);
+
+  int _u32(int offset) => _view.getUint32(offset, Endian.little);
 
   int _sectorOffset(int sector) => (sector + 1) * _sectorSize;
 
@@ -65,20 +66,32 @@ class CfbReader {
     var difatSector = header.getUint32(0x44, Endian.little);
     final numDifat = header.getUint32(0x48, Endian.little);
 
+    // Header counts are untrusted (up to 2^32). Every real sector lies inside
+    // the file, so bound all loops and tables by the number of whole sectors
+    // after the header; a corrupt or hostile file then costs at most time and
+    // memory linear in its own size.
+    final maxSectors = _data.length ~/ _sectorSize - 1;
+    final fatLimit = numFatSectors < maxSectors ? numFatSectors : maxSectors;
+
     // DIFAT: 109 entries in the header, the rest chained through sectors.
+    // Out-of-range or repeated FAT sectors keep their slot (so later FAT
+    // indices don't shift) but contribute only free entries.
     final fatSectors = <int>[];
-    for (var i = 0; i < 109 && fatSectors.length < numFatSectors; i++) {
+    for (var i = 0; i < 109 && fatSectors.length < fatLimit; i++) {
       final s = header.getUint32(0x4C + i * 4, Endian.little);
       if (s == _freeSect) break;
       fatSectors.add(s);
     }
     final perSector = _sectorSize ~/ 4;
+    final difatSeen = <int>{};
     for (var n = 0;
-        n < numDifat && difatSector < _endOfChain && fatSectors.length < numFatSectors;
+        n < numDifat &&
+            difatSector < maxSectors &&
+            fatSectors.length < fatLimit &&
+            difatSeen.add(difatSector);
         n++) {
       final base = _sectorOffset(difatSector);
-      if (base + _sectorSize > _data.length) break;
-      for (var i = 0; i < perSector - 1; i++) {
+      for (var i = 0; i < perSector - 1 && fatSectors.length < fatLimit; i++) {
         final s = _u32(base + i * 4);
         if (s == _freeSect) continue;
         fatSectors.add(s);
@@ -86,14 +99,21 @@ class CfbReader {
       difatSector = _u32(base + (perSector - 1) * 4);
     }
 
-    _fat = <int>[];
-    for (final s in fatSectors) {
+    // Only the first maxSectors FAT entries can describe sectors that exist.
+    final fatLength = fatSectors.length * perSector < maxSectors
+        ? fatSectors.length * perSector
+        : (maxSectors < 0 ? 0 : maxSectors);
+    final fat = Uint32List(fatLength)..fillRange(0, fatLength, _freeSect);
+    final fatSeen = <int>{};
+    for (var k = 0; k < fatSectors.length && k * perSector < fatLength; k++) {
+      final s = fatSectors[k];
+      if (s >= maxSectors || !fatSeen.add(s)) continue;
       final base = _sectorOffset(s);
-      if (base + _sectorSize > _data.length) break;
-      for (var i = 0; i < perSector; i++) {
-        _fat.add(_u32(base + i * 4));
+      for (var i = 0; i < perSector && k * perSector + i < fatLength; i++) {
+        fat[k * perSector + i] = _u32(base + i * 4);
       }
     }
+    _fat = fat;
 
     final dirBytes = _readChain(firstDirSector, _fat, _sectorSize, null);
     final dir = ByteData.sublistView(dirBytes);
@@ -122,7 +142,12 @@ class CfbReader {
 
     final miniFatBytes = numMiniFat == 0
         ? Uint8List(0)
-        : _readChain(firstMiniFat, _fat, _sectorSize, null);
+        : _readChain(
+            firstMiniFat,
+            _fat,
+            _sectorSize,
+            numMiniFat < maxSectors ? numMiniFat * _sectorSize : null,
+          );
     final mf = ByteData.sublistView(miniFatBytes);
     _miniFat = [
       for (var i = 0; i + 4 <= miniFatBytes.length; i += 4)
@@ -226,20 +251,53 @@ class CfbEntry {
   String toString() => 'CfbEntry($name, type $type, $size bytes)';
 }
 
+/// Code points of Windows-1252 bytes 0x80–0x9F. The five undefined slots
+/// (0x81, 0x8D, 0x8F, 0x90, 0x9D) map to themselves so every byte value
+/// round-trips through [decodeCp1252] and [encodeCp1252].
+const _cp1252High = [
+  0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, //
+  0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
+  0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+  0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
+];
+
+final Map<int, int> _cp1252Reverse = {
+  for (var i = 0; i < _cp1252High.length; i++) _cp1252High[i]: 0x80 + i,
+};
+
 /// Decodes Windows-1252 bytes (the "compressed" 8-bit text used by legacy
 /// Office formats). Bytes 0x80–0x9F map to their cp1252 code points.
 String decodeCp1252(List<int> bytes) {
-  const high = [
-    0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, //
-    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
-    0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
-  ];
-  final codes = [
-    for (final b in bytes) b >= 0x80 && b < 0xA0 ? high[b - 0x80] : b,
-  ];
+  final codes = Uint16List(bytes.length);
+  for (var i = 0; i < bytes.length; i++) {
+    final b = bytes[i];
+    codes[i] = b >= 0x80 && b < 0xA0 ? _cp1252High[b - 0x80] : b;
+  }
   return String.fromCharCodes(codes);
 }
+
+/// Encodes [text] as Windows-1252, the exact inverse of [decodeCp1252].
+///
+/// Returns null when [text] contains a character cp1252 can't represent;
+/// use [isCp1252Encodable] to find which ones.
+Uint8List? encodeCp1252(String text) {
+  final out = Uint8List(text.length);
+  for (var i = 0; i < text.length; i++) {
+    final u = text.codeUnitAt(i);
+    if (u < 0x80 || (u >= 0xA0 && u <= 0xFF)) {
+      out[i] = u;
+      continue;
+    }
+    final b = _cp1252Reverse[u];
+    if (b == null) return null;
+    out[i] = b;
+  }
+  return out;
+}
+
+/// Whether the UTF-16 code unit [unit] has a Windows-1252 byte.
+bool isCp1252Encodable(int unit) =>
+    unit < 0x80 || (unit >= 0xA0 && unit <= 0xFF) || _cp1252Reverse.containsKey(unit);
 
 /// Decodes UTF-16LE bytes.
 String decodeUtf16le(List<int> bytes) {

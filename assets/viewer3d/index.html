@@ -110,6 +110,25 @@
       return;
     }
 
+    // Start reading the model (and the app's list of nearby files) now, so
+    // the download overlaps loading the viewer's modules and starting WebGL.
+    // viewer.js picks these requests up (and makes its own if they're absent).
+    try {
+      var query = new URLSearchParams(location.search);
+      var src = query.get('src');
+      var files = query.get('files');
+      if (src) {
+        var modelRequest = fetch(src);
+        modelRequest.catch(function () { /* reported by viewer.js */ });
+        window.__v3dModelRequest = modelRequest;
+      }
+      if (files) {
+        window.__v3dFilesRequest = fetch(files)
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .catch(function () { return null; });
+      }
+    } catch (e) { /* viewer.js fetches them itself */ }
+
     // If the module graph fails to load (missing asset, parse error), report it.
     setTimeout(function () {
       if (!window.__v3dStarted && !window.__v3dFailed) {

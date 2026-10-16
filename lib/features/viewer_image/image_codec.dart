@@ -4,44 +4,84 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/features/viewer_image/raw_image.dart';
 import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 
 /// Decoding/encoding helpers for formats Flutter can't display natively and
 /// for applying edits.
 abstract final class ImageCodec {
-  /// Extensions the `image` package can encode to.
+  /// Extensions the editor can save back in place: the encoder must write
+  /// exactly that format. Everything else is saved as a PNG copy. (The
+  /// `image` package has no PNM/PPM/PGM/PBM/PAM writer, its CUR writer
+  /// drops the hotspot, and WebP/HEIC/AVIF/PSD/EXR can't be written.)
   static const writable = {
     'jpg', 'jpeg', 'jfif', 'png', 'gif', 'bmp', 'tif', 'tiff', 'tga', 'ico',
-    'cur', 'pnm', 'ppm', 'pgm', 'pbm', 'pam',
   };
+
+  static bool canWrite(String extension) => writable.contains(extension);
 
   static bool needsDartDecoder(String path) =>
       FileTypes.kindOf(path) == FileKind.rasterImage;
 
-  /// An [ImageProvider] for any supported image file.
-  static ImageProvider providerFor(File file) => needsDartDecoder(file.path)
-      ? _DartDecodedImage(file)
-      : FileImage(file);
+  /// An [ImageProvider] for any supported image file. Camera raws show
+  /// their embedded preview.
+  static ImageProvider providerFor(File file) {
+    if (RawImages.isRaw(file.path)) return RawPreviewImage(file);
+    return needsDartDecoder(file.path)
+        ? _DartDecodedImage(file)
+        : FileImage(file);
+  }
 
-  /// Decodes [file] to a PNG in a background isolate.
-  static Future<Uint8List> toPng(File file) async {
+  /// [providerFor], decoded no larger than [maxSide] pixels on its long
+  /// side. Phone cameras now take 50–200 MP photos; decoding those at full
+  /// size costs hundreds of MB and seconds, for a screen a fraction of that.
+  static ImageProvider displayProviderFor(File file, int maxSide) =>
+      ResizeImage(
+        providerFor(file),
+        width: maxSide,
+        height: maxSide,
+        policy: ResizeImagePolicy.fit,
+        allowUpscaling: false,
+      );
+
+  /// Decodes [file] with the Dart decoder in a background isolate (which
+  /// also reads the file, so the bytes aren't copied between isolates) and
+  /// hands it to the engine as an uncompressed BMP. Compressing a PNG only to
+  /// decompress it a moment later used to be most of the cost: for a 12 MP
+  /// TIFF on a desktop CPU the hand-off went from ~910 ms (PNG) to ~290 ms.
+  static Future<Uint8List> toEngineImage(File file) {
     final path = file.path;
-    final bytes = await file.readAsBytes();
     return Isolate.run(() {
-      final decoded = img.decodeNamedImage(path, bytes) ?? img.decodeImage(bytes);
+      final bytes = File(path).readAsBytesSync();
+      var decoded = img.decodeNamedImage(path, bytes) ?? img.decodeImage(bytes);
       if (decoded == null) throw const FormatException('Unsupported image data');
-      return img.encodePng(decoded);
+      // BMP holds 8-bit RGB(A); expand palettes, grey and 16-bit/float data.
+      final alpha =
+          decoded.hasAlpha || (decoded.palette?.numChannels ?? 0) == 4;
+      if (decoded.format != img.Format.uint8 ||
+          decoded.hasPalette ||
+          decoded.numChannels != (alpha ? 4 : 3)) {
+        decoded = decoded.convert(
+          format: img.Format.uint8,
+          numChannels: alpha ? 4 : 3,
+        );
+      }
+      return img.encodeBmp(decoded);
     });
   }
 
   /// Decodes [file] into editable pixels. Falls back to the platform codec
   /// for formats the Dart decoder lacks (e.g. HEIC/AVIF where supported).
+  /// Camera raws are edited through their (upright) embedded preview.
   static Future<img.Image> decodeForEditing(File file) async {
+    if (RawImages.isRaw(file.path)) {
+      return _decodeWithPlatform(await RawImages.previewBytes(file));
+    }
     final path = file.path;
-    final bytes = await file.readAsBytes();
     final decoded = await Isolate.run(() {
       try {
+        final bytes = File(path).readAsBytesSync();
         final image = img.decodeNamedImage(path, bytes);
         if (image == null) return null;
         // Match what Flutter displays: apply the EXIF orientation flag.
@@ -53,7 +93,11 @@ abstract final class ImageCodec {
       }
     });
     if (decoded != null) return decoded;
+    return _decodeWithPlatform(await file.readAsBytes());
+  }
 
+  /// Decodes with the engine's codecs, which apply EXIF orientation.
+  static Future<img.Image> _decodeWithPlatform(Uint8List bytes) async {
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     final data = await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -69,8 +113,9 @@ abstract final class ImageCodec {
     );
   }
 
-  /// Applies [edits] to [source] and encodes as [extension] (falls back to
-  /// PNG when the format can't be written).
+  /// Applies [edits] to [source] and encodes as [extension], which must be
+  /// one of [writable]. Throws [UnsupportedError] otherwise — never writes
+  /// bytes of a different format under that extension.
   static Future<Uint8List> applyAndEncode(
     img.Image source,
     ImageEdits edits,
@@ -103,21 +148,29 @@ abstract final class ImageCodec {
             ..b = (matrix[10] * r + matrix[11] * g + matrix[12] * b + matrix[13] * a + matrix[14]).clamp(0, 255);
         }
       }
+      if (!writable.contains(extension)) {
+        throw UnsupportedError("Can't write .$extension images");
+      }
       return switch (extension) {
         'jpg' || 'jpeg' || 'jfif' => img.encodeJpg(out, quality: 92),
-        _ => img.encodeNamedImage('x.$extension', out) ?? img.encodePng(out),
+        'png' => img.encodePng(out),
+        _ => img.encodeNamedImage('x.$extension', out) ??
+            (throw UnsupportedError("Can't write .$extension images")),
       };
     });
   }
 
-  /// Basic EXIF tags as label → value, for JPEG/TIFF files.
+  /// Basic EXIF tags as label → value, for JPEG/TIFF files; for camera raws
+  /// also the raw format, raw size and the size of the preview shown.
   static Future<Map<String, String>> readExif(File file) async {
+    if (RawImages.isRaw(file.path)) return RawImages.details(file);
     final ext = FileTypes.extensionOf(file.path);
     if (!const {'jpg', 'jpeg', 'jfif', 'tif', 'tiff'}.contains(ext)) return {};
-    final bytes = await file.readAsBytes();
+    final path = file.path;
     return Isolate.run(() {
       final result = <String, String>{};
       try {
+        final bytes = File(path).readAsBytesSync();
         final exif = ext.startsWith('t')
             ? img.decodeTiff(bytes)?.exif
             : img.decodeJpgExif(bytes);
@@ -288,8 +341,8 @@ class _DartDecodedImage extends ImageProvider<_DartDecodedImage> {
   }
 
   Future<ImageInfo> _load(ImageDecoderCallback decode) async {
-    final png = await ImageCodec.toPng(file);
-    final buffer = await ui.ImmutableBuffer.fromUint8List(png);
+    final encoded = await ImageCodec.toEngineImage(file);
+    final buffer = await ui.ImmutableBuffer.fromUint8List(encoded);
     final codec = await decode(buffer);
     final frame = await codec.getNextFrame();
     return ImageInfo(image: frame.image);

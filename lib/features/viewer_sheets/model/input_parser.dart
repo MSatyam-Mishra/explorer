@@ -88,7 +88,12 @@ Cell? parseCellInput(String text, CellStyle style, {bool date1904 = false}) {
   return Cell(value: text, style: style);
 }
 
-/// Upper-cases function names and references (`sum(a1)` -> `SUM(A1)`).
+final _prefixRe = RegExp(r'^(_xlfn\.|_xlws\.|_xlpm\.)+', caseSensitive: false);
+
+/// Turns typed formula text into the form stored in files: upper-cases
+/// function names and references (`sum(a1)` -> `SUM(A1)`), accepts `;` as an
+/// argument separator (written as `,`), drops the `@` implicit-intersection
+/// marker and adds the `_xlfn.` prefixes Excel needs for newer functions.
 String normalizeFormula(String f) {
   List<FToken> toks;
   try {
@@ -98,29 +103,58 @@ String normalizeFormula(String f) {
   }
   final b = StringBuffer();
   var pos = 0;
+  var prevEnd = 0;
+  var braces = 0;
+  // Text between tokens is whitespace or `@` (which the tokenizer skips).
+  void writeGap(int from, int to) {
+    b.write(f.substring(pos, from));
+    b.write(f.substring(from, to).replaceAll('@', ''));
+    pos = to;
+  }
+
   for (final t in toks) {
+    final gapStart = prevEnd;
+    prevEnd = t.end;
     String? rep;
     if (t.type == FTokType.func) {
-      rep = t.text.toUpperCase();
+      // Keep any file prefix lower-case like Excel writes it.
+      final m = _prefixRe.firstMatch(t.text);
+      rep = m == null
+          ? t.text.toUpperCase()
+          : '${m[0]!.toLowerCase()}${t.text.substring(m.end).toUpperCase()}';
     } else if (t.type == FTokType.ref) {
       rep = t.ref!.format();
     } else if (t.type == FTokType.boolean) {
       rep = t.text.toUpperCase();
+    } else if (t.type == FTokType.lbrace) {
+      braces++;
+    } else if (t.type == FTokType.rbrace) {
+      braces--;
+    } else if (t.type == FTokType.comma && t.text == ';' && braces <= 0) {
+      rep = ',';
     }
-    if (rep == null || rep == f.substring(t.start, t.end)) continue;
-    b.write(f.substring(pos, t.start));
-    b.write(rep);
+    final at = f.substring(gapStart, t.start).contains('@');
+    if ((rep == null || rep == f.substring(t.start, t.end)) && !at) continue;
+    writeGap(gapStart, t.start);
+    b.write(rep ?? f.substring(t.start, t.end));
     pos = t.end;
   }
-  if (pos == 0) return f;
-  b.write(f.substring(pos));
-  return b.toString();
+  if (f.substring(prevEnd).contains('@')) writeGap(prevEnd, f.length);
+  var out = f;
+  if (pos > 0) {
+    b.write(f.substring(pos));
+    out = b.toString();
+  }
+  return addFunctionPrefixes(out);
 }
+
+/// Formula text for the editor/formula bar (without file-only prefixes).
+String formulaDisplayText(String formula) => '=${stripFunctionPrefixes(formula)}';
 
 /// Text shown in the editor/formula bar for a cell.
 String cellEditText(Cell? cell, {bool date1904 = false}) {
   if (cell == null) return '';
-  if (cell.formula != null) return '=${cell.formula}';
+  if (cell.formula != null) return formulaDisplayText(cell.formula!);
   final v = cell.value;
   if (v == null) return '';
   if (v is String) {

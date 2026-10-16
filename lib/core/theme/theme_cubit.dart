@@ -1,5 +1,6 @@
 import 'package:explorer/core/theme/app_theme_settings.dart';
 import 'package:explorer/core/theme/theme_preferences.dart';
+import 'package:explorer/shared/file_icons/file_icon_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -23,6 +24,12 @@ class ThemeCubit extends Cubit<AppThemeSettings> {
     final nextMode =
         state.themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
     await setThemeMode(nextMode);
+  }
+
+  Future<void> setFileIconStyle(FileIconStyle style) async {
+    final next = state.copyWith(fileIconStyle: style);
+    emit(next);
+    await ThemePreferences.save(next);
   }
 
   Future<void> setColorTheme(String colorThemeId) async {

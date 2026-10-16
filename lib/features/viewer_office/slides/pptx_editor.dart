@@ -301,6 +301,7 @@ class PptxEditor {
     final relsDoc = pkg.xml(relsPath);
     if (relsDoc != null) {
       final root = relsDoc.rootElement;
+      final cloned = <String, String>{};
       for (final r in Ox.children(root, 'Relationship').toList()) {
         final type = Ox.attr(r, 'Type') ?? '';
         final target = Ox.attr(r, 'Target') ?? '';
@@ -317,6 +318,8 @@ class PptxEditor {
           }
         } else if (type.toLowerCase().contains('comment')) {
           root.children.remove(r);
+        } else {
+          _cloneOwnedTarget(r, slidePart, newPart, cloned);
         }
       }
       pkg.putText(OfficePackage.relsPathFor(newPart), relsDoc.toXmlString());
@@ -359,6 +362,79 @@ class PptxEditor {
     _save(presPart, pres);
     _updateAppSlideCount();
     return newRel;
+  }
+
+  /// Relationship kinds whose target belongs to a single slide (charts and
+  /// their workbooks/styles, SmartArt, OLE/ActiveX objects, ink, tags).
+  /// Pictures, media and layouts can be shared and aren't copied.
+  static const _ownedKinds = {
+    'chart',
+    'chartusershapes',
+    'chartstyle',
+    'chartcolorstyle',
+    'themeoverride',
+    'package',
+    'oleobject',
+    'control',
+    'activexcontrolbinary',
+    'vmldrawing',
+    'diagramdata',
+    'diagramlayout',
+    'diagramquickstyle',
+    'diagramcolors',
+    'diagramdrawing',
+    'tags',
+    'ink',
+  };
+
+  static bool _isOwned(String type) => _ownedKinds.contains(
+    type.substring(type.lastIndexOf('/') + 1).toLowerCase(),
+  );
+
+  /// When relationship [r] (of [source], copied to [copy]) targets a part
+  /// owned by its source, copies that part and points [r] at the copy.
+  void _cloneOwnedTarget(
+    XmlElement r,
+    String source,
+    String copy,
+    Map<String, String> cloned,
+  ) {
+    if ((Ox.attr(r, 'TargetMode') ?? '').toLowerCase() == 'external') return;
+    final target = Ox.attr(r, 'Target');
+    if (target == null || !_isOwned(Ox.attr(r, 'Type') ?? '')) return;
+    final part = OfficePackage.resolve(source, target);
+    final newPart = _clonePart(part, cloned);
+    if (newPart != part) {
+      r.setAttribute('Target', OfficePackage.relativeTarget(copy, newPart));
+    }
+  }
+
+  /// Copies [part] and the parts it owns under new names in the same
+  /// folder; returns the copy's name ([part] itself when it's missing).
+  String _clonePart(String part, Map<String, String> cloned) {
+    final done = cloned[part];
+    if (done != null) return done;
+    final bytes = pkg.bytes(part);
+    if (bytes == null) return part;
+    final slash = part.lastIndexOf('/');
+    final dir = part.substring(0, slash + 1);
+    final file = part.substring(slash + 1);
+    final dot = file.lastIndexOf('.');
+    final base = dot < 0 ? file : file.substring(0, dot);
+    final ext = dot < 0 ? '' : file.substring(dot);
+    final copy = _nextName(dir, base.replaceFirst(RegExp(r'\d+$'), ''), ext);
+    pkg.put(copy, bytes);
+    cloned[part] = copy;
+    final type = ContentTypes.overrideFor(pkg, part);
+    if (type != null) ContentTypes.ensureOverride(pkg, copy, type);
+    final rels = pkg.xml(OfficePackage.relsPathFor(part));
+    if (rels != null) {
+      for (final r in Ox.children(rels.rootElement, 'Relationship').toList()) {
+        _cloneOwnedTarget(r, part, copy, cloned);
+      }
+      pkg.putText(OfficePackage.relsPathFor(copy), rels.toXmlString());
+    }
+    return copy;
   }
 
   String? _duplicateNotes(String notesPart, String newSlidePart) {
@@ -405,8 +481,28 @@ class PptxEditor {
       (n) => n is XmlElement && n.name.local == 'sldId',
     );
     list.children.addAll(ids);
-    _fixSections(pres, [for (final e in ids) Ox.attr(e, 'id') ?? '']);
+    final order = [for (final e in ids) Ox.attr(e, 'id') ?? ''];
+    _joinNeighbourSection(pres, order, to);
+    _fixSections(pres, order);
     _save(presPart, pres);
+  }
+
+  /// Moves the slide now at [index] into the section of its new
+  /// predecessor (or successor, at the start) so sections stay contiguous,
+  /// as PowerPoint does when a slide is dragged into another section.
+  void _joinNeighbourSection(XmlDocument pres, List<String> order, int index) {
+    final entries = _sectionIds(pres).toList();
+    if (entries.isEmpty || order.length < 2) return;
+    final neighbour = order[index > 0 ? index - 1 : 1];
+    XmlElement? find(String id) =>
+        entries.where((e) => Ox.attr(e, 'id') == id).firstOrNull;
+    final mine = find(order[index]);
+    final theirs = find(neighbour);
+    if (mine == null || theirs == null) return;
+    final from = mine.parent, into = theirs.parent;
+    if (from == null || into == null || identical(from, into)) return;
+    from.children.remove(mine);
+    into.children.add(mine);
   }
 
   // ---------------------------------------------------------------------------
@@ -417,8 +513,10 @@ class PptxEditor {
         (e) => e.name.local == 'sldId' && _local(e.parent?.parent) == 'section',
       );
 
-  /// Reorders section membership to follow the new slide order; drops the
-  /// section list when a section would no longer be contiguous.
+  /// Sorts each section's slide ids into the new slide order and orders the
+  /// sections by their first slide (empty sections keep their place). Only
+  /// a file whose sections were already non-contiguous loses its section
+  /// list here; [_joinNeighbourSection] keeps valid files contiguous.
   void _fixSections(XmlDocument pres, List<String> order) {
     final sections = pres.descendants
         .whereType<XmlElement>()
@@ -468,10 +566,9 @@ class PptxEditor {
       lst.children.addAll(ids);
     }
     final parent = sections.first.parent!;
+    var k = 0;
     final ordered = [
-      ...seen,
-      for (final s in sections)
-        if (!seen.contains(s)) s,
+      for (final s in sections) seen.contains(s) ? seen[k++] : s,
     ];
     parent.children.removeWhere(
       (n) => n is XmlElement && n.name.local == 'section',

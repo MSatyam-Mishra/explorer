@@ -79,64 +79,77 @@ abstract final class CsvCodec {
     return out;
   }
 
-  /// Parses delimited [text] into rows of fields.
+  /// Parses delimited [text] into rows of fields. A field starting with `"`
+  /// is quoted (`""` is a literal quote); anything after its closing quote up
+  /// to the next delimiter is kept as typed.
   static List<List<String>> parse(String text, String delimiter, {int? maxRows}) {
     final rows = <List<String>>[];
     var row = <String>[];
-    final field = StringBuffer();
     final d = delimiter.codeUnitAt(0);
-    var inQuotes = false;
-    var fieldStart = true;
-    var i = 0;
     final n = text.length;
-    while (i < n) {
-      final c = text.codeUnitAt(i);
-      if (inQuotes) {
-        if (c == 0x22) {
-          if (i + 1 < n && text.codeUnitAt(i + 1) == 0x22) {
-            field.writeCharCode(0x22);
-            i += 2;
-            continue;
-          }
-          inQuotes = false;
-          i++;
-          continue;
-        }
-        field.writeCharCode(c);
-        i++;
-        continue;
+    var i = 0;
+    int fieldEnd(int from) {
+      var k = from;
+      while (k < n) {
+        final u = text.codeUnitAt(k);
+        if (u == d || u == 0x0D || u == 0x0A) break;
+        k++;
       }
-      if (c == 0x22 && fieldStart) {
-        inQuotes = true;
-        fieldStart = false;
-        i++;
-        continue;
-      }
-      if (c == d) {
-        row.add(field.toString());
-        field.clear();
-        fieldStart = true;
-        i++;
-        continue;
-      }
-      if (c == 0x0D || c == 0x0A) {
-        row.add(field.toString());
-        field.clear();
-        rows.add(row);
-        row = <String>[];
-        fieldStart = true;
-        if (c == 0x0D && i + 1 < n && text.codeUnitAt(i + 1) == 0x0A) i++;
-        i++;
-        if (maxRows != null && rows.length >= maxRows) return rows;
-        continue;
-      }
-      field.writeCharCode(c);
-      fieldStart = false;
-      i++;
+      return k;
     }
-    if (field.isNotEmpty || row.isNotEmpty || !fieldStart) {
-      row.add(field.toString());
+
+    while (i < n) {
+      // At the start of a field.
+      String field;
+      if (text.codeUnitAt(i) == 0x22) {
+        final b = StringBuffer();
+        var j = i + 1;
+        var seg = j;
+        var closed = false;
+        while (j < n) {
+          if (text.codeUnitAt(j) == 0x22) {
+            if (j + 1 < n && text.codeUnitAt(j + 1) == 0x22) {
+              b.write(text.substring(seg, j + 1));
+              j += 2;
+              seg = j;
+              continue;
+            }
+            closed = true;
+            break;
+          }
+          j++;
+        }
+        b.write(text.substring(seg, j));
+        if (closed) j++;
+        final k = fieldEnd(j);
+        if (k > j) b.write(text.substring(j, k));
+        field = b.toString();
+        i = k;
+      } else {
+        final k = fieldEnd(i);
+        field = text.substring(i, k);
+        i = k;
+      }
+      row.add(field);
+      if (i >= n) {
+        rows.add(row);
+        return rows;
+      }
+      final c = text.codeUnitAt(i);
+      if (c == d) {
+        i++;
+        if (i >= n) {
+          row.add('');
+          rows.add(row);
+          return rows;
+        }
+        continue;
+      }
       rows.add(row);
+      row = <String>[];
+      if (c == 0x0D && i + 1 < n && text.codeUnitAt(i + 1) == 0x0A) i++;
+      i++;
+      if (maxRows != null && rows.length >= maxRows) return rows;
     }
     return rows;
   }
@@ -185,20 +198,53 @@ abstract final class CsvCodec {
 
   static final _plainNumber = RegExp(r'^-?(0|[1-9]\d*)(\.\d+)?$');
 
+  /// For `-?(0|[1-9]\d*)(\.\d+)?` returns the index of the dot (or the
+  /// length when there is none) if at most 15 significant digits; else -1.
+  static int _plainNumberDot(String f) {
+    final n = f.length;
+    var i = 0;
+    if (f.codeUnitAt(0) == 0x2D) i = 1;
+    if (i >= n) return -1;
+    final first = f.codeUnitAt(i);
+    if (first < 0x30 || first > 0x39) return -1;
+    var sig = first == 0x30 ? 0 : 1;
+    var j = i + 1;
+    if (first != 0x30) {
+      while (j < n) {
+        final u = f.codeUnitAt(j);
+        if (u < 0x30 || u > 0x39) break;
+        sig++;
+        j++;
+      }
+    }
+    if (j == n) return sig <= 15 ? n : -1;
+    if (f.codeUnitAt(j) != 0x2E || j + 1 >= n) return -1;
+    final dot = j;
+    for (j = dot + 1; j < n; j++) {
+      final u = f.codeUnitAt(j);
+      if (u < 0x30 || u > 0x39) return -1;
+      if (sig > 0 || u != 0x30) sig++;
+    }
+    return sig <= 15 ? dot : -1;
+  }
+
   /// Converts a field to a cell: plain decimal numbers become numbers (with
   /// a format that keeps trailing zeros), everything else stays text.
   static Cell? fieldToCell(String f) {
     if (f.isEmpty) return null;
-    if (f.length <= 17 && _plainNumber.hasMatch(f)) {
-      final digits = f.replaceAll(RegExp(r'[-.]'), '').replaceFirst(RegExp(r'^0+'), '');
-      if (digits.length <= 15) {
+    final n = f.length;
+    if (n <= 17) {
+      final dot = _plainNumberDot(f);
+      if (dot >= 0) {
         final v = double.parse(f);
-        final dot = f.indexOf('.');
-        if (dot >= 0) {
-          final decimals = f.length - dot - 1;
-          if (NumberFormats.numberToPlainString(v) != f) {
-            return Cell(value: v, style: CellStyle(numFmt: '0.${'0' * decimals}'));
-          }
+        if (dot < n) {
+          // With <= 15 significant digits the plain text of the number equals
+          // the field unless it has trailing zeros (or is tiny); only then is
+          // a format needed to keep showing what was typed.
+          final same = f.codeUnitAt(n - 1) != 0x30 && v.abs() >= 1e-5
+              ? true
+              : NumberFormats.numberToPlainString(v) == f;
+          if (!same) return Cell(value: v, style: CellStyle(numFmt: '0.${'0' * (n - dot - 1)}'));
         }
         return Cell(value: v);
       }
@@ -206,12 +252,33 @@ abstract final class CsvCodec {
     return Cell(value: f);
   }
 
-  /// Builds a workbook from delimited text.
+  /// Builds a workbook from delimited text. With [previewRows] only the
+  /// start of the file is decoded and at most that many rows are read (a
+  /// quick preview to show while the whole file loads).
   static Workbook read(Uint8List bytes, {required String sheetName, String? delimiter,
-      String? extHint, bool? hasHeader}) {
+      String? extHint, bool? hasHeader, int? previewRows}) {
+    var partial = false;
+    if (previewRows != null && bytes.length > 256 * 1024) {
+      var end = 256 * 1024;
+      final utf16 = bytes.length >= 2 &&
+          ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF));
+      if (utf16) {
+        end &= ~1;
+      } else {
+        // Don't split a UTF-8 sequence.
+        while (end > 0 && (bytes[end] & 0xC0) == 0x80) {
+          end--;
+        }
+      }
+      bytes = Uint8List.sublistView(bytes, 0, end);
+      partial = true;
+    }
     final (text, enc) = decode(bytes);
     final d = delimiter ?? detectDelimiter(text, hint: hintForExtension(extHint ?? ''));
-    final rows = parse(text, d);
+    final rows = parse(text, d, maxRows: previewRows == null ? null : previewRows + 1);
+    // The last line of a cut-off prefix may be incomplete.
+    if (partial && rows.length > 1) rows.removeLast();
+    if (previewRows != null && rows.length > previewRows) rows.length = previewRows;
     final newline = text.contains('\r\n') ? '\r\n' : (text.contains('\n') ? '\n' : '\r\n');
     final sheet = SheetData(name: sheetName.isEmpty ? 'Sheet1' : sheetName);
     var maxLen = List<int>.filled(0, 0, growable: true);

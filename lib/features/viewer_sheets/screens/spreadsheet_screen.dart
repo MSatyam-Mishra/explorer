@@ -19,6 +19,7 @@ import '../readers/workbook_loader.dart';
 import '../widgets/find_bar.dart';
 import '../widgets/format_toolbar.dart';
 import '../widgets/formula_bar.dart';
+import '../widgets/grid_colors.dart';
 import '../widgets/sheet_grid.dart';
 import '../widgets/sheet_tabs.dart';
 import '../widgets/side_panel.dart';
@@ -149,51 +150,102 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   // ---------------------------------------------------------------------------
   // Loading
 
+  /// Files at least this big first show their first rows (read-only) while
+  /// the whole file is read in the background.
+  static const _previewMinBytes = 1024 * 1024;
+
+  /// Identifies the current load so results of a superseded one are dropped.
+  int _loadGen = 0;
+
+  /// True while [_ctrl] is a read-only preview of the file being loaded.
+  bool _previewing = false;
+
   Future<void> _load({CsvLoadOptions? csv}) async {
-    if (!_loading || _error != null) {
+    final gen = ++_loadGen;
+    if (!_loading || _error != null || _previewing) {
       setState(() {
         _loading = true;
+        _previewing = false;
         _error = null;
       });
     }
     try {
       final bytes = await _file.readAsBytes();
+      if (!mounted || gen != _loadGen) return;
       final name = _fileName;
-      final wb = await _parseInBackground(bytes, name, csv);
-      if (!mounted) return;
-      final old = _ctrl;
-      old?.removeListener(_onControllerChanged);
-      final next = SpreadsheetController(wb)..addListener(_onControllerChanged);
+      final full = _parseInBackground(bytes, name, csv);
+      if (bytes.length >= _previewMinBytes) {
+        // Runs in parallel; ignored if the full workbook is ready first.
+        _previewInBackground(bytes, name, csv).then((wb) {
+          if (wb != null && mounted && gen == _loadGen && _loading) _showPreview(wb);
+        }, onError: (Object _) {});
+      }
+      final wb = await full;
+      if (!mounted || gen != _loadGen) return;
+      _install(wb, bytes);
+    } on SpreadsheetReadException catch (e) {
+      _failLoad(gen, e.message);
+    } on FileSystemException {
+      _failLoad(gen, 'This file can\'t be read. Check that it still exists and that the app may access it.');
+    } catch (_) {
+      _failLoad(gen, 'This file couldn\'t be opened. It may be damaged or in a format that isn\'t supported.');
+    }
+  }
+
+  void _failLoad(int gen, String message) {
+    if (!mounted || gen != _loadGen) return;
+    setState(() {
+      _loading = false;
+      _previewing = false;
+      _error = message;
+    });
+  }
+
+  void _replaceController(SpreadsheetController next) {
+    final old = _ctrl;
+    old?.removeListener(_onControllerChanged);
+    next.addListener(_onControllerChanged);
+    _ctrl = next;
+    WidgetsBinding.instance.addPostFrameCallback((_) => old?.dispose());
+  }
+
+  void _showPreview(Workbook wb) {
+    final next = SpreadsheetController(wb)
+      ..readOnly = true
+      ..onReadOnly = () => _toast('Still opening the file. You can edit in a moment.');
+    setState(() {
+      _replaceController(next);
+      _previewing = true;
       _lastDirty = false;
-      setState(() {
-        _ctrl = next;
-        _packageBytes = wb.format.isXlsxFamily ? bytes : null;
-        _loading = false;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) => old?.dispose());
-      if (wb.warnings.isNotEmpty) _toast(wb.warnings.first);
+    });
+  }
+
+  void _install(Workbook wb, Uint8List bytes) {
+    final preview = _previewing ? _ctrl : null;
+    final next = SpreadsheetController(wb);
+    if (preview != null) next.adoptViewFrom(preview);
+    _lastDirty = false;
+    setState(() {
+      _replaceController(next);
+      _packageBytes = wb.format.isXlsxFamily ? bytes : null;
+      _loading = false;
+      _previewing = false;
+      // Matches found in the preview point at its (discarded) sheets.
+      if (preview != null) _findOpen = false;
+    });
+    if (wb.warnings.isNotEmpty) _toast(wb.warnings.first);
+    if (preview == null || !_formulaFocus.hasFocus) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _gridFocus.requestFocus();
       });
-    } on SpreadsheetReadException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.message;
-      });
-    } on FileSystemException {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = 'This file can\'t be read. Check that it still exists and that the app may access it.';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = 'This file couldn\'t be opened. It may be damaged or in a format that isn\'t supported.';
-      });
     }
+  }
+
+  /// False (with a message) while the file is still being read.
+  bool _readyToSave() {
+    if (!_loading) return true;
+    _toast('Still opening the file. Try again in a moment.');
+    return false;
   }
 
   // ---------------------------------------------------------------------------
@@ -264,17 +316,25 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
     }
   }
 
-  void _syncAfterXlsxSave(SpreadsheetController c, XlsxWriteResult result, int sheetCount) {
-    final sheets = c.workbook.sheets;
-    if (sheets.length != sheetCount || result.sheetPaths.length != sheetCount) return;
-    for (var i = 0; i < sheets.length; i++) {
-      sheets[i]
+  /// Points each sheet at its part in the package just written. [saved] is
+  /// the sheet list and names as they were when the save started (edits made
+  /// while it ran aren't in the file, so they must not be marked as saved).
+  void _syncAfterXlsxSave(SpreadsheetController c, XlsxWriteResult result,
+      List<(SheetData, String)> saved, int serial) {
+    if (result.sheetPaths.length != saved.length) return;
+    final unchanged = c.editSerial == serial;
+    for (var i = 0; i < saved.length; i++) {
+      final (sheet, name) = saved[i];
+      sheet
         ..sourcePath = result.sheetPaths[i]
         ..sourceIndex = i
-        ..sourceName = sheets[i].name
-        ..structureChanged = false;
+        ..sourceName = name;
+      if (unchanged) sheet.structureChanged = false;
     }
   }
+
+  List<(SheetData, String)> _sheetSnapshot(SpreadsheetController c) =>
+      [for (final s in c.workbook.sheets) (s, s.name)];
 
   Future<XlsxWriteResult> _buildXlsx(SpreadsheetController c, SpreadsheetFormat target) =>
       _writeXlsxInBackground(c.workbook, _packageBytes, target);
@@ -282,7 +342,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   /// Save (Ctrl+S): overwrite when possible, otherwise "Save as .xlsx".
   Future<bool> _save() async {
     final c = _ctrl;
-    if (c == null || _saving) return false;
+    if (c == null || _saving || !_readyToSave()) return false;
     if (!_commitPending()) return false;
     final fmt = c.workbook.format;
     if (fmt.isXlsxFamily) return _overwriteXlsx(c);
@@ -293,15 +353,16 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   Future<bool> _overwriteXlsx(SpreadsheetController c) async {
     setState(() => _saving = true);
     try {
-      final count = c.workbook.sheets.length;
+      final serial = c.editSerial;
+      final saved = _sheetSnapshot(c);
       final result = await _buildXlsx(c, c.workbook.format);
       await _writeBytes(_file, result.bytes);
       if (!mounted) return true;
       _packageBytes = result.bytes;
-      _syncAfterXlsxSave(c, result, count);
-      c.markSaved();
+      _syncAfterXlsxSave(c, result, saved, serial);
+      c.markSaved(atSerial: serial);
       setState(() {});
-      _toast('Saved');
+      _toast(c.dirty ? 'Saved. Changes made while saving aren\'t saved yet.' : 'Saved');
       return true;
     } catch (e) {
       _toast('Couldn\'t save: ${_describe(e)}');
@@ -312,13 +373,14 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   }
 
   Future<bool> _saveAsXlsx(SpreadsheetController c, {required bool switchToNew}) async {
-    if (!_commitPending()) return false;
+    if (!_readyToSave() || !_commitPending()) return false;
     setState(() => _saving = true);
     try {
       final dir = p.dirname(_file.path);
       final base = p.basenameWithoutExtension(_file.path);
       final target = await _uniqueFile(dir, base, '.xlsx');
-      final count = c.workbook.sheets.length;
+      final serial = c.editSerial;
+      final saved = _sheetSnapshot(c);
       final result = await _buildXlsx(c, SpreadsheetFormat.xlsx);
       await _writeBytes(target, result.bytes);
       if (!mounted) return true;
@@ -328,8 +390,8 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
         _packageBytes = result.bytes;
         c.workbook.format = SpreadsheetFormat.xlsx;
         c.workbook.csv = null;
-        _syncAfterXlsxSave(c, result, count);
-        c.markSaved();
+        _syncAfterXlsxSave(c, result, saved, serial);
+        c.markSaved(atSerial: serial);
       }
       setState(() {});
       _toast('Saved as ${p.basename(target.path)}');
@@ -376,12 +438,13 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       final newline = csv.newline;
       final date1904 = wb.date1904;
       final encoding = target == null ? csv.encoding : TextEncodingKind.utf8Bom;
+      final serial = c.editSerial;
       final bytes = await _writeCsvInBackground(sheet, delimiter, newline, date1904, encoding);
       await _writeBytes(target ?? _file, bytes);
       if (!mounted) return true;
       if (target == null) {
-        c.markSaved();
-        _toast('Saved');
+        c.markSaved(atSerial: serial);
+        _toast(c.dirty ? 'Saved. Changes made while saving aren\'t saved yet.' : 'Saved');
       } else {
         _createdNewFile = true;
         _toast('Exported ${p.basename(target.path)}');
@@ -398,7 +461,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
 
   Future<void> _exportCsv() async {
     final c = _ctrl;
-    if (c == null || !_commitPending()) return;
+    if (c == null || !_readyToSave() || !_commitPending()) return;
     final dir = p.dirname(_file.path);
     final base = p.basenameWithoutExtension(_file.path);
     final name = c.workbook.sheets.length > 1 ? '$base - ${c.sheet.name}' : base;
@@ -968,6 +1031,29 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
     );
   }
 
+  /// First frame while the file is read: an empty grid, not a spinner.
+  Widget _buildSkeleton(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        SizedBox(height: DockedGlossyTopBar.contentTopInset(context)),
+        Material(
+          color: theme.colorScheme.surface.withValues(alpha: 0.94),
+          child: SizedBox(height: WindowSize.of(context).isCompact ? 40 : 44, width: double.infinity),
+        ),
+        const LinearProgressIndicator(minHeight: 1),
+        Expanded(
+          child: RepaintBoundary(
+            child: CustomPaint(
+              size: Size.infinite,
+              painter: _SkeletonGridPainter(GridColors.of(context)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildEditor(BuildContext context, SpreadsheetController c) {
     final theme = Theme.of(context);
     final width = MediaQuery.sizeOf(context).width;
@@ -1032,7 +1118,10 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
               onClose: _closeFind,
               onMessage: _toast,
             ),
-          Divider(height: 1, color: theme.colorScheme.outlineVariant),
+          if (_previewing)
+            const LinearProgressIndicator(minHeight: 1)
+          else
+            Divider(height: 1, color: theme.colorScheme.outlineVariant),
           Expanded(
             child: AdaptiveSplitView(
               secondaryOnLeading: false,
@@ -1081,14 +1170,11 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       child: ExplorerScaffold(
         title: '${c?.dirty == true ? '• ' : ''}$_fileName',
         trailing: _topActions(context),
-        body: _loading
-            ? Padding(
-                padding: EdgeInsets.only(top: DockedGlossyTopBar.contentTopInset(context)),
-                child: const Center(child: CircularProgressIndicator()),
-              )
-            : (_error != null || c == null)
-                ? _buildError(context)
-                : _buildEditor(context, c),
+        body: _error != null
+            ? _buildError(context)
+            : (c != null && (!_loading || _previewing))
+                ? _buildEditor(context, c)
+                : _buildSkeleton(context),
       ),
     );
   }
@@ -1099,6 +1185,48 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
 
 Future<Workbook> _parseInBackground(Uint8List bytes, String name, CsvLoadOptions? csv) =>
     Isolate.run(() => loadWorkbook(bytes, fileName: name, csv: csv));
+
+Future<Workbook?> _previewInBackground(Uint8List bytes, String name, CsvLoadOptions? csv) =>
+    Isolate.run(() => loadWorkbookPreview(bytes, fileName: name, csv: csv));
+
+/// Header bands and grid lines at default sizes (no text, so it costs
+/// nothing to lay out on the first frame).
+class _SkeletonGridPainter extends CustomPainter {
+  _SkeletonGridPainter(this.colors);
+
+  final GridColors colors;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const headerH = 22.0;
+    const headerW = 40.0;
+    const colW = kDefaultColWidth;
+    const rowH = kDefaultRowHeight;
+    canvas.drawRect(Offset.zero & size, Paint()..color = colors.paper);
+    final header = Paint()..color = colors.header;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, headerH), header);
+    canvas.drawRect(Rect.fromLTWH(0, 0, headerW, size.height), header);
+    final grid = Paint()
+      ..color = colors.gridLine
+      ..strokeWidth = 1;
+    final line = Paint()
+      ..color = colors.headerLine
+      ..strokeWidth = 1;
+    for (var x = headerW + colW; x < size.width; x += colW) {
+      canvas.drawLine(Offset(x, headerH), Offset(x, size.height), grid);
+      canvas.drawLine(Offset(x, 0), Offset(x, headerH), line);
+    }
+    for (var y = headerH + rowH; y < size.height; y += rowH) {
+      canvas.drawLine(Offset(headerW, y), Offset(size.width, y), grid);
+      canvas.drawLine(Offset(0, y), Offset(headerW, y), line);
+    }
+    canvas.drawLine(const Offset(0, headerH), Offset(size.width, headerH), line);
+    canvas.drawLine(const Offset(headerW, 0), Offset(headerW, size.height), line);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SkeletonGridPainter old) => old.colors != colors;
+}
 
 Future<XlsxWriteResult> _writeXlsxInBackground(
         Workbook wb, Uint8List? original, SpreadsheetFormat target) =>

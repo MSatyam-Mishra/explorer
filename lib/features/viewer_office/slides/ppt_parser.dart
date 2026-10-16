@@ -238,7 +238,9 @@ class _PptParser {
       final r = rec(o);
       if (r == null || r.type != 0x0FF5) break;
       edits.add(o);
-      docRef ??= u32(r.offset + 20);
+      // UserEditAtom: lastSlideIdRef, version, offsetLastEdit,
+      // offsetPersistDirectory, docPersistIdRef (+16), persistIdSeed (+20).
+      docRef ??= u32(r.offset + 16);
       o = u32(r.offset + 8);
     }
     for (final e in edits.reversed) {

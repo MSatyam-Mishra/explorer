@@ -97,6 +97,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   /// Latest known document bytes, without unsaved viewer annotations.
   Uint8List? _latestBytes;
   String? _password;
+  bool _unlocking = false;
   PdfViewerController _controller = PdfViewerController();
   GlobalKey<SfPdfViewerState> _viewerKey = GlobalKey();
   int _docVersion = 0;
@@ -228,6 +229,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     } catch (_) {}
   }
 
+  /// Reads the file and hands it straight to the viewer. The viewer parses
+  /// the document itself; parsing it here first (to check for a password or
+  /// count pages) doubled the work before anything showed. Password-protected
+  /// files are detected from the viewer's load failure instead.
   Future<void> _open() async {
     if (_loadState != _LoadState.loading) {
       setState(() {
@@ -235,60 +240,59 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         _errorMessage = null;
       });
     }
+    final initialPage = _lastReadPage();
     try {
       _sourceBytes ??= await widget.pdfFile.readAsBytes();
     } catch (e) {
       _fail('The file could not be read.', e);
       return;
     }
-    final bytes = _sourceBytes!;
-    PdfProbeResult probe;
-    try {
-      probe = await PdfDocumentOps.probe(bytes);
-    } catch (e) {
-      _fail('This file could not be opened as a PDF.', e);
-      return;
-    }
+    final page = await initialPage;
     if (!mounted) return;
-    var working = bytes;
-    var pageCount = probe.pageCount;
-    switch (probe.status) {
-      case PdfOpenStatus.invalid:
-        _fail('This file could not be opened as a PDF.', probe.message);
-        return;
-      case PdfOpenStatus.needsPassword:
-        final unlocked = await _unlock(bytes);
-        if (!mounted) return;
-        if (unlocked == null) {
-          setState(() => _loadState = _LoadState.locked);
-          return;
-        }
-        working = unlocked.$1;
-        pageCount = unlocked.$2;
-      case PdfOpenStatus.ok:
-        break;
-    }
+    _reloadViewer(_sourceBytes!, page: page);
+  }
 
-    var initialPage = 1;
+  Future<int> _lastReadPage() async {
     try {
       final lastRead = await _bookmarkService.getLastReadPosition(_bookmarkKey);
-      if (lastRead is num) {
-        initialPage = (lastRead.toInt() + 1).clamp(1, math.max(1, pageCount));
-      }
+      // The viewer ignores a page past the end of the document.
+      if (lastRead is num) return math.max(1, lastRead.toInt() + 1);
     } catch (_) {}
-    if (!mounted) return;
+    return 1;
+  }
+
+  /// Asks for the password of the (encrypted) source file and shows the
+  /// decrypted copy.
+  Future<void> _promptPassword() async {
+    final bytes = _sourceBytes;
+    if (bytes == null || !mounted || _unlocking) return;
     setState(() {
-      _viewerBytes = working;
-      _latestBytes = working;
-      _initialPage = initialPage;
-      _currentPage.value = initialPage;
-      _loadState = _LoadState.ready;
+      _loadState = _LoadState.loading;
+      _errorMessage = null;
     });
+    _unlocking = true;
+    final Uint8List? unlocked;
+    try {
+      unlocked = await _unlock(bytes);
+    } finally {
+      _unlocking = false;
+    }
+    if (!mounted) return;
+    if (unlocked == null) {
+      // Only a cancelled prompt locks; a failure keeps _unlock's error.
+      if (_loadState != _LoadState.error) {
+        setState(() => _loadState = _LoadState.locked);
+      }
+      return;
+    }
+    final page = await _lastReadPage();
+    if (mounted) _reloadViewer(unlocked, page: page);
   }
 
   /// Prompts for the password until it is right or the user gives up.
-  /// Returns the decrypted bytes and page count.
-  Future<(Uint8List, int)?> _unlock(Uint8List bytes) async {
+  /// Returns the decrypted bytes, or null when cancelled or when decrypting
+  /// failed (then the screen is already in the error state).
+  Future<Uint8List?> _unlock(Uint8List bytes) async {
     var wrong = false;
     while (true) {
       if (!mounted) return null;
@@ -298,19 +302,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         wrongPassword: wrong,
       );
       if (password == null || !mounted) return null;
-      final probe = await PdfDocumentOps.probe(bytes, password: password);
-      if (probe.status == PdfOpenStatus.ok) {
-        try {
+      try {
+        final probe = await PdfDocumentOps.probe(bytes, password: password);
+        if (probe.status == PdfOpenStatus.ok) {
           final plain = await PdfDocumentOps.decrypt(bytes, password);
           _password = password;
-          return (plain, probe.pageCount);
-        } catch (e) {
-          _fail('The PDF could not be decrypted.', e);
+          return plain;
+        }
+        if (probe.status == PdfOpenStatus.invalid) {
+          _fail('This file could not be opened as a PDF.', probe.message);
           return null;
         }
-      }
-      if (probe.status == PdfOpenStatus.invalid) {
-        _fail('This file could not be opened as a PDF.', probe.message);
+      } catch (e) {
+        _fail('The PDF could not be decrypted.', e);
         return null;
       }
       wrong = true;
@@ -345,19 +349,33 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   // ---------------------------------------------------------------------------
 
   void _onDocumentLoaded(PdfDocumentLoadedDetails details) {
-    final outline = PdfOutlineNode.read(details.document);
     _post(() {
       _viewerDocument = details.document;
-      _outline = outline;
       _viewerReady = true;
       _pageCount = _controller.pageCount;
       if (_controller.pageNumber > 0) {
         _currentPage.value = _controller.pageNumber;
       }
     });
+    _sweepTempFilesOnce();
+  }
+
+  /// The outline is read the first time the side panel is built rather than
+  /// when the document loads; walking a long outline is UI-thread work.
+  List<PdfOutlineNode>? get _outlineIfLoaded {
+    final document = _viewerDocument;
+    if (document == null) return null;
+    return _outline ??= PdfOutlineNode.read(document);
   }
 
   void _onDocumentLoadFailed(PdfDocumentLoadFailedDetails details) {
+    // 'Empty Password Error' / 'Invalid Password Error': the source file is
+    // encrypted (the viewer is never given a password).
+    if (details.error.endsWith('Password Error') &&
+        identical(_viewerBytes, _sourceBytes)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _promptPassword());
+      return;
+    }
     _post(() {
       _loadState = _LoadState.error;
       _errorMessage = details.description.isNotEmpty
@@ -423,6 +441,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     final controller = PdfViewerController();
     _configureController(controller);
     setState(() {
+      _loadState = _LoadState.ready;
+      _errorMessage = null;
       _viewerBytes = bytes;
       _latestBytes = bytes;
       _viewerHasChanges = false;
@@ -551,7 +571,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               ),
             )
           : _file;
-      await target.writeAsBytes(out, flush: true);
+      await _writeSafely(target, out);
       if (!mounted) return true;
       setState(() {
         _file = target;
@@ -580,23 +600,104 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
   }
 
+  /// Writes [bytes] to [target] through a temporary file in the same folder
+  /// that then replaces it, so a failed or interrupted write (full disk,
+  /// removed card, app killed) never leaves the original truncated.
+  static Future<void> _writeSafely(File target, Uint8List bytes) async {
+    var path = target.path;
+    try {
+      // Replace the real file, not a symbolic link pointing at it.
+      path = await target.resolveSymbolicLinks();
+    } catch (_) {
+      // A new file (save as copy) has nothing to resolve yet.
+    }
+    final temp = File(
+      p.join(
+        p.dirname(path),
+        '.${p.basename(path)}.${DateTime.now().microsecondsSinceEpoch}.tmp',
+      ),
+    );
+    try {
+      await temp.writeAsBytes(bytes, flush: true);
+      await temp.rename(path);
+    } catch (_) {
+      try {
+        if (await temp.exists()) await temp.delete();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
   Future<void> _share() async {
     if (_busy) return;
+    // iPad shows the share sheet as a popover that needs an anchor: the
+    // top bar's trailing corner, where the menu was opened.
+    final size = MediaQuery.sizeOf(context);
+    final origin = Rect.fromLTWH(
+      math.max(0, size.width - 64),
+      MediaQuery.paddingOf(context).top + 12,
+      48,
+      48,
+    );
+    Directory? shareDir;
     try {
       String path = _file.path;
       if (_dirty) {
         _setBusy('Preparing to share…');
         final out = await _bytesForDisk();
-        final dir = await Directory.systemTemp.createTemp('pdf_share_');
-        path = p.join(dir.path, _fileName);
+        // One fixed folder, emptied first: at most one shared copy is kept.
+        shareDir = Directory(p.join(Directory.systemTemp.path, _shareDirName));
+        await _deleteQuietly(shareDir);
+        await shareDir.create(recursive: true);
+        path = p.join(shareDir.path, _fileName);
         await File(path).writeAsBytes(out, flush: true);
         _setBusy(null);
       }
-      await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(path)], sharePositionOrigin: origin),
+      );
+      // On Android share_plus copies the file into its own cache before
+      // returning; elsewhere the target app may still be reading ours.
+      if (shareDir != null && Platform.isAndroid) {
+        await _deleteQuietly(shareDir);
+      }
     } catch (e) {
       _setBusy(null);
       _showError('Sharing failed', e);
     }
+  }
+
+  static const _shareDirName = 'pdf_share';
+  static bool _tempSwept = false;
+
+  /// Once per run, removes temp copies left behind when the app was killed
+  /// (shares of edited documents, page renderer copies).
+  static void _sweepTempFilesOnce() {
+    if (_tempSwept) return;
+    _tempSwept = true;
+    unawaited(() async {
+      try {
+        // The age check spares another running instance's files (desktop).
+        final cutoff = DateTime.now().subtract(const Duration(hours: 1));
+        await for (final entity in Directory.systemTemp.list()) {
+          if (entity is! Directory) continue;
+          final name = p.basename(entity.path);
+          final ours = name.startsWith('pdf_share') ||
+              name.startsWith('pdf_pages_');
+          if (ours && (await entity.stat()).modified.isBefore(cutoff)) {
+            await _deleteQuietly(entity);
+          }
+        }
+      } catch (_) {
+        // Best effort.
+      }
+    }());
+  }
+
+  static Future<void> _deleteQuietly(Directory dir) async {
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {}
   }
 
   static Future<String> _uniquePath(String dir, String base, String ext) async {
@@ -696,7 +797,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         '${p.basenameWithoutExtension(_file.path)}_pages',
         '.pdf',
       );
-      await File(path).writeAsBytes(out, flush: true);
+      await _writeSafely(File(path), out);
       _folderChanged = true;
       _showMessage(
         'Saved ${pages.length} page${pages.length == 1 ? '' : 's'} to '
@@ -828,7 +929,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _setBusy(null);
     }
     if (!mounted) return;
-    final marks = await Navigator.push<List<PageMark>>(
+    // The canvas stays open until the marks are burned in, so a failure
+    // (e.g. an unreadable image) doesn't throw away the whole session.
+    await Navigator.push<List<PageMark>>(
       context,
       MaterialPageRoute(
         builder: (_) => PdfPageCanvasScreen(
@@ -838,14 +941,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           initialTool: tool,
           start: start,
           initialColor: _canvasColor,
+          onApply: (marks) => _runDocumentEdit(
+            'Adding to page',
+            (current) => PdfDocumentOps.drawOnPage(current, pageIndex, marks),
+            targetPage: pageIndex + 1,
+          ),
         ),
       ),
-    );
-    if (marks == null || marks.isEmpty || !mounted) return;
-    await _runDocumentEdit(
-      'Adding to page',
-      (current) => PdfDocumentOps.drawOnPage(current, pageIndex, marks),
-      targetPage: pageIndex + 1,
     );
   }
 
@@ -1330,7 +1432,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       case _LoadState.loading:
         return Padding(
           padding: EdgeInsets.only(top: top),
-          child: const Center(child: CircularProgressIndicator()),
+          child: const _PageSkeleton(),
         );
       case _LoadState.locked:
         return Padding(
@@ -1339,7 +1441,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             icon: Icons.lock_outline,
             title: 'This PDF is password protected',
             actionLabel: 'Enter password',
-            onAction: _open,
+            onAction: _promptPassword,
           ),
         );
       case _LoadState.error:
@@ -1391,7 +1493,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     return PdfSidePanel(
       tabIndex: _panelTab,
       onTabChanged: (tab) => _post(() => _panelTab = tab),
-      outline: _outline,
+      outline: _outlineIfLoaded,
       onOutlineSelected: _openOutlineNode,
       bookmarks: _bookmarks,
       currentPage: currentPage,
@@ -1474,6 +1576,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               child: _buildViewer(),
             ),
           ),
+          // Until the first document is shown (the viewer has its own
+          // progress bar; later reloads keep the old pages' layout).
+          if (!_viewerReady && _pageCount == 0)
+            const Positioned.fill(
+              child: IgnorePointer(child: _PageSkeleton(showProgress: false)),
+            ),
           if (_searchOpen)
             Positioned(
               top: 8,
@@ -1602,6 +1710,51 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Page-shaped placeholder shown from the first frame until the document is
+/// on screen.
+class _PageSkeleton extends StatelessWidget {
+  const _PageSkeleton({this.showProgress = true});
+
+  final bool showProgress;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = math.max(0.0, math.min(constraints.maxWidth - 24, 760.0));
+        return ClipRect(
+          child: Stack(
+            children: [
+              Positioned(
+                top: 12,
+                left: (constraints.maxWidth - width) / 2,
+                width: width,
+                height: width * math.sqrt2,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest.withValues(
+                      alpha: 0.6,
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              if (showProgress)
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
