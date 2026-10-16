@@ -330,6 +330,10 @@ Future<ExtractResult> runExtraction(
     }
   }
 
+  final madeDirs = <String>{root};
+  // Setting a timestamp costs a few milliseconds per file on Windows; skip
+  // it there for big extractions.
+  final keepTimes = !Platform.isWindows || items.length <= 2000;
   var doneBytes = 0;
   var doneFiles = 0;
   var lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
@@ -358,6 +362,7 @@ Future<ExtractResult> runExtraction(
     final e = item.entry;
     var target = item.target;
     final type = FileSystemEntity.typeSync(target, followLinks: false);
+    var replaces = false;
     if (type != FileSystemEntityType.notFound) {
       if (policy == ConflictPolicy.skip && req.targets == null) {
         result.skippedExisting++;
@@ -368,32 +373,38 @@ Future<ExtractResult> runExtraction(
       if (policy == ConflictPolicy.rename ||
           type == FileSystemEntityType.directory) {
         target = uniquePath(target);
+      } else {
+        replaces = true;
       }
     }
     final temp = '$target.explorer-part';
-    progress(e.path, temp, force: true);
-    try {
-      await Directory(p.dirname(target)).create(recursive: true);
-    } on FileSystemException catch (err) {
-      throw _ioError(err, target);
+    // Big entries always announce their temp file, so a hard cancel can
+    // remove it; small ones only update the (throttled) progress.
+    progress(e.path, temp, force: e.size < 0 || e.size > (1 << 20));
+    final parentDir = p.dirname(target);
+    if (madeDirs.add(parentDir)) {
+      try {
+        await Directory(parentDir).create(recursive: true);
+      } on FileSystemException catch (err) {
+        throw _ioError(err, target);
+      }
     }
     RandomAccessFile? out;
     var written = 0;
     // Bare compressed streams don't declare their size: cap by ratio.
-    final cap = e.size >= 0
-        ? e.size
-        : _ratioCap(archiveSize ?? 0);
+    final exact = e.sizeIsExact && e.size >= 0;
+    final cap = exact ? e.size : _ratioCap(archiveSize ?? 0);
     backend.onSeek = (f) => progress(e.path, temp, seeking: f);
     try {
       out = await File(temp).open(mode: FileMode.write);
-      if (e.size != 0) {
+      if (e.size != 0 || !exact) {
         await for (final chunk in backend.openRead(e)) {
           if (isCancelled()) throw _cancelled();
           written += chunk.length;
           if (written > cap) {
             throw ArcException(
               ArcErrorKind.tooLarge,
-              e.size >= 0
+              exact
                   ? '"${e.name}" unpacks to more data than the archive '
                       'declares (possible zip bomb). Extraction stopped.'
                   : '"${e.name}" expands far beyond any normal compression '
@@ -409,20 +420,21 @@ Future<ExtractResult> runExtraction(
       }
       await out.close();
       out = null;
-      if (e.size >= 0 && written != e.size) {
+      if (exact && written != e.size) {
         throw ArcException(
           ArcErrorKind.corrupt,
           '"${e.name}" is incomplete in the archive.',
           entryPath: e.path,
         );
       }
-      if (FileSystemEntity.typeSync(target, followLinks: false) ==
-          FileSystemEntityType.file) {
+      if (replaces &&
+          FileSystemEntity.typeSync(target, followLinks: false) ==
+              FileSystemEntityType.file) {
         await File(target).delete();
       }
       await File(temp).rename(target);
       final m = e.modified;
-      if (m != null) {
+      if (m != null && keepTimes) {
         try {
           await File(target).setLastModified(m.toLocal());
         } catch (_) {}
@@ -511,14 +523,15 @@ Future<Uint8List> readEntryBytes(
   ArcEntry entry, {
   int maxBytes = 512 * 1024 * 1024,
 }) async {
-  if (entry.size > maxBytes) {
+  final exact = entry.sizeIsExact && entry.size >= 0;
+  if (exact && entry.size > maxBytes) {
     throw ArcException(
       ArcErrorKind.tooLarge,
       '"${entry.name}" is too large to open in place.',
       entryPath: entry.path,
     );
   }
-  final out = entry.size > 0 ? Uint8List(entry.size) : null;
+  final out = exact && entry.size > 0 ? Uint8List(entry.size) : null;
   final bb = out == null ? BytesBuilder(copy: false) : null;
   var pos = 0;
   await for (final chunk in backend.openRead(entry)) {

@@ -21,12 +21,12 @@ import 'dart:typed_data';
 import 'package:koni_archive_core/koni_archive_core.dart' as koni;
 import 'package:koni_rar/src/rar20_decoder.dart';
 import 'package:koni_rar/src/rar4_container.dart';
-import 'package:koni_rar/src/rar4_decoder.dart';
 import 'package:koni_rar/src/rar5_container.dart';
-import 'package:koni_rar/src/rar5_decoder.dart';
 import 'package:koni_rar/src/rar_crypto.dart';
 
 import 'archive_backend.dart';
+import 'archive_rar4_decoder.dart';
+import 'archive_rar5_decoder.dart';
 
 /// Resolves volume [number] (2, 3, …) of a multi-volume set.
 typedef VolumeResolver = Future<koni.ByteSource?> Function(int number);
@@ -184,7 +184,7 @@ class RarBackend extends ArcBackend {
           isDirectory: h.isDirectory,
           size: h.isDirectory ? 0 : h.unpackedSize,
           packedSize: h.isDirectory ? 0 : packed,
-          modified: h.modified,
+          modified: h.version == 29 ? _rar4Local(h.modified) : h.modified,
           isEncrypted: h.isEncrypted,
           isSymlink: h.redirectTarget != null,
           linkTarget: h.redirectTarget,
@@ -209,6 +209,15 @@ class RarBackend extends ArcBackend {
       pw,
       limits,
     );
+  }
+
+  /// RAR4 stores local DOS times; koni_rar labels their fields as UTC.
+  static DateTime? _rar4Local(DateTime? naive) {
+    if (naive == null || naive.year < 1980) return naive;
+    final date =
+        ((naive.year - 1980) << 9) | (naive.month << 5) | naive.day;
+    final time = (naive.hour << 11) | (naive.minute << 5) | (naive.second >> 1);
+    return dosDateTime(date, time);
   }
 
   static String _methodLabel(Rar5FileHeader h) {
@@ -503,14 +512,17 @@ class RarBackend extends ArcBackend {
       );
     }
     final output = Uint8List(window);
+    Uint8List? filtered;
     if (h.version != 29) {
-      Rar5Decoder(output).decompressFile(data, h.unpackedSize);
+      final d = Rar5Decoder(output)..decompressFile(data, h.unpackedSize);
+      filtered = d.lastFiltered;
     } else if (h.unpackVersion == 20 || h.unpackVersion == 26) {
       Rar20Decoder(output).decompressFile(data, h.unpackedSize);
     } else {
-      Rar4Decoder(output).decompressFile(data, h.unpackedSize);
+      final d = Rar4Decoder(output)..decompressFile(data, h.unpackedSize);
+      filtered = d.lastFiltered;
     }
-    return Uint8List.sublistView(output, 0, h.unpackedSize);
+    return filtered ?? Uint8List.sublistView(output, 0, h.unpackedSize);
   }
 
   @override
@@ -629,6 +641,7 @@ class _SolidRun {
       _ensureRoom(h.unpackedSize);
       final start = _ptr;
       final data = await owner._readData(i, h);
+      Uint8List? filtered;
       if (h.method == 0) {
         if (data.length < h.unpackedSize) {
           throw const FormatException('stored entry is truncated');
@@ -638,6 +651,7 @@ class _SolidRun {
       } else if (_r5 != null) {
         _r5!.beginFileFilters();
         _r5!.decompressFile(data, h.unpackedSize);
+        filtered = _r5!.lastFiltered;
       } else if (_ppmd) {
         final slice = _r4!.decompressSolidPpmdFile(data, h.unpackedSize);
         if (slice.end - slice.start != h.unpackedSize) {
@@ -649,11 +663,13 @@ class _SolidRun {
           h.unpackedSize,
           parseTable: !_r4!.hasTables,
         );
+        filtered = _r4!.lastFiltered;
       }
       if (i == index) {
-        result = Uint8List.fromList(
-          Uint8List.sublistView(_window, start, start + h.unpackedSize),
-        );
+        result = filtered ??
+            Uint8List.fromList(
+              Uint8List.sublistView(_window, start, start + h.unpackedSize),
+            );
       }
     }
     return result ?? Uint8List(0);

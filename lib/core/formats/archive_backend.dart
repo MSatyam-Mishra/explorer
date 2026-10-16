@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:koni_archive_core/koni_archive_core.dart' as koni;
@@ -87,6 +88,7 @@ class ArcEntry {
     this.method,
     this.crc32,
     this.unsupportedReason,
+    this.sizeIsExact = true,
   });
 
   /// Position in [ArcBackend.entries]; stable for a given archive file.
@@ -116,6 +118,10 @@ class ArcEntry {
 
   /// Set when the entry can be listed but not read (e.g. a GNU sparse file).
   final String? unsupportedReason;
+
+  /// False when [size] is only an estimate (a bare .gz records its size
+  /// modulo 4 GiB, and only for its last member).
+  final bool sizeIsExact;
 
   String get name {
     final slash = path.lastIndexOf('/');
@@ -166,6 +172,15 @@ class ArcLimits {
   /// Largest entry a reader that must decode in memory (RAR compressed
   /// entries, 7z folders) may materialise.
   final int maxInMemoryEntry;
+
+  /// Phones get a lower in-memory cap: the worker shares the app's heap and
+  /// a failed giant allocation can take the whole app down.
+  factory ArcLimits.forPlatform() {
+    final mobile = Platform.isAndroid || Platform.isIOS;
+    return ArcLimits(
+      maxInMemoryEntry: mobile ? 512 * 1024 * 1024 : 1024 * 1024 * 1024,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +476,13 @@ DateTime? dosDateTime(int date, int time) {
   final hour = (time >> 11) & 0x1F;
   final minute = (time >> 5) & 0x3F;
   final second = (time & 0x1F) * 2;
-  if (month < 1 || month > 12 || day < 1) return null;
-  return DateTime(year, month, day, hour, minute, second);
+  if (month < 1 || month > 12 || day < 1 || hour > 23) return null;
+  // Local-time DateTime construction is slow (time-zone lookup, ~20 µs on
+  // Windows); archives hold few distinct hours, so cache per date and hour.
+  final key = (date << 5) | hour;
+  final base = _dosHourCache[key] ??= DateTime(year, month, day, hour);
+  if (_dosHourCache.length > 4096) _dosHourCache.clear();
+  return base.add(Duration(minutes: minute, seconds: second));
 }
+
+final Map<int, DateTime> _dosHourCache = {};

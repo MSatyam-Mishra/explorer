@@ -121,7 +121,7 @@ Future<ArcFormat?> detectArchiveFormat(
 // ---------------------------------------------------------------------------
 
 final _partRar = RegExp(r'^(.*)\.part(\d+)\.(rar|cbr)$', caseSensitive: false);
-final _oldRarPart = RegExp(r'^(.*)\.([r-z])(\d\d)$', caseSensitive: false);
+final _oldRarPart = RegExp(r'^(.*)\.([rs])(\d\d)$', caseSensitive: false);
 final _numbered = RegExp(r'^(.*)\.(\d{3})$');
 
 /// Describes how the parts of a multi-volume set are named.
@@ -153,10 +153,10 @@ class VolumeSet {
       return VolumeSet._(nameOf(1), nameOf, 'rar-new');
     }
     m = _oldRarPart.firstMatch(name);
-    if (m != null && !name.toLowerCase().endsWith('.zip')) {
+    if (m != null) {
       final base = m.group(1)!;
-      final rar = _existingCase(dir, '$base.rar');
-      if (rar != null) return _oldRar(dir, base, rar);
+      final rar = _existingCase(dir, '$base.rar') ?? _existingCase(dir, '$base.cbr');
+      return _oldRar(dir, base, rar ?? p.join(dir, '$base.rar'));
     }
     if (name.toLowerCase().endsWith('.rar') ||
         name.toLowerCase().endsWith('.cbr')) {
@@ -212,16 +212,17 @@ class VolumeSet {
 Future<ArcOpened> openArchive(
   String path, {
   String? password,
-  ArcLimits limits = const ArcLimits(),
+  ArcLimits? limits,
   ArcFormat? forceFormat,
   void Function(double progress)? onProgress,
   void Function(List<ArcEntry> batch)? onEntries,
 }) async {
+  limits ??= ArcLimits.forPlatform();
   final set = VolumeSet.of(path);
   var firstPath = path;
   if (set.kind != 'single' && File(set.first).existsSync()) {
     firstPath = set.first;
-  } else if (set.kind == 'split' || set.kind == 'rar-new') {
+  } else if (set.kind != 'single') {
     if (!File(set.first).existsSync()) {
       throw ArcException(
         ArcErrorKind.missingVolume,

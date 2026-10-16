@@ -57,7 +57,11 @@ class ArchiveEntryTile extends StatelessWidget {
       if (e!.isSymlink) {
         parts.add(e.linkTarget == null ? 'Link' : 'Link → ${e.linkTarget}');
       } else {
-        parts.add(formatBytes(e.size));
+        parts.add(
+          e.sizeIsExact || e.size < 0
+              ? formatBytes(e.size)
+              : '≈ ${formatBytes(e.size)}',
+        );
         final ratio = ratioLabel(e.size, e.packedSize);
         if (ratio != null && e.size > 0) parts.add('packed $ratio');
       }

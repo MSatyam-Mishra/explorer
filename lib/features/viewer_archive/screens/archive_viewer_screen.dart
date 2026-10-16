@@ -97,7 +97,14 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
       _foundSoFar = 0;
     });
     try {
-      _session ??= await ArchiveSession.spawn();
+      if (_session == null) {
+        final session = await ArchiveSession.spawn();
+        if (!mounted) {
+          session.dispose();
+          return;
+        }
+        _session = session;
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _error = ArcException(
@@ -682,12 +689,8 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
         if (!didPop) _handleBack();
       },
       child: ExplorerScaffold(
+        // The default back button pops through PopScope, i.e. _handleBack.
         title: _archiveName,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: iconColor),
-          tooltip: 'Back',
-          onPressed: _handleBack,
-        ),
         topBarBuilder: _selected.isNotEmpty
             ? _selectionBar
             : _searching

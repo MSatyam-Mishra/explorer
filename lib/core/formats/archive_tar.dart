@@ -279,7 +279,8 @@ class TarBackend extends ArcBackend {
           if (base.isNotEmpty) inner = base;
         }
       }
-      // ISIZE: size modulo 2^32 (exact below 4 GiB).
+      // ISIZE is the size modulo 2^32, and multi-member files only record
+      // their last member: shown as an estimate (sizeIsExact: false).
       final tail = await source.read(source.length - 4, 4);
       size = ByteData.sublistView(tail).getUint32(0, Endian.little);
     }
@@ -297,6 +298,7 @@ class TarBackend extends ArcBackend {
           packedSize: source.length,
           modified: modified,
           method: _label(compression),
+          sizeIsExact: false,
         ),
       ],
       [_TarItem(0, size)],
@@ -414,6 +416,13 @@ class TarBackend extends ArcBackend {
     }
     final item = _items[entry.index];
     if (compression == TarCompression.none) {
+      if (item.dataOffset + item.size > _source.length) {
+        throw ArcException(
+          ArcErrorKind.corrupt,
+          'The archive is truncated ("${entry.name}" runs past its end).',
+          entryPath: entry.path,
+        );
+      }
       return readRange(_source, item.dataOffset, item.size);
     }
     return _readSequential(entry, item);

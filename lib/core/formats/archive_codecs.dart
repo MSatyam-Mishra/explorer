@@ -9,7 +9,6 @@ import 'dart:io' show gzip;
 import 'dart:typed_data';
 
 import 'package:koni_archive_core/koni_archive_core.dart' show Crc32;
-// ignore: depend_on_referenced_packages
 import 'package:koni_codecs/crypto.dart' show Sha256;
 
 /// Gzip (multi-member) through the platform zlib.

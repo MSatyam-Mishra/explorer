@@ -436,8 +436,7 @@ class ExtractProgressCard extends StatelessWidget {
     final current = pr == null || pr.current.isEmpty
         ? 'Preparing…'
         : seeking != null
-        ? 'Unpacking the data stored before ${p.basename(pr.current)} '
-            '(solid archive)…'
+        ? 'Unpacking earlier data to reach ${p.basename(pr.current)}…'
         : p.basename(pr.current);
     final detail = pr == null
         ? ''

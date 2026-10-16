@@ -12,9 +12,7 @@ import 'dart:typed_data';
 import 'package:koni_archive_core/koni_archive_core.dart' as koni;
 // koni_codecs is resolved through koni_sevenz/koni_rar (same version); it
 // should also be listed in pubspec.yaml.
-// ignore: depend_on_referenced_packages
 import 'package:koni_codecs/crypto.dart' as kc;
-// ignore: depend_on_referenced_packages
 import 'package:koni_codecs/koni_codecs.dart' show LzmaDecoder;
 
 import 'archive_backend.dart';
@@ -56,12 +54,13 @@ class _ZipItem {
 
 class ZipBackend extends ArcBackend {
   ZipBackend._(this._source, this.entries, this._items, this._bias,
-      this.formatLabel, this._password);
+      this.formatLabel, this._password, this._limits);
 
   final koni.ByteSource _source;
   final List<_ZipItem> _items;
   final int _bias;
   final String? _password;
+  final ArcLimits _limits;
 
   @override
   final List<ArcEntry> entries;
@@ -160,6 +159,7 @@ class ZipBackend extends ArcBackend {
       bias,
       zip64 ? 'ZIP64' : 'ZIP',
       password,
+      limits,
     );
   }
 
@@ -655,7 +655,7 @@ class ZipBackend extends ArcBackend {
     _ZipItem item,
     ArcEntry entry,
   ) async* {
-    if (item.size > const ArcLimits().maxInMemoryEntry) {
+    if (item.size > _limits.maxInMemoryEntry) {
       throw ArcException(
         ArcErrorKind.tooLarge,
         '"${entry.name}" is too large to unpack (LZMA entries are decoded in '

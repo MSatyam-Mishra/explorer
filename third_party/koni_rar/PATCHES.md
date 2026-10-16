@@ -16,5 +16,16 @@ depend on the published package once upstream includes equivalent fixes.
    boundary, so a directory header inside a run can't restart decoding with
    empty state.
 
+3. The app's RAR driver (lib/core/formats/archive_rar.dart) doesn't use
+   this package's `RarReader`; it uses this package's container, crypto,
+   PPMd and filter code with patched copies of the two decoders in
+   lib/core/formats/archive_rar5_decoder.dart and archive_rar4_decoder.dart.
+   Those copies also fix, for solid archives: x86/ARM filter addresses taken
+   from the window position instead of the file start, and filters applied
+   in place in the LZ window (later members then matched filtered bytes) —
+   executables after the first in a solid archive failed their CRC. Solid
+   runs larger than the dictionary also decode there, in a bounded window.
+   Fold these into this package if upstream takes them.
+
 Verified byte-for-byte against WinRAR 7 output (store, -m1..-m5, solid, -p,
 -hp, 6-volume set) and libarchive's RAR4 test archives.

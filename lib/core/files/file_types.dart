@@ -205,9 +205,13 @@ abstract final class FileTypes {
     return ext.startsWith('.') ? ext.substring(1) : ext;
   }
 
+  /// Later parts of multi-volume archives: `.r00`, `.s01`, `.7z.001`, ….
+  static final _volumePart = RegExp(r'^(?:[rs]\d\d|\d{3})$');
+
   static FileKind kindOf(String path) {
     if (path.toLowerCase().endsWith('.fb2.zip')) return FileKind.ebook;
     final ext = extensionOf(path);
+    if (_volumePart.hasMatch(ext)) return FileKind.archive;
     if (ext.isEmpty) {
       final name = p.basename(path).toLowerCase();
       return textFileNames.contains(name) ? FileKind.text : FileKind.unknown;

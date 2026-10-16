@@ -36,6 +36,7 @@ dependencies:
   archive: ^3.6.1 # Avoid 4.0.0 for now unless necessary as it's a major bump
   # Pure-Dart RAR4/RAR5 and 7z readers (archive viewer, CBR/CB7 comics).
   koni_archive_core: ^0.9.0
+  koni_codecs: ^0.9.0
   koni_rar:
     path: third_party/koni_rar # 0.9.0 with fixes, see PATCHES.md there
   koni_sevenz: ^0.9.0

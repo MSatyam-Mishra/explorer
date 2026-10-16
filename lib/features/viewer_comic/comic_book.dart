@@ -79,7 +79,14 @@ class ComicBook extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      _session ??= await ArchiveSession.spawn();
+      if (_session == null) {
+        final session = await ArchiveSession.spawn();
+        if (_disposed) {
+          session.dispose();
+          return;
+        }
+        _session = session;
+      }
     } catch (e) {
       _fail(ArcException(ArcErrorKind.io, 'Couldn\'t start the reader.', detail: '$e'));
       return;
