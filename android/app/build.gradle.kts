@@ -16,6 +16,12 @@ if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
 
+// The video downloader bundles GPL-3.0 components (youtubedl-android with
+// Python and FFmpeg) and adds ~54 MB to each APK. Build without it with
+// -Pexplorer.videoDownloader=false (tool/build_release.py
+// --without-video-downloader, together with --dart-define=VIDEO_DOWNLOADER=false).
+val withVideoDownloader = project.findProperty("explorer.videoDownloader")?.toString() != "false"
+
 android {
     namespace = "com.example.explorer"
     compileSdk = flutter.compileSdkVersion
@@ -38,6 +44,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["videoDownloaderEnabled"] = withVideoDownloader.toString()
     }
 
     signingConfigs {
@@ -60,6 +67,10 @@ android {
             }
         }
     }
+
+    sourceSets.getByName("main").java.srcDir(
+        if (withVideoDownloader) "src/videoDownloader/kotlin" else "src/noVideoDownloader/kotlin",
+    )
 
     packaging {
         resources {
@@ -95,6 +106,8 @@ dependencies {
     // (GPL-3.0; https://github.com/yausername/youtubedl-android, maintained
     // builds published by JunkFood02). Needs extractNativeLibs=true, which
     // the jniLibs.useLegacyPackaging setting above gives.
-    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    if (withVideoDownloader) {
+        implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+        implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    }
 }

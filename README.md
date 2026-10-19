@@ -35,6 +35,8 @@ This is an independent implementation of the protocol written from its specifica
 
 ## Video downloader (yt-dlp)
 
+> **Not in the release APKs yet.** The downloader bundles GPL-3.0 components (youtubedl-android and FFmpeg) and adds about 54 MB per APK, so published builds are made without it (`python tool/build_release.py --without-video-downloader`). Build from source to try it.
+
 Download videos or audio from the [many sites yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md). It is the same engine that [VidBee](https://github.com/nexmoe/VidBee) uses on the desktop.
 
 - In a browser or video app, tap **Share → Download video**. Or open **Menu → Tools → Video downloader** and paste a link.
@@ -55,10 +57,11 @@ flutter pub get
 flutter run
 ```
 
-Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are built into `build/release/v<version>/`:
+Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are built into `build/release/v<version>/`. Add `--without-video-downloader` to leave the downloader out:
 
 ```sh
 python tool/build_release.py
+python tool/build_release.py --without-video-downloader
 ```
 
 Release signing reads `android/key.properties`, which is git-ignored. Without that file, builds use the debug key.

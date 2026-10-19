@@ -1,6 +1,7 @@
 // FILE PATH: lib/main.dart
 
 import 'package:explorer/core/app/app_bloc_observer.dart';
+import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/services/incoming_files.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_licenses.dart';
 import 'package:explorer/core/services/webview_warmup.dart';
@@ -19,15 +20,17 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   Bloc.observer = const AppBlocObserver();
-  registerVideoDownloaderLicenses();
+  if (kVideoDownloaderEnabled) registerVideoDownloaderLicenses();
 
   // Launched from another app ("Open with" a file, or "Share" a link): go
   // straight to the viewer or the video downloader.
   final launchItem = await IncomingFiles.takeInitial();
   IncomingFiles.onIncoming.listen((incoming) {
-    _navigatorKey.currentState?.push(MaterialPageRoute(
-      builder: (_) => _screenFor(incoming, launchedForIt: false),
-    ));
+    _navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => _screenFor(incoming, launchedForIt: false),
+      ),
+    );
   });
 
   // A notification tap opens its screen on top of the explorer, so Back
@@ -36,9 +39,11 @@ void main() async {
   runApp(App(launchItem: startItem));
   if (launchItem is IncomingRoute) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _navigatorKey.currentState?.push(MaterialPageRoute(
-        builder: (_) => _screenFor(launchItem, launchedForIt: false),
-      ));
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => _screenFor(launchItem, launchedForIt: false),
+        ),
+      );
     });
   }
 
@@ -66,10 +71,7 @@ class App extends StatelessWidget {
           return MaterialApp(
             navigatorKey: _navigatorKey,
             title: 'Explorer',
-            theme: AppTheme.forSettings(
-              settings,
-              brightness: Brightness.light,
-            ),
+            theme: AppTheme.forSettings(settings, brightness: Brightness.light),
             darkTheme: AppTheme.forSettings(
               settings,
               brightness: Brightness.dark,
@@ -95,10 +97,19 @@ class App extends StatelessWidget {
 /// started just for this, so leaving it returns to the sending app.
 Widget _screenFor(IncomingItem item, {required bool launchedForIt}) =>
     switch (item) {
-      IncomingFile() =>
-        IncomingFileScreen(incoming: item, closeAppWhenDone: launchedForIt),
+      IncomingFile() => IncomingFileScreen(
+        incoming: item,
+        closeAppWhenDone: launchedForIt,
+      ),
+      // Builds without the downloader don't register for shared links or
+      // post download notifications, so these only arrive with it.
       IncomingLink(:final text, :final url) =>
-        VideoDownloaderScreen(initialUrl: url ?? text.trim()),
+        kVideoDownloaderEnabled
+            ? VideoDownloaderScreen(initialUrl: url ?? text.trim())
+            : const FileExplorerScreen(),
       // Only one route so far: download notifications.
-      IncomingRoute() => const VideoDownloaderScreen(),
+      IncomingRoute() =>
+        kVideoDownloaderEnabled
+            ? const VideoDownloaderScreen()
+            : const FileExplorerScreen(),
     };

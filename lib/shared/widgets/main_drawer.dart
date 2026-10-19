@@ -10,6 +10,7 @@ import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/vault/screens/vault_screen.dart';
 import 'package:explorer/features/tools/screens/app_manager_screen.dart';
+import 'package:explorer/core/build_features.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
 import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
@@ -201,19 +202,20 @@ class MainDrawerContent extends StatelessWidget {
               );
             },
           ),
-          ListTile(
-            leading: const Icon(BootstrapIcons.cloud_arrow_down_fill),
-            title: const Text('Video downloader'),
-            onTap: () {
-              dismissDrawer(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const VideoDownloaderScreen(),
-                ),
-              );
-            },
-          ),
+          if (kVideoDownloaderEnabled)
+            ListTile(
+              leading: const Icon(BootstrapIcons.cloud_arrow_down_fill),
+              title: const Text('Video downloader'),
+              onTap: () {
+                dismissDrawer(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const VideoDownloaderScreen(),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );

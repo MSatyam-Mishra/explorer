@@ -1,7 +1,11 @@
 """Builds release APKs for every ABI plus a universal APK.
 
 Run from the project root:
-    python tool/build_release.py
+    python tool/build_release.py [--without-video-downloader]
+
+--without-video-downloader leaves out the video downloader (its GPL-3.0
+youtubedl-android/FFmpeg/Python payload, ~54 MB per APK) and its menu entry
+and share target.
 
 Output: build/release/v<version>/explorer-v<version>-<abi>.apk, the universal
 APK and SHA256SUMS.txt. Dart code is obfuscated; the symbols needed to decode
@@ -23,6 +27,7 @@ ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86_64']
 
 
 def main():
+    without_downloader = '--without-video-downloader' in sys.argv[1:]
     with open(os.path.join(ROOT, 'pubspec.yaml'), encoding='utf-8') as f:
         version = re.search(r'^version:\s*([0-9.]+)', f.read(), re.M).group(1)
     if not os.path.exists(os.path.join(ROOT, 'android', 'key.properties')):
@@ -32,6 +37,10 @@ def main():
     symbols = os.path.join(ROOT, 'build', 'symbols', f'v{version}')
     common = ['build', 'apk', '--release', '--obfuscate', f'--split-debug-info={symbols}',
               '--android-skip-build-dependency-validation']
+    if without_downloader:
+        common += ['--dart-define=VIDEO_DOWNLOADER=false',
+                   '--android-project-arg=explorer.videoDownloader=false']
+        print('Building without the video downloader.')
     for extra in (['--split-per-abi'], []):
         print('flutter', ' '.join(common + extra))
         subprocess.run([flutter, *common, *extra], cwd=ROOT, check=True)

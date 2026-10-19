@@ -63,12 +63,6 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- "Share → Download video": links shared from browsers and video apps. -->
-            <intent-filter android:label="Download video">
-                <action android:name="android.intent.action.SEND"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <data android:mimeType="text/plain"/>
-            </intent-filter>
             <!-- "Open with" from other apps: every type an in-app viewer handles.
                  Explicit types (not */*) keep Explorer out of choosers for files it
                  would only hand to another app, e.g. APKs. -->
@@ -165,10 +159,26 @@
                 <data android:mimeType="application/octet-stream"/>
             </intent-filter>
         </activity>
-        
+
+        <!-- "Share → Download video": links shared from browsers and video apps.
+             Disabled in builds without the video downloader (build.gradle.kts). -->
+        <activity-alias
+            android:name=".DownloadVideoShareTarget"
+            android:targetActivity=".MainActivity"
+            android:label="Download video"
+            android:enabled="${videoDownloaderEnabled}"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity-alias>
+
         <!-- Video downloader: runs yt-dlp jobs while the app is in the background. -->
         <service
             android:name=".VideoDownloadService"
+            android:enabled="${videoDownloaderEnabled}"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

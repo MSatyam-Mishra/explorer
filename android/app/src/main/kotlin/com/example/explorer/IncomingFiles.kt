@@ -31,6 +31,11 @@ import java.util.concurrent.Executors
  * access.
  */
 class IncomingFiles(private val activity: Activity, messenger: BinaryMessenger) {
+    companion object {
+        /** Screen to open, set by notifications (see VideoDownloadService). */
+        const val EXTRA_ROUTE = "explorer.route"
+    }
+
     private val channel = MethodChannel(messenger, "explorer/incoming")
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newCachedThreadPool()
@@ -81,7 +86,7 @@ class IncomingFiles(private val activity: Activity, messenger: BinaryMessenger) 
 
     private fun describe(intent: Intent): Map<String, Any?>? {
         // A tap on a download notification: open that screen.
-        intent.getStringExtra(VideoDownloadService.EXTRA_ROUTE)?.let {
+        intent.getStringExtra(EXTRA_ROUTE)?.let {
             return mapOf("route" to it)
         }
         // A link shared from another app (e.g. a video page from a browser).
