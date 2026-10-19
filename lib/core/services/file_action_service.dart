@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/router/file_opener.dart';
+import 'package:explorer/features/localsend/screens/localsend_screen.dart';
 
 class FileActionsService {
   final FileRepository repository;
@@ -44,6 +45,19 @@ class FileActionsService {
               onTap: () {
                 Navigator.pop(sheetContext);
                 share(context, entity);
+              },
+            ),
+            ListTile(
+              leading: const Icon(BootstrapIcons.broadcast),
+              title: const Text('Send nearby (LocalSend)'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LocalSendScreen(initialItems: [entity]),
+                  ),
+                );
               },
             ),
             ListTile(

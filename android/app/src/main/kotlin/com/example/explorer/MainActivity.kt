@@ -26,6 +26,8 @@ class MainActivity : FlutterFragmentActivity() {
     private val deviceInterfaces = HashMap<Int, UsbInterface>()
 
     private var incomingFiles: IncomingFiles? = null
+    private var localSend: LocalSendNative? = null
+    private var videoDownloader: VideoDownloaderNative? = null
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -36,12 +38,18 @@ class MainActivity : FlutterFragmentActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         incomingFiles?.dispose()
         incomingFiles = null
+        localSend?.dispose()
+        localSend = null
+        videoDownloader?.dispose()
+        videoDownloader = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         incomingFiles = IncomingFiles(this, flutterEngine.dartExecutor.binaryMessenger)
+        localSend = LocalSendNative(this, flutterEngine.dartExecutor.binaryMessenger)
+        videoDownloader = VideoDownloaderNative(this, flutterEngine.dartExecutor.binaryMessenger)
         
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 

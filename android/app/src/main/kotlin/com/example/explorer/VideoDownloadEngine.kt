@@ -1,0 +1,201 @@
+package com.example.explorer
+
+import android.content.Context
+import android.os.Environment
+import com.yausername.ffmpeg.FFmpeg
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+
+/**
+ * yt-dlp runtime on Android, from youtubedl-android: a Python interpreter,
+ * the yt-dlp zipapp, FFmpeg and QuickJS, all run as child processes.
+ *
+ * The first [ensureReady] unpacks Python (~65 MB) and FFmpeg (~140 MB) into
+ * no-backup app storage; later calls only check that they are there.
+ */
+object VideoDownloadEngine {
+    const val PREFS = "explorer_video_downloader"
+    private const val KEY_VERSION = "ytdlp_version"
+    private const val KEY_VERSION_STAMP = "ytdlp_version_stamp"
+    private const val RELEASES_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+    private const val BASE_DIR = "youtubedl-android"
+
+    @Volatile
+    var isReady = false
+        private set
+    private val initLock = Any()
+    private val updateLock = Any()
+
+    /** Whether Python and FFmpeg were unpacked before, so init will be quick. */
+    fun isUnpacked(context: Context): Boolean {
+        val packages = File(context.noBackupFilesDir, "$BASE_DIR/packages")
+        return File(packages, "python").isDirectory && File(packages, "ffmpeg").isDirectory &&
+            ytDlpFile(context).isFile
+    }
+
+    @Throws(Exception::class)
+    fun ensureReady(context: Context) {
+        if (isReady) return
+        synchronized(initLock) {
+            if (isReady) return
+            val app = context.applicationContext
+            YoutubeDL.getInstance().init(app)
+            FFmpeg.getInstance().init(app)
+            isReady = true
+        }
+    }
+
+    fun ytDlpFile(context: Context): File =
+        File(context.noBackupFilesDir, "$BASE_DIR/${YoutubeDL.ytdlpDirName}/${YoutubeDL.ytdlpBin}")
+
+    /** yt-dlp's cache (YouTube player code, signatures): makes repeat runs faster. */
+    fun cacheDir(context: Context): File = File(context.cacheDir, "yt-dlp-cache")
+
+    /** Parent of the per-job folders for partial downloads (`-P temp:`). */
+    fun workRoot(context: Context): File =
+        File(context.externalCacheDir ?: context.cacheDir, "video-downloads")
+
+    /** Public Download/Explorer Videos when writable, else the app's own folder. */
+    fun defaultOutputDir(context: Context): File {
+        @Suppress("DEPRECATION")
+        val public = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "Explorer Videos",
+        )
+        if (canWrite(public)) return public
+        val own = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+        return File(own, "Explorer Videos")
+    }
+
+    fun canWrite(dir: File): Boolean = try {
+        dir.mkdirs()
+        val probe = File(dir, ".explorer-write-test")
+        probe.writeText("")
+        probe.delete()
+    } catch (e: Exception) {
+        false
+    }
+
+    /** `yt-dlp -J --flat-playlist`: the JSON for a video or a playlist. */
+    @Throws(Exception::class)
+    fun fetchInfo(context: Context, url: String, requestId: String): String {
+        ensureReady(context)
+        val request = YoutubeDLRequest(url)
+            .addOption("--cache-dir", cacheDir(context).absolutePath)
+            .addOption("--dump-single-json")
+            .addOption("--flat-playlist")
+            .addOption("--no-update")
+        return YoutubeDL.getInstance().execute(request, requestId, null).out
+    }
+
+    /** yt-dlp's version, e.g. "2025.11.12". Cached until the binary changes. */
+    @Throws(Exception::class)
+    fun version(context: Context): String? {
+        ensureReady(context)
+        val file = ytDlpFile(context)
+        val stamp = "${file.length()}:${file.lastModified()}"
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(KEY_VERSION_STAMP, null) == stamp) {
+            prefs.getString(KEY_VERSION, null)?.let { return it }
+        }
+        val request = YoutubeDLRequest(emptyList<String>()).addOption("--version")
+        val out = YoutubeDL.getInstance().execute(request, null, null).out
+        val version = out.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
+        prefs.edit().putString(KEY_VERSION, version).putString(KEY_VERSION_STAMP, stamp).apply()
+        return version
+    }
+
+    /**
+     * Updates yt-dlp to the latest stable release from GitHub, verified
+     * against the release's SHA2-256SUMS. Refused while downloads run: the
+     * zipapp is read lazily by the running interpreters.
+     */
+    @Throws(Exception::class)
+    fun update(context: Context): Map<String, Any?> {
+        ensureReady(context)
+        synchronized(updateLock) {
+            if (VideoDownloadJobs.hasActive()) {
+                throw IllegalStateException("Wait for the downloads to finish, then update yt-dlp.")
+            }
+            val release = JSONObject(readText(RELEASES_API, api = true))
+            val tag = release.getString("tag_name")
+            val current = version(context)
+            if (current == tag) return mapOf("status" to "upToDate", "version" to current)
+
+            var binaryUrl: String? = null
+            var sumsUrl: String? = null
+            val assets = release.getJSONArray("assets")
+            for (i in 0 until assets.length()) {
+                val asset = assets.getJSONObject(i)
+                when (asset.getString("name")) {
+                    "yt-dlp" -> binaryUrl = asset.getString("browser_download_url")
+                    "SHA2-256SUMS" -> sumsUrl = asset.getString("browser_download_url")
+                }
+            }
+            if (binaryUrl == null || sumsUrl == null) throw IOException("The release has no yt-dlp file.")
+            val expected = readText(sumsUrl).lineSequence()
+                .map { it.trim().split(Regex("\\s+")) }
+                .firstOrNull { it.size == 2 && it[1].removePrefix("*") == "yt-dlp" }
+                ?.get(0)?.lowercase()
+                ?: throw IOException("SHA2-256SUMS has no entry for yt-dlp.")
+
+            val target = ytDlpFile(context)
+            val temp = File(target.parentFile, "yt-dlp.download")
+            val digest = MessageDigest.getInstance("SHA-256")
+            open(binaryUrl).let { connection ->
+                try {
+                    connection.inputStream.use { input ->
+                        temp.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                digest.update(buffer, 0, n)
+                                output.write(buffer, 0, n)
+                            }
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (actual != expected) {
+                temp.delete()
+                throw IOException("The downloaded yt-dlp failed its checksum test.")
+            }
+            if (!temp.renameTo(target)) {
+                target.delete()
+                if (!temp.renameTo(target)) throw IOException("Couldn't replace yt-dlp.")
+            }
+            return mapOf("status" to "updated", "version" to (version(context) ?: tag))
+        }
+    }
+
+    private fun open(url: String, api: Boolean = false): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Explorer-VideoDownloader")
+            if (api) setRequestProperty("Accept", "application/vnd.github+json")
+        }
+
+    private fun readText(url: String, api: Boolean = false): String {
+        val connection = open(url, api)
+        try {
+            if (connection.responseCode !in 200..299) {
+                throw IOException("HTTP ${connection.responseCode} from ${URL(url).host}")
+            }
+            return connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}

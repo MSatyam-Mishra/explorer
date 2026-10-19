@@ -10,7 +10,9 @@ import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/vault/screens/vault_screen.dart';
 import 'package:explorer/features/tools/screens/app_manager_screen.dart';
+import 'package:explorer/features/localsend/screens/localsend_screen.dart';
 import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
+import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
 
 import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/glossy_drawer.dart';
@@ -184,6 +186,31 @@ class MainDrawerContent extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const UsbBootScreen()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(BootstrapIcons.broadcast),
+            title: const Text('Nearby share'),
+            subtitle: const Text('Send and receive with LocalSend'),
+            onTap: () {
+              dismissDrawer(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LocalSendScreen()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(BootstrapIcons.cloud_arrow_down_fill),
+            title: const Text('Video downloader'),
+            onTap: () {
+              dismissDrawer(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const VideoDownloaderScreen(),
+                ),
               );
             },
           ),

@@ -50,5 +50,7 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Explorer finds nearby devices to send and receive files with LocalSend.</string>
 </dict>
 </plist>

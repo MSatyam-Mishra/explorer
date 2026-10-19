@@ -80,6 +80,15 @@ class IncomingFiles(private val activity: Activity, messenger: BinaryMessenger) 
     }
 
     private fun describe(intent: Intent): Map<String, Any?>? {
+        // A tap on a download notification: open that screen.
+        intent.getStringExtra(VideoDownloadService.EXTRA_ROUTE)?.let {
+            return mapOf("route" to it)
+        }
+        // A link shared from another app (e.g. a video page from a browser).
+        if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return null
+            return mapOf("text" to text)
+        }
         if (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_EDIT) {
             return null
         }

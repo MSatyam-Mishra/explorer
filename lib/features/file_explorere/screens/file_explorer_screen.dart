@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'package:bootstrap_icons/bootstrap_icons.dart';
+import 'package:explorer/features/localsend/screens/localsend_screen.dart';
+
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/shared/icons/app_icons.dart';
@@ -43,7 +46,8 @@ class FileExplorerScreen extends StatefulWidget {
 class _FileExplorerScreenState extends State<FileExplorerScreen> {
   // Created once: building the FutureBuilder with a fresh future on every
   // rebuild re-ran the permission check each time.
-  late final Future<PermissionStatus> _permission = _checkAndRequestPermission();
+  late final Future<PermissionStatus> _permission =
+      _checkAndRequestPermission();
 
   @override
   Widget build(BuildContext context) {
@@ -155,8 +159,7 @@ class _FileExplorerUI extends StatelessWidget {
       onPopInvoked: (didPop) {
         if (didPop) return;
         if (fileExplorerState is FileExplorerLoaded) {
-          final parentPath =
-              ExplorerPaths.parentOf(fileExplorerState.path);
+          final parentPath = ExplorerPaths.parentOf(fileExplorerState.path);
           if (parentPath != null) {
             context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
           }
@@ -224,8 +227,8 @@ class _FileExplorerUI extends StatelessWidget {
           tooltip: 'Cancel selection',
           onPressed: () {
             context.read<FileExplorerBloc>().add(
-                  ToggleSelectionMode(enable: false),
-                );
+              ToggleSelectionMode(enable: false),
+            );
           },
         ),
         trailing: Row(
@@ -238,11 +241,29 @@ class _FileExplorerUI extends StatelessWidget {
                 onPressed: () {
                   final entity = fileExplorerState.selectedItems.first;
                   context.read<FileExplorerBloc>().add(
-                        ToggleSelectionMode(enable: false),
-                      );
+                    ToggleSelectionMode(enable: false),
+                  );
                   fileActionsService.showFileOptionsMenu(context, entity);
                 },
               ),
+            IconButton(
+              icon: const Icon(BootstrapIcons.broadcast),
+              tooltip: 'Send nearby (LocalSend)',
+              onPressed: () {
+                final items = List<FileSystemEntity>.of(
+                  fileExplorerState.selectedItems,
+                );
+                context.read<FileExplorerBloc>().add(
+                  ToggleSelectionMode(enable: false),
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LocalSendScreen(initialItems: items),
+                  ),
+                );
+              },
+            ),
             IconButton(
               icon: AppIcons.archive(),
               tooltip: 'Compress',
@@ -279,17 +300,14 @@ class _FileExplorerUI extends StatelessWidget {
               ExplorerOptionsSheet.show(
                 context,
                 fileState: fileExplorerState,
-                onHttpShare: () =>
-                    _handleHttpShare(context, fileExplorerState),
+                onHttpShare: () => _handleHttpShare(context, fileExplorerState),
                 onSortChanged: (SortOption option, SortOrder order) {
                   context.read<FileExplorerBloc>().add(
-                        ChangeSortOrder(option, order),
-                      );
+                    ChangeSortOrder(option, order),
+                  );
                 },
                 onViewModeChanged: (ViewMode mode) {
-                  context.read<FileExplorerBloc>().add(
-                        ChangeViewMode(mode),
-                      );
+                  context.read<FileExplorerBloc>().add(ChangeViewMode(mode));
                 },
               );
             }

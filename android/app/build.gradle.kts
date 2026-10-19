@@ -65,6 +65,12 @@ android {
         resources {
             pickFirst("lib/**/libc++_shared.so")
         }
+        // Compress native libraries inside the APK: the download is ~half the
+        // size (libapp/libflutter/rive compress ~2.4x), at the cost of Android
+        // extracting them on install. Right for APKs downloaded from GitHub.
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
@@ -82,4 +88,13 @@ android.applicationVariants.configureEach {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Video downloader: yt-dlp with Python, QuickJS and FFmpeg for Android
+    // (GPL-3.0; https://github.com/yausername/youtubedl-android, maintained
+    // builds published by JunkFood02). Needs extractNativeLibs=true, which
+    // the jniLibs.useLegacyPackaging setting above gives.
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 }
