@@ -7,7 +7,10 @@ import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/archive_service.dart';
 import 'package:explorer/core/services/file_action_service.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
-import 'package:explorer/core/services/http_server_service.dart';
+import 'package:explorer/core/services/file_server/app_file_server_resources.dart';
+import 'package:explorer/core/services/file_server/http_file_server.dart';
+import 'package:explorer/core/services/localsend/localsend_platform.dart';
+import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
@@ -146,15 +149,15 @@ class _FileExplorerWithProviders extends StatelessWidget {
 
 /// The folder a state is about, if any.
 String? _pathOf(FileExplorerState state) => switch (state) {
-      FileExplorerLoaded(:final path) => path,
-      FileExplorerLoading(:final path) => path,
-      FileExplorerError(:final path) => path,
-      _ => null,
-    };
+  FileExplorerLoaded(:final path) => path,
+  FileExplorerLoading(:final path) => path,
+  FileExplorerError(:final path) => path,
+  _ => null,
+};
 
 // This is the actual UI, which is now guaranteed to be under all the providers.
 class _FileExplorerUI extends StatelessWidget {
-  _FileExplorerUI();
+  const _FileExplorerUI();
 
   /// Sidebar width when it's docked next to the files (tablets, desktops).
   static const double _sidebarWidth = 280;
@@ -167,27 +170,33 @@ class _FileExplorerUI extends StatelessWidget {
     final taskState = context.watch<TaskProgressBloc>().state;
 
     final path = _pathOf(fileExplorerState);
-    final loaded =
-        fileExplorerState is FileExplorerLoaded ? fileExplorerState : null;
+    final loaded = fileExplorerState is FileExplorerLoaded
+        ? fileExplorerState
+        : null;
     final bool isSelectionMode = loaded?.isSelectionMode ?? false;
-    final String? parentPath = path == null ? null : ExplorerPaths.parentOf(path);
+    final String? parentPath = path == null
+        ? null
+        : ExplorerPaths.parentOf(path);
     final bool canPop = !isSelectionMode && parentPath == null;
 
     // Tablets, unfolded foldables and desktops keep navigation docked.
     final bool docked = AdaptiveSplitView.isSplit(context);
     final bool busy = taskState is TaskInProgress;
-    final pasteState =
-        clipboardState is ClipboardReadyToPaste && !busy ? clipboardState : null;
+    final pasteState = clipboardState is ClipboardReadyToPaste && !busy
+        ? clipboardState
+        : null;
     final bool canCreate =
         loaded != null && !ExplorerPaths.isWindowsRoots(loaded.path);
-    final bool showFab = !docked &&
+    final bool showFab =
+        !docked &&
         canCreate &&
         loaded.entities.isNotEmpty &&
         !isSelectionMode &&
         pasteState == null &&
         !busy;
 
-    final bottomInset = (pasteState != null ? PasteBar.reservedHeight : 0.0) +
+    final bottomInset =
+        (pasteState != null ? PasteBar.reservedHeight : 0.0) +
         (showFab ? 72.0 : 0) +
         (busy ? 120.0 : 0);
 
@@ -213,9 +222,9 @@ class _FileExplorerUI extends StatelessWidget {
                     context.read<ClipboardBloc>().add(ClearClipboard()),
                 onPaste: loaded == null || ExplorerPaths.isWindowsRoots(path!)
                     ? null
-                    : () => context
-                        .read<ClipboardBloc>()
-                        .add(PasteFromClipboard(loaded.path)),
+                    : () => context.read<ClipboardBloc>().add(
+                        PasteFromClipboard(loaded.path),
+                      ),
               ),
             ),
           ),
@@ -327,7 +336,9 @@ class _FileExplorerUI extends StatelessWidget {
               bloc.add(ClearSelection());
             case SelectionMenuAction.copy:
               exitSelection();
-              context.read<ClipboardBloc>().add(CopyToClipboard(selected.first));
+              context.read<ClipboardBloc>().add(
+                CopyToClipboard(selected.first),
+              );
             case SelectionMenuAction.cut:
               exitSelection();
               context.read<ClipboardBloc>().add(CutToClipboard(selected.first));
@@ -346,8 +357,9 @@ class _FileExplorerUI extends StatelessWidget {
     }
 
     final path = _pathOf(fileExplorerState);
-    final loaded =
-        fileExplorerState is FileExplorerLoaded ? fileExplorerState : null;
+    final loaded = fileExplorerState is FileExplorerLoaded
+        ? fileExplorerState
+        : null;
     return ExplorerHeader(
       crumbs: path == null
           ? const []
@@ -365,7 +377,8 @@ class _FileExplorerUI extends StatelessWidget {
           ? null
           : (option, order) => bloc.add(ChangeSortOrder(option, order)),
       onNewFolder: canCreate && loaded != null
-          ? () => fileActionsService.showCreateFolderDialog(context, loaded.path)
+          ? () =>
+                fileActionsService.showCreateFolderDialog(context, loaded.path)
           : null,
       onOptionsPressed: loaded == null
           ? null
@@ -396,13 +409,12 @@ class _FileExplorerUI extends StatelessWidget {
     final statePadding = EdgeInsets.fromLTRB(24, topInset + 24, 24, bottom);
 
     if (state is FileExplorerLoading || state is FileExplorerInitial) {
-      return _DelayedReveal(
-        child: _ListSkeleton(top: topInset + 8),
-      );
+      return _DelayedReveal(child: _ListSkeleton(top: topInset + 8));
     }
     if (state is FileExplorerError) {
-      final parent =
-          state.path == null ? null : ExplorerPaths.parentOf(state.path!);
+      final parent = state.path == null
+          ? null
+          : ExplorerPaths.parentOf(state.path!);
       final bloc = context.read<FileExplorerBloc>();
       return ExplorerEmptyState(
         padding: statePadding,
@@ -489,8 +501,7 @@ class _FileExplorerUI extends StatelessWidget {
     );
 
     final List<Widget> slivers;
-    if (state.viewMode == ViewMode.grid ||
-        state.viewMode == ViewMode.gallery) {
+    if (state.viewMode == ViewMode.grid || state.viewMode == ViewMode.gallery) {
       final gallery = state.viewMode == ViewMode.gallery;
       final pad = wide ? 24.0 : 16.0;
       final spacing = wide ? 12.0 : 10.0;
@@ -512,22 +523,19 @@ class _FileExplorerUI extends StatelessWidget {
                     crossAxisSpacing: spacing,
                     mainAxisSpacing: spacing,
                   ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final entity = entities[index];
-                return FileGridItem(
-                  entity: entity,
-                  displayName: state.labelFor(entity),
-                  gallery: gallery,
-                  isSelectionMode: state.isSelectionMode,
-                  isSelected: state.selectedItems.contains(entity),
-                  onTap: () => onTap(entity),
-                  onLongPress: () => onLongPress(entity),
-                  onSecondaryTap: onSecondaryTap(entity),
-                );
-              },
-              childCount: entities.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final entity = entities[index];
+              return FileGridItem(
+                entity: entity,
+                displayName: state.labelFor(entity),
+                gallery: gallery,
+                isSelectionMode: state.isSelectionMode,
+                isSelected: state.selectedItems.contains(entity),
+                onTap: () => onTap(entity),
+                onLongPress: () => onLongPress(entity),
+                onSecondaryTap: onSecondaryTap(entity),
+              );
+            }, childCount: entities.length),
           ),
         ),
         footer,
@@ -536,8 +544,8 @@ class _FileExplorerUI extends StatelessWidget {
       final style = state.viewMode == ViewMode.compact
           ? FileRowStyle.compact
           : wide
-              ? FileRowStyle.table
-              : FileRowStyle.comfortable;
+          ? FileRowStyle.table
+          : FileRowStyle.comfortable;
       final sidePad = wide ? 8.0 : 0.0;
       slivers = [
         SliverPadding(
@@ -559,22 +567,19 @@ class _FileExplorerUI extends StatelessWidget {
           padding: EdgeInsets.symmetric(horizontal: sidePad),
           sliver: SliverFixedExtentList(
             itemExtent: FileListItem.heightFor(style) + 2,
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final entity = entities[index];
-                return FileListItem(
-                  entity: entity,
-                  displayName: state.labelFor(entity),
-                  style: style,
-                  isSelectionMode: state.isSelectionMode,
-                  isSelected: state.selectedItems.contains(entity),
-                  onTap: () => onTap(entity),
-                  onLongPress: () => onLongPress(entity),
-                  onSecondaryTap: onSecondaryTap(entity),
-                );
-              },
-              childCount: entities.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final entity = entities[index];
+              return FileListItem(
+                entity: entity,
+                displayName: state.labelFor(entity),
+                style: style,
+                isSelectionMode: state.isSelectionMode,
+                isSelected: state.selectedItems.contains(entity),
+                onTap: () => onTap(entity),
+                onLongPress: () => onLongPress(entity),
+                onSecondaryTap: onSecondaryTap(entity),
+              );
+            }, childCount: entities.length),
           ),
         ),
         footer,
@@ -649,7 +654,7 @@ class _FileExplorerUI extends StatelessWidget {
       title: 'Compress to ZIP',
       description: count == 1
           ? 'The selected item will be added to a new ZIP archive in this '
-              'folder.'
+                'folder.'
           : '$count items will be added to a new ZIP archive in this folder.',
       initialValue: 'archive.zip',
       selectBaseName: true,
@@ -691,58 +696,62 @@ class _FileExplorerUI extends StatelessWidget {
         }
       } catch (e) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Compression failed: $e')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Compression failed: $e')));
         }
       }
     }
   }
 
-  final HttpServerService _httpService = HttpServerService();
-
   Future<void> _handleHttpShare(
     BuildContext context,
     FileExplorerState state,
   ) async {
-    if (state is! FileExplorerLoaded) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cannot share: Directory not loaded')),
-        );
-      }
+    final messenger = ScaffoldMessenger.of(context);
+    if (state is! FileExplorerLoaded ||
+        ExplorerPaths.isWindowsRoots(state.path)) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Open a folder to share it')),
+      );
       return;
     }
-
-    // Start Server
+    final settings = context.read<ThemeCubit>().state;
+    final bloc = context.read<FileExplorerBloc>();
+    final server = HttpFileServer(
+      resources: AppFileServerResources(iconStyle: settings.fileIconStyle),
+    );
     try {
-      final url = await _httpService.startServer(state.path);
-
+      await server.start(
+        state.path,
+        theme: webThemeFor(settings.colorTheme),
+        deviceName: await LsSettingsStore.deviceModel(),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text("Couldn't start sharing: $e")),
+      );
+      return;
+    }
+    var received = false;
+    final subscription = server.received.listen((_) => received = true);
+    try {
       if (context.mounted) {
-        await showDialog(
+        await showDialog<void>(
           context: context,
-          barrierDismissible:
-              false, // Force use of Stop button or explicit cancel
-          builder: (context) => ServerStatusDialog(
-            url: url,
-            onStop: () async {
-              // The dialog calls onStop then pops; we only stop the server.
-              await _httpService.stopServer();
-            },
+          barrierDismissible: false,
+          builder: (_) => ServerStatusDialog(
+            server: server,
+            folderName: ExplorerPaths.titleForPath(state.path),
           ),
         );
-        // Ensure stopped if dialog closed otherwise
-        if (_httpService.isRunning) {
-          await _httpService.stopServer();
-        }
       }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to start server: $e')));
-      }
+    } finally {
+      await subscription.cancel();
+      await server.stop();
     }
+    // Show files uploaded from a browser.
+    if (received && !bloc.isClosed) bloc.add(LoadDirectory(state.path));
   }
 }
 
@@ -781,13 +790,13 @@ class _ListSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     Widget bar(double width, double height) => Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            color: colors.muted,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        );
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: colors.muted,
+        borderRadius: BorderRadius.circular(4),
+      ),
+    );
     return ListView.builder(
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.only(top: top),
@@ -877,7 +886,8 @@ class _PermissionDeniedScreen extends StatelessWidget {
         child: ExplorerEmptyState(
           icon: LucideIcons.folderLock,
           title: 'Allow access to your files',
-          description: 'Explorer needs the "All files access" permission to '
+          description:
+              'Explorer needs the "All files access" permission to '
               'browse, open and organise the files on this device. Nothing '
               'leaves your device.',
           actions: [

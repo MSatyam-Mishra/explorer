@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/core/services/http_range.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -202,8 +203,8 @@ class LocalContentServer {
       var start = 0, end = length, status = 200;
       final rangeHeader = request.headers[HttpHeaders.rangeHeader];
       if (rangeHeader != null) {
-        final range = _parseRange(rangeHeader, length);
-        if (range == _unsatisfiable) {
+        final range = parseByteRange(rangeHeader, length);
+        if (range == unsatisfiableRange) {
           return Response(
             416,
             headers: {HttpHeaders.contentRangeHeader: 'bytes */$length'},
@@ -226,35 +227,6 @@ class LocalContentServer {
       debugPrint('LocalContentServer: $path failed: $e\n$st');
       return Response.internalServerError();
     }
-  }
-
-  static const _unsatisfiable = (-1, -1);
-
-  /// Parses a single-range `Range: bytes=...` header into `[start, end)`.
-  /// Returns null to ignore the header (malformed or multi-range: the whole
-  /// file is sent, as HTTP allows) and [_unsatisfiable] for 416.
-  static (int, int)? _parseRange(String header, int length) {
-    final value = header.trim();
-    if (!value.startsWith('bytes=') || value.contains(',')) return null;
-    final spec = value.substring(6).trim();
-    final dash = spec.indexOf('-');
-    if (dash < 0) return null;
-    final first = spec.substring(0, dash).trim();
-    final last = spec.substring(dash + 1).trim();
-    if (first.isEmpty) {
-      // Suffix range: the last N bytes.
-      final n = int.tryParse(last);
-      if (n == null) return null;
-      if (n <= 0 || length == 0) return _unsatisfiable;
-      return (max(0, length - n), length);
-    }
-    final start = int.tryParse(first);
-    if (start == null || start < 0) return null;
-    if (start >= length) return _unsatisfiable;
-    if (last.isEmpty) return (start, length);
-    final stop = int.tryParse(last);
-    if (stop == null || stop < start) return null;
-    return (start, min(stop + 1, length));
   }
 
   static String _contentType(String path) {

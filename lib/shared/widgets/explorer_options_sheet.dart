@@ -160,7 +160,7 @@ class ExplorerOptionsSheet extends StatelessWidget {
         _ActionRow(
           icon: LucideIcons.globe,
           title: 'HTTP file server',
-          subtitle: 'Share this folder with devices on your network',
+          subtitle: 'Open this folder in a browser on any device on your Wi-Fi',
           onTap: () {
             Navigator.pop(context);
             onHttpShare();

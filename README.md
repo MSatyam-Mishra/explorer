@@ -19,6 +19,7 @@ Download the latest APK from [Releases](https://github.com/MSatyam-Mishra/explor
   - previews of design and CAD files (AI, EPS, DWG, Sketch, Figma, Krita and more).
 - **Media and more**: video and audio, 3D models (glTF, OBJ, STL, FBX and others), fonts, web pages, Markdown, a code editor with syntax colours, and a hex viewer for everything else.
 - **Nearby sharing** with LocalSend, and a **video downloader** (both below).
+- **Share in a browser**: **Options → HTTP file server** turns the current folder into a web page for any device on the same Wi-Fi. It has search, list and grid views, photo and video previews, ZIP downloads of whole folders, and uploads (off unless you allow them).
 - **System integration**: Explorer appears in Android's "Open with" and "Share" menus, with tablet and foldable layouts and three file-icon styles.
 
 ## Nearby sharing (LocalSend)
