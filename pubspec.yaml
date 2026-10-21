@@ -4,7 +4,7 @@ description: "A new Flutter project."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ^3.8.1
@@ -79,6 +79,7 @@ dev_dependencies:
 
 
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: 0.14.4
 
 
 flutter:
@@ -287,3 +288,30 @@ flutter:
     - assets/viewer3d/three/jsm/loaders/usd/
     - assets/viewer3d/three/jsm/math/
     - assets/viewer3d/three/jsm/utils/
+
+# App icon: artwork in assets/branding (SVG sources in assets/branding/source).
+# Regenerate after changing it: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: "ic_launcher"
+  image_path_android: "assets/branding/icon.png"
+  adaptive_icon_background: "assets/branding/adaptive_background.png"
+  adaptive_icon_foreground: "assets/branding/adaptive_foreground.png"
+  adaptive_icon_monochrome: "assets/branding/adaptive_monochrome.png"
+  # The foreground art is already sized for the adaptive safe zone.
+  adaptive_icon_foreground_inset: 0
+  min_sdk_android: 24
+  ios: true
+  image_path_ios: "assets/branding/icon_ios.png"
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/branding/icon.png"
+    background_color: "#2563EB"
+    theme_color: "#2563EB"
+  windows:
+    generate: true
+    image_path: "assets/branding/icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/branding/icon.png"

@@ -15,7 +15,7 @@
     <uses-feature android:name="android.hardware.usb.host" />
 
     <application
-        android:label="explorer"
+        android:label="Explorer"
         android:usesCleartextTraffic="true"
          android:enableOnBackInvokedCallback="true"  
         android:name="${applicationName}"
