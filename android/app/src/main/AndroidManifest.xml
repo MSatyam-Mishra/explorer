@@ -140,6 +140,7 @@
                 <data android:mimeType="application/vnd.ms-opentype"/>
                 <data android:mimeType="application/sla"/>
                 <data android:mimeType="application/vnd.ms-pki.stl"/>
+                <data android:mimeType="application/x-blender"/>
                 <data android:mimeType="application/x-tgif"/>
                 <data android:mimeType="application/vnd.rar"/>
                 <data android:mimeType="application/x-rar-compressed"/>

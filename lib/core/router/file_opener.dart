@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/features/viewer_3d/screens/blend_viewer_screen.dart';
 import 'package:explorer/features/viewer_3d/screens/three_d_viewer_screen.dart';
 import 'package:explorer/features/viewer_archive/screens/archive_viewer_screen.dart';
 import 'package:explorer/features/viewer_comic/screens/comic_viewer.dart';
@@ -96,7 +97,11 @@ class FileOpener {
       FileKind.legacyPresentation ||
       FileKind.openDocumentPresentation =>
         PptViewerScreen(file: file),
-      FileKind.model3d => ThreeDViewerScreen(file: file),
+      FileKind.model3d => const {'blend', 'blend1'}.contains(
+              FileTypes.extensionOf(file.path),
+            )
+          ? BlendViewerScreen(file: file)
+          : ThreeDViewerScreen(file: file),
       FileKind.archive ||
       FileKind.diskImage =>
         ArchiveViewerScreen(archiveFile: file),

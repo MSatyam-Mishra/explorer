@@ -17,7 +17,7 @@ Download the latest APK from [Releases](https://github.com/MSatyam-Mishra/explor
   - common formats plus TIFF, PSD and camera RAW previews;
   - an image editor and EXIF details;
   - previews of design and CAD files (AI, EPS, DWG, Sketch, Figma, Krita and more).
-- **Media and more**: video and audio, 3D models (glTF, OBJ, STL, FBX and others), fonts, web pages, Markdown, a code editor with syntax colours, and a hex viewer for everything else.
+- **Media and more**: video and audio, 3D models (glTF, OBJ, STL, FBX, Blender .blend and others), fonts, web pages, Markdown, a code editor with syntax colours, and a hex viewer for everything else.
 - **Nearby sharing** with LocalSend, and a **video downloader** (both below).
 - **Wi-Fi sharing** (**Menu → Wi-Fi sharing**, or **Options → Wi-Fi sharing** for the current folder): share a folder with any device on the same Wi-Fi.
   - **Browser (HTTP)**: a web page with search, list and grid views, photo and video previews, ZIP downloads of whole folders, and uploads.

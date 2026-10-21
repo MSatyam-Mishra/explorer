@@ -1,0 +1,164 @@
+[
+ {
+  "file": "empty.zst",
+  "size": 0,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "note": "empty input"
+ },
+ {
+  "file": "one_byte.zst",
+  "size": 1,
+  "sha256": "559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd",
+  "note": "single byte"
+ },
+ {
+  "file": "one_byte_checksum.zst",
+  "size": 1,
+  "sha256": "bbeebd879e1dff6918546dc0c179fdde505f2a21591c9a9c96e36b054ec5af83",
+  "note": "single byte, checksum"
+ },
+ {
+  "file": "zeros_300k.zst",
+  "size": 300000,
+  "sha256": "886715e4051e827f4fe215df3053af3f85ad0d352db2c829c7487af6d78efe30",
+  "note": "RLE blocks"
+ },
+ {
+  "file": "pattern_200k.zst",
+  "size": 200000,
+  "sha256": "2c0ea28e0ee3bcd9017f68547e8e8aae65eff5c4bccc48a4f8f74f77c2518445",
+  "note": "highly repetitive"
+ },
+ {
+  "file": "random_8k.zst",
+  "size": 8192,
+  "sha256": "ccbc3ef6b39b8ffdc83fd3f93fd4299e23d175dc54a5ddfcfb9c7c8e6b1e09cd",
+  "note": "incompressible: raw block"
+ },
+ {
+  "file": "random_8k_w10.zst",
+  "size": 8192,
+  "sha256": "ccbc3ef6b39b8ffdc83fd3f93fd4299e23d175dc54a5ddfcfb9c7c8e6b1e09cd",
+  "note": "raw blocks with 1 KiB window (block max 1 KiB)"
+ },
+ {
+  "file": "text_l1.zst",
+  "size": 16383,
+  "sha256": "b2f1debc34f44d6af8c8788f0b99d326e86c9a221e50d90db25d5e785ae27ace",
+  "note": "English-like text, level 1"
+ },
+ {
+  "file": "text_l3.zst",
+  "size": 16383,
+  "sha256": "b2f1debc34f44d6af8c8788f0b99d326e86c9a221e50d90db25d5e785ae27ace",
+  "note": "English-like text, level 3"
+ },
+ {
+  "file": "text_l9.zst",
+  "size": 16383,
+  "sha256": "b2f1debc34f44d6af8c8788f0b99d326e86c9a221e50d90db25d5e785ae27ace",
+  "note": "English-like text, level 9"
+ },
+ {
+  "file": "text_l19.zst",
+  "size": 16383,
+  "sha256": "b2f1debc34f44d6af8c8788f0b99d326e86c9a221e50d90db25d5e785ae27ace",
+  "note": "English-like text, level 19"
+ },
+ {
+  "file": "text_l22.zst",
+  "size": 16383,
+  "sha256": "b2f1debc34f44d6af8c8788f0b99d326e86c9a221e50d90db25d5e785ae27ace",
+  "note": "English-like text, level 22"
+ },
+ {
+  "file": "text_neg5.zst",
+  "size": 16383,
+  "sha256": "b2f1debc34f44d6af8c8788f0b99d326e86c9a221e50d90db25d5e785ae27ace",
+  "note": "negative (fast) level"
+ },
+ {
+  "file": "text32_l3_checksum_nosize.zst",
+  "size": 32767,
+  "sha256": "ca4b86cbc653465469ecb9d0d9ddef2c06fb33fe6e636694aa37a016a2b4fd6c",
+  "note": "checksum, no content size"
+ },
+ {
+  "file": "text32_l19_checksum.zst",
+  "size": 32767,
+  "sha256": "ca4b86cbc653465469ecb9d0d9ddef2c06fb33fe6e636694aa37a016a2b4fd6c",
+  "note": "checksum + content size"
+ },
+ {
+  "file": "text32_flushblock.zst",
+  "size": 32767,
+  "sha256": "ca4b86cbc653465469ecb9d0d9ddef2c06fb33fe6e636694aa37a016a2b4fd6c",
+  "note": "streamed with FLUSH_BLOCK every 1200 bytes (small blocks, repeat tables)"
+ },
+ {
+  "file": "floats_l3.zst",
+  "size": 16384,
+  "sha256": "6626d6f2c258bfbdc4d0747d116ef88d9c5cb37ad475a928420b1c3256fb49f2",
+  "note": "float32 array, level 3"
+ },
+ {
+  "file": "floats_l19.zst",
+  "size": 16384,
+  "sha256": "6626d6f2c258bfbdc4d0747d116ef88d9c5cb37ad475a928420b1c3256fb49f2",
+  "note": "float32 array, level 19"
+ },
+ {
+  "file": "mixed_l1.zst",
+  "size": 1585209,
+  "sha256": "80cd4656c5c5fd4ac2cbf78bf2b25b96b7eefde63cbedf9c78a4a5f57643563b",
+  "note": "1.5 MiB mixed, level 1"
+ },
+ {
+  "file": "mixed_l19.zst",
+  "size": 1585209,
+  "sha256": "80cd4656c5c5fd4ac2cbf78bf2b25b96b7eefde63cbedf9c78a4a5f57643563b",
+  "note": "1.5 MiB mixed, level 19"
+ },
+ {
+  "file": "mixed_stream_l9.zst",
+  "size": 1585209,
+  "sha256": "80cd4656c5c5fd4ac2cbf78bf2b25b96b7eefde63cbedf9c78a4a5f57643563b",
+  "note": "1.5 MiB mixed, streamed (no content size), checksum"
+ },
+ {
+  "file": "ldm_l3.zst",
+  "size": 3164234,
+  "sha256": "b0cd3919c60690c970755edde556cfb8faf9f464bcf635c5db357cec106f5f2e",
+  "note": "long-distance matching, ~3 MiB offsets"
+ },
+ {
+  "file": "ldm_l22_w27_stream.zst",
+  "size": 3164234,
+  "sha256": "b0cd3919c60690c970755edde556cfb8faf9f464bcf635c5db357cec106f5f2e",
+  "note": "level 22, 128 MiB window descriptor, long mode, no content size"
+ },
+ {
+  "file": "rle_literals.zst",
+  "size": 125962,
+  "sha256": "3c4f676d15616a869d3a68cf9755394534485cd98181b9fc06d3e94585794d7d",
+  "note": "single-byte literal runs"
+ },
+ {
+  "file": "small_alphabet.zst",
+  "size": 12000,
+  "sha256": "de61a5d19c5863093dd895ef5c7261c87bfc00067227dfbb794c71007c7a3200",
+  "note": "12-symbol alphabet"
+ },
+ {
+  "file": "seekable.zst",
+  "size": 126383,
+  "sha256": "9424a7ed014d3f343208af846804b056756d69b8c68a1e3f07ecd5383481ab81",
+  "note": "seekable format"
+ },
+ {
+  "file": "multi_frame.zst",
+  "size": 16395,
+  "sha256": "ef0a72ff067837311854fefe85fbd37b54dcd452d286b690248db7e343d41ba7",
+  "note": "frames + empty skippable + empty frame"
+ }
+]

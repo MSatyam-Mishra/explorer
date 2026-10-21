@@ -34,9 +34,19 @@ import 'package:path/path.dart' as p;
 /// Pops with `true` when a screenshot was saved next to the model, so the
 /// caller can refresh its file listing.
 class ThreeDViewerScreen extends StatefulWidget {
-  const ThreeDViewerScreen({super.key, required this.file});
+  const ThreeDViewerScreen({
+    super.key,
+    required this.file,
+    this.originalFile,
+  });
 
+  /// The model the page loads.
   final File file;
+
+  /// The file the user opened, when [file] was converted from it (e.g. a
+  /// .blend shown as glTF): used for the title, details, screenshots and
+  /// "Open with".
+  final File? originalFile;
 
   @override
   State<ThreeDViewerScreen> createState() => _ThreeDViewerScreenState();
@@ -91,7 +101,10 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
   bool _screenshotSaved = false;
   Timer? _screenshotTimeout;
 
-  String get _fileName => p.basename(widget.file.path);
+  /// The file the user opened.
+  File get _userFile => widget.originalFile ?? widget.file;
+
+  String get _fileName => p.basename(_userFile.path);
 
   String get _extension {
     final ext = p.extension(widget.file.path).toLowerCase();
@@ -146,7 +159,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
       // Everything starts at once; only the stat and the mounts gate the
       // page. The index is served to the page when ready (it waits for it
       // only right before parsing).
-      final statFuture = file.stat();
+      final statFuture = _userFile.stat();
       final assetsFuture = _viewerAssets(_server);
       final modelFuture = _server.mountDirectory(served.path);
       Future<Uri>? filesFuture;
@@ -179,7 +192,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
           ? '${Uri.encodeComponent(p.basename(modelDir.path))}/'
           : '';
       final src = _modelMount!.resolve(
-        '$folder${Uri.encodeComponent(_fileName)}',
+        '$folder${Uri.encodeComponent(p.basename(file.path))}',
       );
       final page = assets.replace(
         path: '${assets.path}index.html',
@@ -475,8 +488,8 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
   }
 
   Future<File> _screenshotTarget() async {
-    final dir = widget.file.parent.path;
-    final stem = p.basenameWithoutExtension(widget.file.path);
+    final dir = _userFile.parent.path;
+    final stem = p.basenameWithoutExtension(_userFile.path);
     final now = DateTime.now();
     String two(int v) => v.toString().padLeft(2, '0');
     final stamp = '${now.year}${two(now.month)}${two(now.day)}_'
@@ -492,7 +505,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
 
   Future<void> _openWithAnotherApp() async {
     try {
-      final result = await OpenFilex.open(widget.file.path);
+      final result = await OpenFilex.open(_userFile.path);
       if (!mounted) return;
       if (result.type != ResultType.done) {
         _snack(result.type == ResultType.noAppToOpen

@@ -89,7 +89,8 @@ abstract final class FileTypes {
   static const model3d = {
     'glb', 'gltf', 'obj', 'stl', 'ply', 'fbx', 'dae', '3ds', '3mf', 'amf',
     'wrl', 'vrml', 'usdz', 'usda', 'usdc', 'off', 'xyz', 'pcd', 'vtk',
-    'vtp', 'lwo', 'md2', 'vox', 'gcode', 'drc', 'kmz', '3dm',
+    'vtp', 'lwo', 'md2', 'vox', 'gcode', 'drc', 'kmz', '3dm', 'blend',
+    'blend1',
   };
 
   static const archive = {
