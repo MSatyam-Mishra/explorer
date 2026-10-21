@@ -224,11 +224,11 @@ class _ObjectEmbed extends EmbedBuilder {
       );
     }
     final icon = switch (o.kind) {
-      'Chart' => Icons.insert_chart_outlined,
-      'Equation' => Icons.functions,
-      'Text box' => Icons.text_fields,
-      'SmartArt' => Icons.account_tree_outlined,
-      _ => Icons.category_outlined,
+      'Chart' => LucideIcons.chartColumn,
+      'Equation' => LucideIcons.sigma,
+      'Text box' => LucideIcons.type,
+      'SmartArt' => LucideIcons.network,
+      _ => LucideIcons.shapes,
     };
     final label = o.kind == 'Equation' && text.isNotEmpty ? text : o.kind;
     return Tooltip(
@@ -297,7 +297,7 @@ class _UnknownEmbed extends EmbedBuilder {
 
   @override
   Widget build(BuildContext context, EmbedContext embedContext) =>
-      const Icon(Icons.help_outline, size: 14, color: Colors.black38);
+      const Icon(LucideIcons.circleHelp, size: 14, color: Colors.black38);
 }
 
 /// Toolbar + editor on a white page.

@@ -84,17 +84,37 @@ class ImmersiveTheme extends StatelessWidget {
 
   final Widget child;
 
-  static AppThemeSettings _settings(BuildContext context) {
+  static AppThemeSettings _settings(BuildContext context, {bool listen = true}) {
     try {
-      return context.watch<ThemeCubit>().state;
+      final cubit = listen
+          ? context.watch<ThemeCubit>()
+          : context.read<ThemeCubit>();
+      return cubit.state;
     } catch (_) {
+      // No ThemeCubit above (isolated widget tests).
       return AppThemeSettings.defaults();
     }
   }
 
+  /// Slider thumbs in the background colour vanish over black media.
+  static ThemeData _withMediaSliders(ThemeData theme, ShadThemeData shad) {
+    final c = shad.colorScheme;
+    return theme.copyWith(
+      sliderTheme: theme.sliderTheme.copyWith(
+        thumbColor: c.foreground,
+        inactiveTrackColor: c.foreground.withValues(alpha: 0.22),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (context.isDarkMode) return child;
+    if (context.isDarkMode) {
+      return Theme(
+        data: _withMediaSliders(Theme.of(context), ShadTheme.of(context)),
+        child: child,
+      );
+    }
     final shad = AppTheme.shad(_settings(context), Brightness.dark);
     final c = shad.colorScheme;
     final base = ThemeData(
@@ -123,17 +143,89 @@ class ImmersiveTheme extends StatelessWidget {
     );
     return ShadTheme(
       data: shad,
-      child: Theme(data: AppTheme.material(base, shad), child: child),
+      child: Theme(
+        data: _withMediaSliders(AppTheme.material(base, shad), shad),
+        child: child,
+      ),
     );
   }
 }
 
-/// Resolved dark shad theme, for code that needs the tokens before the
-/// [ImmersiveTheme] subtree is built.
+/// Resolved dark shad theme, for code that needs the tokens outside the
+/// [ImmersiveTheme] subtree (e.g. when configuring a player). Doesn't
+/// subscribe to theme changes.
 ShadThemeData immersiveShadTheme(BuildContext context) =>
     context.isDarkMode
         ? ShadTheme.of(context)
-        : AppTheme.shad(ImmersiveTheme._settings(context), Brightness.dark);
+        : AppTheme.shad(
+            ImmersiveTheme._settings(context, listen: false),
+            Brightness.dark,
+          );
+
+/// shadcn slider look: background-coloured thumb with a primary ring, so
+/// the thumb stays visible in dark mode (the app theme's plain thumb blends
+/// into dark pages).
+class ShadSliderTheme extends StatelessWidget {
+  const ShadSliderTheme({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        thumbShape: _RingThumbShape(
+          fill: colors.background,
+          ring: colors.primary,
+        ),
+        inactiveTrackColor: colors.muted,
+      ),
+      child: child,
+    );
+  }
+}
+
+class _RingThumbShape extends SliderComponentShape {
+  const _RingThumbShape({required this.fill, required this.ring});
+
+  final Color fill;
+  final Color ring;
+
+  static const double _radius = 9;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size.fromRadius(_radius);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final canvas = context.canvas;
+    final enabled = enableAnimation.value > 0.5;
+    canvas.drawCircle(center, _radius, Paint()..color = fill);
+    canvas.drawCircle(
+      center,
+      _radius - 1,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = enabled ? ring : ring.withValues(alpha: 0.4),
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // States

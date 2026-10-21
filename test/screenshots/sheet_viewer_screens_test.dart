@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:explorer/features/viewer_sheets/model/workbook.dart';
 import 'package:explorer/features/viewer_sheets/screens/spreadsheet_screen.dart';
 import 'package:explorer/features/viewer_sheets/widgets/color_palette.dart';
+import 'package:explorer/features/viewer_sheets/widgets/find_bar.dart';
 import 'package:explorer/features/viewer_sheets/widgets/sheet_grid.dart';
 import 'package:explorer/features/viewer_sheets/writers/xlsx_writer.dart';
 import 'package:flutter/material.dart';
@@ -83,7 +84,10 @@ void main() {
         await tester.tap(find.byTooltip('Find & replace'));
       }
       await settle(tester, rounds: 4);
-      await tester.enterText(find.byType(TextField).first, 'North');
+      await tester.enterText(
+        find.descendant(of: find.byType(FindReplaceBar), matching: find.byType(TextField)).first,
+        'North',
+      );
       await settle(tester, rounds: 6);
       await saveScreenshot(tester, 'sheets_find_$tag');
       await tester.tap(find.byTooltip('Close'));
@@ -110,6 +114,8 @@ void main() {
         await saveScreenshot(tester, 'sheets_palette_$tag');
         await dismissTop(tester);
 
+        await tester.ensureVisible(find.byTooltip('Number format'));
+        await settle(tester, rounds: 2);
         await tester.tap(find.byTooltip('Number format'));
         await settle(tester, rounds: 6);
         await saveScreenshot(tester, 'sheets_numfmt_$tag');

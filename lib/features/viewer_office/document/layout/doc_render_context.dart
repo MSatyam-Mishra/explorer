@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 import '../../common/office_package.dart';
 import '../doc_model.dart';
@@ -462,7 +463,7 @@ class DocImageBox extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
-                Icons.image_not_supported_outlined,
+                LucideIcons.imageOff,
                 size: 18,
                 color: Color(0x88000000),
               ),

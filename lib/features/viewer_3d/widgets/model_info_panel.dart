@@ -153,15 +153,17 @@ class ModelInfoPanel extends StatelessWidget {
         ],
         if (controller.hasPoints) ...[
           const _SectionTitle('Point size'),
-          Slider(
-            // Logarithmic scale: -2..2 maps to 0.25×..4×.
-            value: (math.log(controller.pointScale) / math.ln2).clamp(-2.0, 2.0),
-            min: -2,
-            max: 2,
-            divisions: 16,
-            label: '${controller.pointScale.toStringAsFixed(2)}×',
-            onChanged: (v) => controller.setPointScale(
-              double.parse(math.pow(2, v).toStringAsFixed(3)),
+          ShadSliderTheme(
+            child: Slider(
+              // Logarithmic scale: -2..2 maps to 0.25×..4×.
+              value: (math.log(controller.pointScale) / math.ln2).clamp(-2.0, 2.0),
+              min: -2,
+              max: 2,
+              divisions: 16,
+              label: '${controller.pointScale.toStringAsFixed(2)}×',
+              onChanged: (v) => controller.setPointScale(
+                double.parse(math.pow(2, v).toStringAsFixed(3)),
+              ),
             ),
           ),
         ],

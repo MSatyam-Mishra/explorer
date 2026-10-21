@@ -192,15 +192,17 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
                     Text(subtitle, style: text.bodySmall),
                   ],
                   const SizedBox(height: 24),
-                  Slider(
-                    value: positionSeconds,
-                    min: 0,
-                    max: maxSeconds <= 0 ? 1 : maxSeconds,
-                    onChanged: _loading || maxSeconds <= 0
-                        ? null
-                        : (value) => _player.seek(
-                              Duration(milliseconds: (value * 1000).round()),
-                            ),
+                  ShadSliderTheme(
+                    child: Slider(
+                      value: positionSeconds,
+                      min: 0,
+                      max: maxSeconds <= 0 ? 1 : maxSeconds,
+                      onChanged: _loading || maxSeconds <= 0
+                          ? null
+                          : (value) => _player.seek(
+                                Duration(milliseconds: (value * 1000).round()),
+                              ),
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),

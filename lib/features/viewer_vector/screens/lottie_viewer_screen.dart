@@ -209,12 +209,14 @@ class _LottiePlayerPageState extends State<LottiePlayerPage>
                           Expanded(
                             child: AnimatedBuilder(
                               animation: _controller,
-                              builder: (context, child) => Slider(
-                                value: _controller.value,
-                                onChanged: (value) {
-                                  if (_isPlaying) _togglePlay();
-                                  _controller.value = value;
-                                },
+                              builder: (context, child) => ShadSliderTheme(
+                                child: Slider(
+                                  value: _controller.value,
+                                  onChanged: (value) {
+                                    if (_isPlaying) _togglePlay();
+                                    _controller.value = value;
+                                  },
+                                ),
                               ),
                             ),
                           ),

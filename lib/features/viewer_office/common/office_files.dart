@@ -76,6 +76,7 @@ Future<void> showLinkSheet(BuildContext context, String url) {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     internal ? LucideIcons.hash : LucideIcons.link,
@@ -86,6 +87,7 @@ Future<void> showLinkSheet(BuildContext context, String url) {
                   Expanded(
                     child: SelectableText(
                       internal ? url.substring(1) : url,
+                      minLines: 1,
                       maxLines: 4,
                       style: Theme.of(sheet).textTheme.bodyMedium,
                     ),
