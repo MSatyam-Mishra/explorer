@@ -1,28 +1,26 @@
 import 'dart:io';
 
-import 'package:bootstrap_icons/bootstrap_icons.dart';
+import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/platform/windows_locations.dart';
 import 'package:explorer/core/services/auth_service.dart';
 import 'package:explorer/core/services/directory_services.dart';
+import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/category_view/bloc/bloc/screens/category_viewer_screen.dart';
-import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
-import 'package:explorer/features/vault/screens/vault_screen.dart';
-import 'package:explorer/features/tools/screens/app_manager_screen.dart';
-import 'package:explorer/core/build_features.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
+import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
+import 'package:explorer/features/tools/screens/app_manager_screen.dart';
 import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
+import 'package:explorer/features/vault/screens/vault_screen.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
-
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
-import 'package:explorer/shared/widgets/glossy_drawer.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:explorer/shared/widgets/storage_drawer.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:photo_manager/photo_manager.dart';
 import 'package:path/path.dart' as p;
+import 'package:photo_manager/photo_manager.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 /// Closes the navigation drawer if [context] is inside an open one. When the
 /// menu is docked as a side pane (tablets, foldables) this does nothing.
@@ -37,7 +35,7 @@ class MainDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const GlossyDrawer(child: MainDrawerContent());
+    return const AppSidebar(child: MainDrawerContent());
   }
 }
 
@@ -46,184 +44,214 @@ class MainDrawer extends StatelessWidget {
 class MainDrawerContent extends StatelessWidget {
   const MainDrawerContent({super.key, this.padding});
 
-  /// Padding around the list; defaults to the safe area.
+  /// Padding around the list; defaults to none (the drawer adds safe area).
   final EdgeInsets? padding;
 
   @override
   Widget build(BuildContext context) {
-    final sectionStyle = ClearGlassForeground.title(
-      context,
-    ).copyWith(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.4);
-    final itemColor = ClearGlassForeground.icon(context);
-
-    final list = Theme(
-      data: Theme.of(context).copyWith(
-        listTileTheme: ListTileThemeData(
-          textColor: itemColor,
-          iconColor: itemColor,
-        ),
-      ),
-      child: ListView(
-        padding: padding ?? EdgeInsets.zero,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text('Storage', style: sectionStyle),
-          ),
-          if (Platform.isWindows)
-            _WindowsStorageSection()
-          else
-            BlocBuilder<SidebarBloc, SidebarState>(
-              builder: (context, state) {
-                return Column(
-                  children: [
-                    const StorageDrawerItem(
-                      icon: BootstrapIcons.phone_fill,
-                      title: 'Internal Storage',
-                      path: ExplorerPaths.androidInternalStorage,
-                    ),
-                    if (state is SidebarLoaded)
-                      ...state.externalStorage.map(
-                        (volume) => StorageDrawerItem(
-                          icon: BootstrapIcons.usb_drive_fill,
-                          title: 'External (${p.basename(volume.path)})',
-                          path: volume.path,
-                        ),
+    return Column(
+      children: [
+        const _SidebarHeader(),
+        Divider(height: 1, color: context.colors.border),
+        Expanded(
+          child: ListView(
+            padding: (padding ?? EdgeInsets.zero).add(
+              const EdgeInsets.only(bottom: 16),
+            ),
+            children: [
+              const AppSidebarSection('Storage'),
+              if (Platform.isWindows)
+                const _WindowsStorageSection()
+              else
+                BlocBuilder<SidebarBloc, SidebarState>(
+                  builder: (context, state) => Column(
+                    children: [
+                      const StorageDrawerItem(
+                        icon: LucideIcons.smartphone,
+                        title: 'Internal storage',
+                        path: ExplorerPaths.androidInternalStorage,
                       ),
-                  ],
-                );
-              },
-            ),
-          Divider(height: 24, color: Colors.white.withValues(alpha: 0.18)),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text('Categories', style: sectionStyle),
-          ),
-          BlocBuilder<SidebarBloc, SidebarState>(
-            builder: (context, state) {
-              if (state is SidebarLoaded) {
-                return Column(
-                  children: state.categories.map((category) {
-                    return ListTile(
-                      leading: Icon(category.icon, color: category.color),
-                      title: Text(category.name),
-                      trailing: Text(category.fileCount.toString()),
-                      onTap: () async {
-                        dismissDrawer(context);
-
-                        RequestType? type;
-                        switch (category.name) {
-                          case 'Photos':
-                            type = RequestType.image;
-                            break;
-                          case 'Video':
-                            type = RequestType.video;
-                            break;
-                          case 'Audio':
-                            type = RequestType.audio;
-                            break;
-                        }
-                        if (type != null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CategoryViewerScreen(
-                                categoryType: type!,
-                                title: category.name,
-                              ),
-                            ),
-                          );
-                        }
-                        if (category.name == 'Downloads') {
-                          final downloadsDir =
-                              await DirectoryService.findDownloadsDirectory();
-                          if (downloadsDir != null && context.mounted) {
-                            context.read<FileExplorerBloc>().add(
-                              LoadDirectory(downloadsDir.path),
-                            );
-                          }
-                        }
-                        if (category.name == 'Vault') {
-                          final isAuthenticated = await AuthService()
-                              .authenticate();
-                          if (isAuthenticated && context.mounted) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const VaultScreen(),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                    );
-                  }).toList(),
-                );
-              }
-              return const SizedBox.shrink();
-            },
-          ),
-          Divider(height: 24, color: Colors.white.withValues(alpha: 0.18)),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text('Tools', style: sectionStyle),
-          ),
-          ListTile(
-            leading: const Icon(BootstrapIcons.grid_fill),
-            title: const Text('App Manager'),
-            onTap: () {
-              dismissDrawer(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AppManagerScreen()),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(BootstrapIcons.usb_drive),
-            title: const Text('USB Boot'),
-            onTap: () {
-              dismissDrawer(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const UsbBootScreen()),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(BootstrapIcons.broadcast),
-            title: const Text('Nearby share'),
-            subtitle: const Text('Send and receive with LocalSend'),
-            onTap: () {
-              dismissDrawer(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const LocalSendScreen()),
-              );
-            },
-          ),
-          if (kVideoDownloaderEnabled)
-            ListTile(
-              leading: const Icon(BootstrapIcons.cloud_arrow_down_fill),
-              title: const Text('Video downloader'),
-              onTap: () {
-                dismissDrawer(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const VideoDownloaderScreen(),
+                      if (state is SidebarLoaded)
+                        for (final volume in state.externalStorage)
+                          StorageDrawerItem(
+                            icon: LucideIcons.hardDrive,
+                            title: 'External (${p.basename(volume.path)})',
+                            path: volume.path,
+                          ),
+                    ],
                   ),
-                );
-              },
+                ),
+              const AppSidebarSection('Categories'),
+              BlocBuilder<SidebarBloc, SidebarState>(
+                builder: (context, state) {
+                  if (state is! SidebarLoaded) return const SizedBox.shrink();
+                  return Column(
+                    children: [
+                      for (final category in state.categories)
+                        AppSidebarItem(
+                          icon: _categoryIcon(category.name) ?? category.icon,
+                          label: category.name,
+                          trailing: category.fileCount > 0
+                              ? Text('${category.fileCount}')
+                              : null,
+                          onTap: () => _openCategory(context, category.name),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              const AppSidebarSection('Tools'),
+              AppSidebarItem(
+                icon: LucideIcons.radio,
+                label: 'Nearby share',
+                detail: 'Send and receive with LocalSend',
+                onTap: () => _push(context, const LocalSendScreen()),
+              ),
+              if (kVideoDownloaderEnabled)
+                AppSidebarItem(
+                  icon: LucideIcons.cloudDownload,
+                  label: 'Video downloader',
+                  onTap: () => _push(context, const VideoDownloaderScreen()),
+                ),
+              AppSidebarItem(
+                icon: LucideIcons.layoutGrid,
+                label: 'App manager',
+                onTap: () => _push(context, const AppManagerScreen()),
+              ),
+              AppSidebarItem(
+                icon: LucideIcons.usb,
+                label: 'USB boot',
+                onTap: () => _push(context, const UsbBootScreen()),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static IconData? _categoryIcon(String name) => switch (name) {
+        'Photos' => LucideIcons.image,
+        'Video' => LucideIcons.clapperboard,
+        'Audio' => LucideIcons.music,
+        'Documents' => LucideIcons.fileText,
+        'Vault' => LucideIcons.lock,
+        'Archives' => LucideIcons.archive,
+        'Downloads' => LucideIcons.download,
+        'Cloud Drive' => LucideIcons.cloud,
+        'Apps' => LucideIcons.layoutGrid,
+        _ => null,
+      };
+
+  static void _push(BuildContext context, Widget screen) {
+    dismissDrawer(context);
+    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
+
+  static Future<void> _openCategory(BuildContext context, String name) async {
+    dismissDrawer(context);
+    final type = switch (name) {
+      'Photos' => RequestType.image,
+      'Video' => RequestType.video,
+      'Audio' => RequestType.audio,
+      _ => null,
+    };
+    if (type != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CategoryViewerScreen(categoryType: type, title: name),
+        ),
+      );
+      return;
+    }
+    if (name == 'Downloads') {
+      final downloadsDir = await DirectoryService.findDownloadsDirectory();
+      if (downloadsDir != null && context.mounted) {
+        context.read<FileExplorerBloc>().add(LoadDirectory(downloadsDir.path));
+      }
+      return;
+    }
+    if (name == 'Vault') {
+      final isAuthenticated = await AuthService().authenticate();
+      if (isAuthenticated && context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const VaultScreen()),
+        );
+      }
+    }
+  }
+}
+
+/// App mark and name, with a theme switch (System → Light → Dark).
+class _SidebarHeader extends StatelessWidget {
+  const _SidebarHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final mode = context.select((ThemeCubit c) => c.state.themeMode);
+    final (icon, label, next) = switch (mode) {
+      ThemeMode.system => (LucideIcons.monitor, 'System theme', ThemeMode.light),
+      ThemeMode.light => (LucideIcons.sun, 'Light theme', ThemeMode.dark),
+      ThemeMode.dark => (LucideIcons.moon, 'Dark theme', ThemeMode.system),
+    };
+    // 56 px like the page header, so their bottom borders line up when the
+    // sidebar is docked next to the page.
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: colors.primary,
+              borderRadius: BorderRadius.circular(9),
             ),
+            child: Icon(
+              LucideIcons.folderOpen,
+              size: 18,
+              color: colors.primaryForeground,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Explorer', style: text.titleSmall),
+                Text('Files, viewers and tools', style: text.bodySmall),
+              ],
+            ),
+          ),
+          AppIconButton(
+            icon: Icon(icon, size: 18),
+            tooltip: '$label · tap to change',
+            onPressed: () => context.read<ThemeCubit>().setThemeMode(next),
+          ),
         ],
       ),
     );
-    return padding == null ? SafeArea(child: list) : list;
   }
 }
 
 class _WindowsStorageSection extends StatelessWidget {
+  const _WindowsStorageSection();
+
+  static IconData _libraryIcon(String name) => switch (name.toLowerCase()) {
+        'desktop' => LucideIcons.monitor,
+        'documents' => LucideIcons.fileText,
+        'downloads' => LucideIcons.download,
+        'music' => LucideIcons.music,
+        'pictures' => LucideIcons.image,
+        'videos' => LucideIcons.clapperboard,
+        _ => LucideIcons.folder,
+      };
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<WindowsStorageLocation>>(
@@ -235,59 +263,34 @@ class _WindowsStorageSection extends StatelessWidget {
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-
         final drives = snapshot.data!
             .where((e) => e.kind == WindowsStorageKind.drive)
             .toList();
         final libraries = snapshot.data!
             .where((e) => e.kind == WindowsStorageKind.library)
             .toList();
-
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (drives.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 16, 4),
-                child: Text(
-                  'DRIVES',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: 0.08,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              ...drives.map(
-                (d) => StorageDrawerItem(
-                  icon: d.icon,
-                  title: d.displayName,
-                  path: d.path,
-                ),
-              ),
-            ],
-            if (libraries.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 16, 4),
-                child: Text(
-                  'LIBRARIES',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: 0.08,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+            for (final d in drives)
               StorageDrawerItem(
-                icon: BootstrapIcons.pc_display,
+                icon: LucideIcons.hardDrive,
+                title: d.displayName,
+                path: d.path,
+              ),
+            if (libraries.isNotEmpty) ...[
+              const AppSidebarSection('Libraries'),
+              const StorageDrawerItem(
+                icon: LucideIcons.monitor,
                 title: 'This PC',
                 path: ExplorerPaths.windowsRoots,
               ),
-              ...libraries.map(
-                (lib) => StorageDrawerItem(
-                  icon: lib.icon,
+              for (final lib in libraries)
+                StorageDrawerItem(
+                  icon: _libraryIcon(lib.displayName),
                   title: lib.displayName,
                   path: lib.path,
                 ),
-              ),
             ],
           ],
         );

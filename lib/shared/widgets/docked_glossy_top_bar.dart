@@ -1,18 +1,13 @@
 import 'package:explorer/shared/icons/app_icons.dart';
-import 'package:explorer/shared/liquid_glass/explorer_liquid_glass.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
 
-export 'package:explorer/shared/liquid_glass/explorer_liquid_glass.dart'
-    show
-        ExplorerLiquidGlassBottomSheet,
-        ExplorerLiquidGlassDrawer,
-        ExplorerLiquidGlassForeground,
-        ExplorerLiquidGlassLayer,
-        ExplorerLiquidGlassTopBarScaffold;
+export 'package:explorer/shared/liquid_glass/explorer_liquid_glass.dart';
 
-typedef DockedTopBarScaffold = ExplorerLiquidGlassTopBarScaffold;
+typedef DockedTopBarScaffold = AppTopBarScaffold;
 
-/// Toolbar row inside the liquid-glass top bar lens.
+/// Header row: menu/back button, title, actions. Shown by
+/// [AppTopBarScaffold] (via ExplorerScaffold) at the top of each page.
 class DockedGlossyTopBar extends StatelessWidget {
   const DockedGlossyTopBar({
     super.key,
@@ -21,7 +16,7 @@ class DockedGlossyTopBar extends StatelessWidget {
     this.onMorePressed,
     this.leading,
     this.trailing,
-    this.height = 54,
+    this.height = AppTopBarScaffold.defaultBarHeight,
   });
 
   final String title;
@@ -32,55 +27,49 @@ class DockedGlossyTopBar extends StatelessWidget {
   final double height;
 
   static double totalHeight(EdgeInsets margin, double barHeight) =>
-      margin.top + barHeight + margin.bottom;
+      barHeight + 1;
 
+  /// Space above the first row of scrolling content.
   static double contentTopInset(
     BuildContext context, {
-    EdgeInsets barMargin = const EdgeInsets.fromLTRB(16, 12, 16, 12),
-    double barHeight = 54,
+    EdgeInsets? barMargin,
+    double barHeight = AppTopBarScaffold.defaultBarHeight,
   }) =>
-      ExplorerLiquidGlassTopBarScaffold.contentTopInset(
-        context,
-        barMargin: barMargin,
-        barHeight: barHeight,
-      );
+      AppTopBarScaffold.contentTopInset(context, barHeight: barHeight);
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = ExplorerLiquidGlassForeground.icon(context);
-    final titleStyle = ExplorerLiquidGlassForeground.title(context);
+    final colors = context.colors;
+    final titleStyle = AppForeground.title(context);
 
     return IconTheme(
-      data: IconThemeData(color: iconColor, size: 20),
-      child: DefaultTextStyle(
-        style: titleStyle,
-        child: SizedBox(
-          height: height,
+      data: IconThemeData(color: colors.foreground, size: 20),
+      child: SizedBox(
+        height: height,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Row(
             children: [
               leading ??
-                  _BarIconButton(
-                    icon: AppIcons.drawerMenu(color: iconColor),
+                  AppIconButton(
+                    icon: AppIcons.drawerMenu(color: colors.foreground),
                     tooltip: 'Open menu',
-                    onPressed: onMenuPressed ??
-                        () => Scaffold.of(context).openDrawer(),
+                    onPressed:
+                        onMenuPressed ?? () => Scaffold.of(context).openDrawer(),
                   ),
+              const SizedBox(width: 8),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.left,
-                    style: titleStyle,
-                  ),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: titleStyle,
                 ),
               ),
               trailing ??
                   (onMorePressed != null
-                      ? _BarIconButton(
-                          icon: AppIcons.optionsMenu(color: iconColor),
+                      ? AppIconButton(
+                          icon: AppIcons.optionsMenu(color: colors.foreground),
                           tooltip: 'Options',
                           onPressed: onMorePressed,
                         )
@@ -89,29 +78,6 @@ class DockedGlossyTopBar extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _BarIconButton extends StatelessWidget {
-  const _BarIconButton({
-    required this.icon,
-    required this.tooltip,
-    this.onPressed,
-  });
-
-  final Widget icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: onPressed,
-      tooltip: tooltip,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      constraints: const BoxConstraints(minWidth: 46, minHeight: 46),
-      icon: icon,
     );
   }
 }

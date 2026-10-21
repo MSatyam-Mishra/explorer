@@ -1,14 +1,13 @@
 import 'dart:io';
 
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
-import 'package:explorer/shared/icons/app_icons.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/file_icons/file_icons.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:hugeicons/hugeicons.dart';
 import 'package:path/path.dart' as p;
 
 /// Multi-tab text/code editor. Each tab keeps its state while hidden.
@@ -148,6 +147,9 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: context.colors.destructive,
+            ),
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Discard'),
           ),
@@ -180,8 +182,7 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
 
     return PopScope(
       canPop: !_anyDirty,
@@ -199,30 +200,32 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
         },
         child: ExplorerScaffold(
           title: p.basename(_current.file.path),
-          trailing: ExplorerTopBar.actions(context, [
-            ExplorerTopBar.iconButton(
-              context: context,
-              icon: AppIcons.huge(HugeIcons.strokeRoundedAdd01, color: iconColor),
-              tooltip: 'Open another file',
-              onPressed: _addFile,
-            ),
-            ExplorerTopBar.iconButton(
-              context: context,
-              icon: AppIcons.huge(
-                HugeIcons.strokeRoundedFloppyDisk,
-                color: _current.dirty ? scheme.primary : iconColor,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppIconButton(
+                icon: const Icon(LucideIcons.filePlus2),
+                tooltip: 'Open another file',
+                onPressed: _addFile,
               ),
-              tooltip: 'Save',
-              onPressed: _current.dirty ? _saveCurrent : null,
-            ),
-          ]),
+              AppIconButton(
+                icon: Icon(
+                  LucideIcons.save,
+                  color: _current.dirty ? colors.primary : null,
+                ),
+                tooltip: 'Save',
+                onPressed: _current.dirty ? _saveCurrent : null,
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
           body: Padding(
             padding: EdgeInsets.only(
               top: DockedGlossyTopBar.contentTopInset(context),
             ),
             child: Column(
               children: [
-                if (_tabs.length > 1) _buildTabStrip(scheme),
+                if (_tabs.length > 1) _buildTabStrip(),
                 Expanded(
                   child: IndexedStack(
                     index: _index,
@@ -249,30 +252,111 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
     );
   }
 
-  Widget _buildTabStrip(ColorScheme scheme) {
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        itemCount: _tabs.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 6),
-        itemBuilder: (context, i) {
-          final tab = _tabs[i];
-          final selected = i == _index;
-          return InputChip(
-            selected: selected,
-            showCheckmark: false,
-            label: Text(
-              '${tab.dirty ? '● ' : ''}${p.basename(tab.file.path)}',
-              overflow: TextOverflow.ellipsis,
-            ),
-            onPressed: () => setState(() => _index = i),
-            onDeleted: () => _closeTab(i),
-            deleteButtonTooltipMessage: 'Close',
-            visualDensity: VisualDensity.compact,
-          );
-        },
+  /// Open files as tabs: the active one raised, unsaved ones marked with a
+  /// dot; each closes with its own button.
+  Widget _buildTabStrip() {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.muted.withValues(alpha: 0.4),
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: SizedBox(
+        height: 44,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          itemCount: _tabs.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 4),
+          itemBuilder: (context, i) => _EditorTabChip(
+            name: p.basename(_tabs[i].file.path),
+            dirty: _tabs[i].dirty,
+            selected: i == _index,
+            onTap: () => setState(() => _index = i),
+            onClose: () => _closeTab(i),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EditorTabChip extends StatelessWidget {
+  const _EditorTabChip({
+    required this.name,
+    required this.dirty,
+    required this.selected,
+    required this.onTap,
+    required this.onClose,
+  });
+
+  final String name;
+  final bool dirty;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return Material(
+      color: selected ? colors.background : Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: selected ? colors.border : Colors.transparent,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 10, right: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FileIcon(path: name, size: 16),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.bodySmall?.copyWith(
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+                    color: selected ? colors.foreground : colors.mutedForeground,
+                  ),
+                ),
+              ),
+              if (dirty) ...[
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: 'Unsaved changes',
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: colors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(width: 2),
+              ToolButton(
+                icon: LucideIcons.x,
+                tooltip: 'Close',
+                size: 28,
+                iconSize: 14,
+                color: colors.mutedForeground,
+                onPressed: onClose,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -1,14 +1,12 @@
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:explorer/shared/icons/app_icons.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:hugeicons/hugeicons.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 
@@ -258,26 +256,14 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       ..showSnackBar(SnackBar(content: Text(message), behavior: SnackBarBehavior.floating));
   }
 
-  Future<bool> _confirm(String title, String message, String action, {bool destructive = false}) async {
-    final r = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(
-            style: destructive
-                ? FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error)
-                : null,
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    return r ?? false;
-  }
+  Future<bool> _confirm(String title, String message, String action, {bool destructive = false}) =>
+      showViewerConfirm(
+        context,
+        title: title,
+        message: message,
+        confirmLabel: action,
+        destructive: destructive,
+      );
 
   // ---------------------------------------------------------------------------
   // Saving
@@ -421,8 +407,8 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
               'Formulas are saved as their results and formatting is lost.',
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-              TextButton(onPressed: () => Navigator.pop(context, 'xlsx'), child: const Text('Save as .xlsx')),
+              OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              OutlinedButton(onPressed: () => Navigator.pop(context, 'xlsx'), child: const Text('Save as .xlsx')),
               FilledButton(onPressed: () => Navigator.pop(context, 'csv'), child: const Text('Save')),
             ],
           ),
@@ -493,8 +479,12 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
           title: const Text('Unsaved changes'),
           content: Text('Save your changes to "$_fileName"?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(context, 'discard'), child: const Text('Discard')),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: context.colors.destructive),
+              onPressed: () => Navigator.pop(context, 'discard'),
+              child: const Text('Discard'),
+            ),
+            OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
             FilledButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save')),
           ],
         ),
@@ -612,11 +602,18 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Delimiter'),
+        contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 16),
         children: [
           for (final cand in CsvCodec.candidates)
-            ListTile(
-              leading: Icon(cand == csv.delimiter ? Icons.radio_button_checked : Icons.radio_button_off),
-              title: Text(CsvSettings.delimiterLabel(cand)),
+            ViewerListTile(
+              title: CsvSettings.delimiterLabel(cand),
+              selected: cand == csv.delimiter,
+              trailing: cand == csv.delimiter
+                  ? const Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Icon(LucideIcons.check),
+                    )
+                  : null,
               onTap: () => Navigator.pop(context, cand),
             ),
         ],
@@ -631,8 +628,8 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
           content: const Text('Re-read the file with this delimiter (your changes are discarded), '
               'or keep your changes and use it when saving?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('When saving')),
+            OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            OutlinedButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('When saving')),
             FilledButton(onPressed: () => Navigator.pop(context, 'reload'), child: const Text('Re-read')),
           ],
         ),
@@ -716,43 +713,37 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final rect = RelativeRect.fromRect(global & const Size(1, 1), Offset.zero & overlay.size);
     final hasMerge = c.selectionHasMerge;
-    PopupMenuItem<_CellMenu> item(_CellMenu v, IconData icon, String label, {bool enabled = true}) =>
-        PopupMenuItem(
-          value: v,
-          enabled: enabled,
-          height: 40,
-          child: Row(children: [
-            Icon(icon, size: 18),
-            const SizedBox(width: 12),
-            Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ]),
-        );
+    PopupMenuEntry<_CellMenu> item(_CellMenu v, IconData icon, String label,
+            {bool enabled = true, bool destructive = false}) =>
+        viewerMenuItem(value: v, icon: icon, label: label, enabled: enabled, destructive: destructive);
     final choice = await showMenu<_CellMenu>(
       context: context,
       position: rect,
+      menuPadding: const EdgeInsets.symmetric(vertical: 4),
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
       items: [
-        item(_CellMenu.cut, Icons.content_cut_rounded, 'Cut'),
-        item(_CellMenu.copy, Icons.content_copy_rounded, 'Copy'),
-        item(_CellMenu.paste, Icons.content_paste_rounded, 'Paste'),
-        item(_CellMenu.clear, Icons.backspace_outlined, 'Clear contents'),
-        item(_CellMenu.clearAll, Icons.format_clear_rounded, 'Clear all'),
-        const PopupMenuDivider(),
-        item(_CellMenu.insertRowAbove, Icons.keyboard_arrow_up_rounded, 'Insert row above'),
-        item(_CellMenu.insertRowBelow, Icons.keyboard_arrow_down_rounded, 'Insert row below'),
-        item(_CellMenu.insertColLeft, Icons.keyboard_arrow_left_rounded, 'Insert column left'),
-        item(_CellMenu.insertColRight, Icons.keyboard_arrow_right_rounded, 'Insert column right'),
-        item(_CellMenu.deleteRows, Icons.table_rows_outlined, 'Delete rows'),
-        item(_CellMenu.deleteCols, Icons.view_column_outlined, 'Delete columns'),
-        const PopupMenuDivider(),
-        item(_CellMenu.fillDown, Icons.south_rounded, 'Fill down'),
-        item(_CellMenu.fillRight, Icons.east_rounded, 'Fill right'),
-        item(_CellMenu.sortAsc, Icons.arrow_upward_rounded, 'Sort A to Z'),
-        item(_CellMenu.sortDesc, Icons.arrow_downward_rounded, 'Sort Z to A'),
+        item(_CellMenu.cut, LucideIcons.scissors, 'Cut'),
+        item(_CellMenu.copy, LucideIcons.copy, 'Copy'),
+        item(_CellMenu.paste, LucideIcons.clipboardPaste, 'Paste'),
+        item(_CellMenu.clear, LucideIcons.eraser, 'Clear contents'),
+        item(_CellMenu.clearAll, LucideIcons.removeFormatting, 'Clear all'),
+        viewerMenuDivider(),
+        item(_CellMenu.insertRowAbove, LucideIcons.betweenHorizontalStart, 'Insert row above'),
+        item(_CellMenu.insertRowBelow, LucideIcons.betweenHorizontalEnd, 'Insert row below'),
+        item(_CellMenu.insertColLeft, LucideIcons.betweenVerticalStart, 'Insert column left'),
+        item(_CellMenu.insertColRight, LucideIcons.betweenVerticalEnd, 'Insert column right'),
+        item(_CellMenu.deleteRows, LucideIcons.rows3, 'Delete rows', destructive: true),
+        item(_CellMenu.deleteCols, LucideIcons.columns3, 'Delete columns', destructive: true),
+        viewerMenuDivider(),
+        item(_CellMenu.fillDown, LucideIcons.arrowDownToLine, 'Fill down'),
+        item(_CellMenu.fillRight, LucideIcons.arrowRightToLine, 'Fill right'),
+        item(_CellMenu.sortAsc, LucideIcons.arrowDownAZ, 'Sort A to Z'),
+        item(_CellMenu.sortDesc, LucideIcons.arrowDownZA, 'Sort Z to A'),
         if (hasMerge)
-          item(_CellMenu.unmerge, Icons.call_split_rounded, 'Unmerge cells')
+          item(_CellMenu.unmerge, LucideIcons.tableCellsSplit, 'Unmerge cells')
         else
-          item(_CellMenu.merge, Icons.merge_type_rounded, 'Merge cells', enabled: !c.selection.isSingle),
-        item(_CellMenu.freezeHere, Icons.ac_unit_rounded, 'Freeze panes here'),
+          item(_CellMenu.merge, LucideIcons.tableCellsMerge, 'Merge cells', enabled: !c.selection.isSingle),
+        item(_CellMenu.freezeHere, LucideIcons.snowflake, 'Freeze panes here'),
       ],
     );
     if (choice == null || !mounted) return;
@@ -809,23 +800,33 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
     final choice = await showMenu<_TabMenu>(
       context: context,
       position: rect,
+      menuPadding: const EdgeInsets.symmetric(vertical: 4),
+      constraints: const BoxConstraints(minWidth: 200, maxWidth: 280),
       items: [
-        const PopupMenuItem(value: _TabMenu.rename, child: Text('Rename')),
-        const PopupMenuItem(value: _TabMenu.duplicate, child: Text('Duplicate')),
-        PopupMenuItem(value: _TabMenu.moveLeft, enabled: index > 0, child: const Text('Move left')),
-        PopupMenuItem(
+        viewerMenuItem(value: _TabMenu.rename, icon: LucideIcons.pencil, label: 'Rename'),
+        viewerMenuItem(value: _TabMenu.duplicate, icon: LucideIcons.copy, label: 'Duplicate'),
+        viewerMenuItem(
+          value: _TabMenu.moveLeft,
+          icon: LucideIcons.arrowLeft,
+          label: 'Move left',
+          enabled: index > 0,
+        ),
+        viewerMenuItem(
           value: _TabMenu.moveRight,
+          icon: LucideIcons.arrowRight,
+          label: 'Move right',
           enabled: index < c.workbook.sheets.length - 1,
-          child: const Text('Move right'),
         ),
         if (hidden)
-          const PopupMenuItem(value: _TabMenu.unhide, child: Text('Unhide'))
+          viewerMenuItem(value: _TabMenu.unhide, icon: LucideIcons.eye, label: 'Unhide')
         else
-          const PopupMenuItem(value: _TabMenu.hide, child: Text('Hide')),
-        const PopupMenuDivider(),
-        PopupMenuItem(
+          viewerMenuItem(value: _TabMenu.hide, icon: LucideIcons.eyeOff, label: 'Hide'),
+        viewerMenuDivider(),
+        viewerMenuItem(
           value: _TabMenu.delete,
-          child: Text('Delete', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          icon: LucideIcons.trash2,
+          label: 'Delete',
+          destructive: true,
         ),
       ],
     );
@@ -874,7 +875,6 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   // UI
 
   Widget _topActions(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
     final c = _ctrl;
     final compact = WindowSize.of(context).isCompact;
     final buttons = <Widget>[];
@@ -883,162 +883,129 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
         buttons.addAll([
           ListenableBuilder(
             listenable: c,
-            builder: (context, _) => ExplorerTopBar.iconButton(
-              context: context,
-              icon: AppIcons.huge(HugeIcons.strokeRoundedUndo,
-                  color: c.canUndo ? iconColor : iconColor.withValues(alpha: 0.35)),
+            builder: (context, _) => ViewerAction(
+              icon: LucideIcons.undo2,
               tooltip: 'Undo',
               onPressed: c.canUndo ? c.undo : null,
             ),
           ),
           ListenableBuilder(
             listenable: c,
-            builder: (context, _) => ExplorerTopBar.iconButton(
-              context: context,
-              icon: AppIcons.huge(HugeIcons.strokeRoundedRedo,
-                  color: c.canRedo ? iconColor : iconColor.withValues(alpha: 0.35)),
+            builder: (context, _) => ViewerAction(
+              icon: LucideIcons.redo2,
               tooltip: 'Redo',
               onPressed: c.canRedo ? c.redo : null,
             ),
           ),
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: AppIcons.huge(HugeIcons.strokeRoundedSearch01, color: iconColor),
+          ViewerAction(
+            icon: LucideIcons.search,
             tooltip: 'Find & replace',
+            selected: _findOpen,
             onPressed: () => _openFind(replace: false),
           ),
         ]);
       }
       buttons.add(ListenableBuilder(
         listenable: c,
-        builder: (context, _) => _saving
-            ? const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 13),
-                child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            : ExplorerTopBar.iconButton(
-                context: context,
-                icon: Badge(
-                  isLabelVisible: c.dirty,
-                  smallSize: 7,
-                  child: AppIcons.huge(HugeIcons.strokeRoundedFloppyDisk, color: iconColor),
-                ),
-                tooltip: c.workbook.format.canOverwrite ? 'Save' : 'Save as .xlsx',
-                onPressed: _save,
-              ),
+        builder: (context, _) => ViewerAction(
+          icon: LucideIcons.save,
+          badge: c.dirty,
+          busy: _saving,
+          tooltip: c.workbook.format.canOverwrite ? 'Save' : 'Save as .xlsx',
+          onPressed: _save,
+        ),
       ));
-      buttons.add(_moreMenu(context, iconColor, compact));
+      buttons.add(_moreMenu(context, compact));
     } else {
-      buttons.add(ExplorerTopBar.iconButton(
-        context: context,
-        icon: AppIcons.huge(HugeIcons.strokeRoundedLinkSquare02, color: iconColor),
+      buttons.add(ViewerAction(
+        icon: LucideIcons.squareArrowOutUpRight,
         tooltip: 'Open in another app',
         onPressed: _openWith,
       ));
     }
-    return ExplorerTopBar.actions(context, buttons);
+    return ViewerActions(children: buttons);
   }
 
-  Widget _moreMenu(BuildContext context, Color iconColor, bool compact) {
+  Widget _moreMenu(BuildContext context, bool compact) {
     final c = _ctrl!;
     final isCsv = c.workbook.format == SpreadsheetFormat.csv;
     final frozen = c.sheet.frozenRows > 0 || c.sheet.frozenCols > 0;
-    PopupMenuItem<_Menu> item(_Menu v, IconData icon, String label) => PopupMenuItem(
-          value: v,
-          height: 42,
-          child: Row(children: [Icon(icon, size: 20), const SizedBox(width: 14), Expanded(child: Text(label))]),
-        );
-    return PopupMenuButton<_Menu>(
-      tooltip: 'More options',
-      icon: AppIcons.huge(HugeIcons.strokeRoundedMoreVertical, color: iconColor),
+    PopupMenuEntry<_Menu> item(_Menu v, IconData icon, String label, {bool destructive = false}) =>
+        viewerMenuItem(value: v, icon: icon, label: label, destructive: destructive);
+    return ViewerMenuButton<_Menu>(
       onSelected: _onMenu,
       itemBuilder: (context) => [
-        if (compact) item(_Menu.find, Icons.search_rounded, 'Find'),
-        item(_Menu.replace, Icons.find_replace_rounded, 'Find & replace'),
-        item(_Menu.goTo, Icons.my_location_rounded, 'Go to cell…'),
-        const PopupMenuDivider(),
-        item(_Menu.sortAsc, Icons.arrow_upward_rounded, 'Sort A to Z'),
-        item(_Menu.sortDesc, Icons.arrow_downward_rounded, 'Sort Z to A'),
-        item(_Menu.fillDown, Icons.south_rounded, 'Fill down'),
-        item(_Menu.insertRow, Icons.table_rows_outlined, 'Insert row'),
-        item(_Menu.insertColumn, Icons.view_column_outlined, 'Insert column'),
-        item(_Menu.deleteRow, Icons.remove_circle_outline_rounded, 'Delete row'),
-        item(_Menu.deleteColumn, Icons.remove_circle_outline_rounded, 'Delete column'),
-        const PopupMenuDivider(),
-        item(_Menu.freezeHere, Icons.ac_unit_rounded, 'Freeze at selection'),
-        item(_Menu.freezeTopRow, Icons.border_top_rounded, 'Freeze top row'),
-        item(_Menu.freezeFirstColumn, Icons.border_left_rounded, 'Freeze first column'),
-        if (frozen) item(_Menu.unfreeze, Icons.grid_off_rounded, 'Unfreeze panes'),
-        item(_Menu.recalc, Icons.functions_rounded, 'Recalculate'),
+        if (compact) item(_Menu.find, LucideIcons.search, 'Find'),
+        item(_Menu.replace, LucideIcons.replace, 'Find & replace'),
+        item(_Menu.goTo, LucideIcons.locateFixed, 'Go to cell…'),
+        viewerMenuDivider(),
+        item(_Menu.sortAsc, LucideIcons.arrowDownAZ, 'Sort A to Z'),
+        item(_Menu.sortDesc, LucideIcons.arrowDownZA, 'Sort Z to A'),
+        item(_Menu.fillDown, LucideIcons.arrowDownToLine, 'Fill down'),
+        item(_Menu.insertRow, LucideIcons.betweenHorizontalStart, 'Insert row'),
+        item(_Menu.insertColumn, LucideIcons.betweenVerticalStart, 'Insert column'),
+        item(_Menu.deleteRow, LucideIcons.rows3, 'Delete row', destructive: true),
+        item(_Menu.deleteColumn, LucideIcons.columns3, 'Delete column', destructive: true),
+        viewerMenuDivider(),
+        item(_Menu.freezeHere, LucideIcons.snowflake, 'Freeze at selection'),
+        item(_Menu.freezeTopRow, LucideIcons.panelTop, 'Freeze top row'),
+        item(_Menu.freezeFirstColumn, LucideIcons.panelLeft, 'Freeze first column'),
+        if (frozen) item(_Menu.unfreeze, LucideIcons.grid2x2X, 'Unfreeze panes'),
+        item(_Menu.recalc, LucideIcons.sigma, 'Recalculate'),
         if (isCsv) ...[
-          const PopupMenuDivider(),
-          item(_Menu.delimiter, Icons.space_bar_rounded,
+          viewerMenuDivider(),
+          item(_Menu.delimiter, LucideIcons.textCursorInput,
               'Delimiter: ${CsvSettings.delimiterLabel(c.workbook.csv?.delimiter ?? ',')}'),
-          CheckedPopupMenuItem(
+          viewerMenuItem(
             value: _Menu.header,
+            icon: LucideIcons.heading,
+            label: 'First row is header',
             checked: c.workbook.csv?.hasHeader ?? false,
-            child: const Text('First row is header'),
           ),
         ],
-        const PopupMenuDivider(),
-        item(_Menu.saveCopy, Icons.save_as_outlined, 'Save a copy as .xlsx'),
-        item(_Menu.exportCsv, Icons.description_outlined, 'Export sheet as CSV'),
-        item(_Menu.openWith, Icons.open_in_new_rounded, 'Open in another app'),
+        viewerMenuDivider(),
+        item(_Menu.saveCopy, LucideIcons.copy, 'Save a copy as .xlsx'),
+        item(_Menu.exportCsv, LucideIcons.fileOutput, 'Export sheet as CSV'),
+        item(_Menu.openWith, LucideIcons.externalLink, 'Open in another app'),
       ],
     );
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: EdgeInsets.only(top: DockedGlossyTopBar.contentTopInset(context)),
-      child: Center(
-        child: ReadableWidth(
-          maxWidth: 460,
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.grid_off_rounded, size: 56, color: theme.colorScheme.onSurfaceVariant),
-                const SizedBox(height: 16),
-                Text('Can\'t open this spreadsheet', style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
-                const SizedBox(height: 8),
-                Text(_error ?? '', style: theme.textTheme.bodyMedium, textAlign: TextAlign.center),
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _load,
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Try again'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _openWith,
-                      icon: const Icon(Icons.open_in_new_rounded),
-                      label: const Text('Open in another app'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+      child: ViewerMessage(
+        icon: LucideIcons.fileSpreadsheet,
+        destructive: true,
+        title: "Can't open this spreadsheet",
+        message: _error,
+        actions: [
+          OutlinedButton.icon(
+            onPressed: _load,
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Try again'),
           ),
-        ),
+          FilledButton.icon(
+            onPressed: _openWith,
+            icon: const Icon(LucideIcons.externalLink, size: 16),
+            label: const Text('Open in another app'),
+          ),
+        ],
       ),
     );
   }
 
   /// First frame while the file is read: an empty grid, not a spinner.
   Widget _buildSkeleton(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
     return Column(
       children: [
         SizedBox(height: DockedGlossyTopBar.contentTopInset(context)),
-        Material(
-          color: theme.colorScheme.surface.withValues(alpha: 0.94),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.background,
+            border: Border(bottom: BorderSide(color: colors.border)),
+          ),
           child: SizedBox(height: WindowSize.of(context).isCompact ? 40 : 44, width: double.infinity),
         ),
         const LinearProgressIndicator(minHeight: 1),
@@ -1055,13 +1022,12 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   }
 
   Widget _buildEditor(BuildContext context, SpreadsheetController c) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
     final width = MediaQuery.sizeOf(context).width;
     final ws = WindowSize.of(context);
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     final compact = ws.isCompact;
     final hideChrome = compact && keyboard;
-    final surface = theme.colorScheme.surface.withValues(alpha: 0.94);
     final canSheets = c.workbook.format.supportsSheets;
 
     final formulaBar = FormulaBar(
@@ -1079,7 +1045,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       topBars = Row(
         children: [
           Expanded(flex: 5, child: formulaBar),
-          VerticalDivider(width: 1, color: theme.colorScheme.outlineVariant),
+          VerticalDivider(width: 1, color: colors.border),
           Expanded(flex: 6, child: SizedBox(height: 44, child: toolbar)),
         ],
       );
@@ -1089,7 +1055,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
         children: [
           formulaBar,
           if (!hideChrome) ...[
-            Divider(height: 1, color: theme.colorScheme.outlineVariant),
+            Divider(height: 1, color: colors.border),
             SizedBox(height: 44, child: toolbar),
           ],
         ],
@@ -1109,7 +1075,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
       child: Column(
         children: [
           SizedBox(height: DockedGlossyTopBar.contentTopInset(context)),
-          Material(color: surface, child: topBars),
+          Material(color: colors.background, child: topBars),
           if (_findOpen)
             FindReplaceBar(
               key: ValueKey(_findKey),
@@ -1121,7 +1087,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
           if (_previewing)
             const LinearProgressIndicator(minHeight: 1)
           else
-            Divider(height: 1, color: theme.colorScheme.outlineVariant),
+            Divider(height: 1, color: colors.border),
           Expanded(
             child: AdaptiveSplitView(
               secondaryOnLeading: false,
@@ -1136,13 +1102,13 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
           ),
           if (!hideChrome)
             Material(
-              color: surface,
+              color: colors.background,
               child: SafeArea(
                 top: false,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Divider(height: 1, color: theme.colorScheme.outlineVariant),
+                    Divider(height: 1, color: colors.border),
                     SheetStatusBar(controller: c),
                     SheetTabs(
                       controller: c,

@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
@@ -28,68 +29,55 @@ class PdfSearchBar extends StatelessWidget {
   final void Function({bool? matchCase, bool? wholeWords}) onOptionsChanged;
   final VoidCallback onClose;
 
-  static const _compactButton = BoxConstraints(minWidth: 36, minHeight: 40);
-
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final compact = MediaQuery.sizeOf(context).width < 420;
-    return Material(
-      elevation: 6,
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(28),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+    final options = matchCase || wholeWords;
+    return AppPanel(
+      translucent: true,
+      padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
+      child: Material(
+        type: MaterialType.transparency,
         child: Row(
           children: [
-            const SizedBox(width: 12),
-            if (!compact) ...[
-              Icon(Icons.search, size: 20, color: scheme.onSurfaceVariant),
-              const SizedBox(width: 8),
-            ],
             Expanded(
-              child: TextField(
+              child: ViewerSearchField(
                 controller: controller,
                 focusNode: focusNode,
                 autofocus: true,
-                textInputAction: TextInputAction.search,
                 onSubmitted: onSubmitted,
-                decoration: const InputDecoration(
-                  hintText: 'Find in document',
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
               ),
             ),
             _ResultLabel(result: result, searching: searching),
             _buildNavigation(),
-            PopupMenuButton<String>(
+            ViewerMenuButton<String>(
               tooltip: 'Search options',
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 180),
-              icon: const Icon(Icons.tune, size: 20),
+              icon: LucideIcons.slidersHorizontal,
+              badge: options,
+              size: 36,
+              minMenuWidth: 180,
               onSelected: (value) => value == 'case'
                   ? onOptionsChanged(matchCase: !matchCase)
                   : onOptionsChanged(wholeWords: !wholeWords),
               itemBuilder: (context) => [
-                CheckedPopupMenuItem(
+                viewerMenuItem(
                   value: 'case',
+                  icon: LucideIcons.caseSensitive,
+                  label: 'Match case',
                   checked: matchCase,
-                  child: const Text('Match case'),
                 ),
-                CheckedPopupMenuItem(
+                viewerMenuItem(
                   value: 'words',
+                  icon: LucideIcons.wholeWord,
+                  label: 'Whole words',
                   checked: wholeWords,
-                  child: const Text('Whole words'),
                 ),
               ],
             ),
-            IconButton(
+            ViewerAction(
+              icon: LucideIcons.x,
               tooltip: 'Close search',
-              constraints: _compactButton,
-              padding: EdgeInsets.zero,
-              icon: const Icon(Icons.close, size: 20),
+              size: 36,
+              iconSize: 18,
               onPressed: onClose,
             ),
           ],
@@ -100,51 +88,30 @@ class PdfSearchBar extends StatelessWidget {
 
   Widget _buildNavigation() {
     final result = this.result;
-    if (result == null) {
-      return const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: 'Previous match',
-            constraints: _compactButton,
-            padding: EdgeInsets.zero,
-            icon: Icon(Icons.keyboard_arrow_up),
-            onPressed: null,
-          ),
-          IconButton(
-            tooltip: 'Next match',
-            constraints: _compactButton,
-            padding: EdgeInsets.zero,
-            icon: Icon(Icons.keyboard_arrow_down),
-            onPressed: null,
-          ),
-        ],
-      );
-    }
-    return ListenableBuilder(
-      listenable: result,
-      builder: (context, _) {
-        final enabled = result.hasResult && result.totalInstanceCount > 0;
-        return Row(
+    Widget buttons(bool enabled) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
+            ViewerAction(
+              icon: LucideIcons.chevronUp,
               tooltip: 'Previous match',
-              constraints: _compactButton,
-              padding: EdgeInsets.zero,
-              icon: const Icon(Icons.keyboard_arrow_up),
-              onPressed: enabled ? result.previousInstance : null,
+              size: 36,
+              iconSize: 18,
+              onPressed: enabled ? result!.previousInstance : null,
             ),
-            IconButton(
+            ViewerAction(
+              icon: LucideIcons.chevronDown,
               tooltip: 'Next match',
-              constraints: _compactButton,
-              padding: EdgeInsets.zero,
-              icon: const Icon(Icons.keyboard_arrow_down),
-              onPressed: enabled ? result.nextInstance : null,
+              size: 36,
+              iconSize: 18,
+              onPressed: enabled ? result!.nextInstance : null,
             ),
           ],
         );
-      },
+    if (result == null) return buttons(false);
+    return ListenableBuilder(
+      listenable: result,
+      builder: (context, _) =>
+          buttons(result.hasResult && result.totalInstanceCount > 0),
     );
   }
 }
@@ -157,7 +124,9 @@ class _ResultLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.labelMedium;
+    final style = Theme.of(context).textTheme.labelMedium?.copyWith(
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
     final result = this.result;
     if (result == null) return const SizedBox.shrink();
     return ListenableBuilder(
@@ -173,7 +142,7 @@ class _ResultLabel extends StatelessWidget {
           text = 'Searching…';
         }
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Text(text, style: style),
         );
       },

@@ -1,16 +1,19 @@
 import 'dart:io';
 import 'package:archive/archive_io.dart';
-import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
+import 'package:explorer/features/file_explorere/widgets/entity_meta.dart';
 import 'package:explorer/features/file_explorere/widgets/info_row.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 
 import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 import 'package:share_plus/share_plus.dart';
 
 import 'package:explorer/core/repositories/file_repository.dart';
@@ -25,132 +28,140 @@ class FileActionsService {
 
   // Method to show the main options menu
   void showFileOptionsMenu(BuildContext context, FileSystemEntity entity) {
-    showModalBottomSheet(
-      context: context,
-      builder: (sheetContext) {
-        return Wrap(
-          children: <Widget>[
-            if (entity is File)
-              ListTile(
-                leading: const Icon(BootstrapIcons.box_arrow_up_right),
-                title: const Text('Open with…'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  FileOpener.showOpenWith(context, entity);
-                },
+    AppSheet.show<void>(
+      context,
+      child: Builder(
+        builder: (sheetContext) {
+          void run(VoidCallback action) {
+            Navigator.pop(sheetContext);
+            action();
+          }
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _EntityHeader(entity: entity),
+              const SizedBox(height: 12),
+              if (entity is File)
+                _SheetAction(
+                  icon: LucideIcons.squareArrowOutUpRight,
+                  label: 'Open with…',
+                  onTap: () =>
+                      run(() => FileOpener.showOpenWith(context, entity)),
+                ),
+              _SheetAction(
+                icon: LucideIcons.share2,
+                label: 'Share',
+                onTap: () => run(() => share(context, entity)),
               ),
-            ListTile(
-              leading: const Icon(BootstrapIcons.share_fill),
-              title: const Text('Share'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                share(context, entity);
-              },
-            ),
-            ListTile(
-              leading: const Icon(BootstrapIcons.broadcast),
-              title: const Text('Send nearby (LocalSend)'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => LocalSendScreen(initialItems: [entity]),
+              _SheetAction(
+                icon: LucideIcons.radio,
+                label: 'Send nearby',
+                detail: 'LocalSend',
+                onTap: () => run(
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => LocalSendScreen(initialItems: [entity]),
+                    ),
                   ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(BootstrapIcons.pencil_square),
-              title: const Text('Rename'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                showRenameDialog(context, entity);
-              },
-            ),
-            ListTile(
-              leading: const Icon(
-                BootstrapIcons.trash_fill,
-                color: Colors.redAccent,
+                ),
               ),
-              title: const Text(
-                'Delete',
-                style: TextStyle(color: Colors.redAccent),
+              const _SheetDivider(),
+              _SheetAction(
+                icon: LucideIcons.copy,
+                label: 'Copy',
+                onTap: () => run(() {
+                  context.read<ClipboardBloc>().add(CopyToClipboard(entity));
+                  _toast(context, 'Copied. Open a folder and paste.');
+                }),
               ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                showDeleteConfirmationDialog(context, entity);
-              },
-            ),
-            ListTile(
-              leading: const Icon(BootstrapIcons.info_circle_fill),
-              title: const Text('Info'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                showInfoSheet(entity, context);
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(BootstrapIcons.copy),
-              title: const Text('Copy'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                context.read<ClipboardBloc>().add(CopyToClipboard(entity));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Copied to clipboard!')),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(BootstrapIcons.scissors),
-              title: const Text('Cut'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                context.read<ClipboardBloc>().add(CutToClipboard(entity));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Cut to clipboard!')),
-                );
-              },
-            ),
-          ],
-        );
-      },
+              _SheetAction(
+                icon: LucideIcons.scissors,
+                label: 'Cut',
+                onTap: () => run(() {
+                  context.read<ClipboardBloc>().add(CutToClipboard(entity));
+                  _toast(context, 'Cut. Open a folder and paste.');
+                }),
+              ),
+              _SheetAction(
+                icon: LucideIcons.pencil,
+                label: 'Rename',
+                onTap: () => run(() => showRenameDialog(context, entity)),
+              ),
+              _SheetAction(
+                icon: LucideIcons.info,
+                label: 'Properties',
+                onTap: () => run(() => showInfoSheet(entity, context)),
+              ),
+              const _SheetDivider(),
+              _SheetAction(
+                icon: LucideIcons.trash2,
+                label: 'Delete',
+                destructive: true,
+                onTap: () =>
+                    run(() => showDeleteConfirmationDialog(context, entity)),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  // --- All our helper methods are now static here ---
+  /// Asks for a file or folder name. Returns the trimmed name, or null when
+  /// cancelled. With [selectBaseName] the part before the extension starts
+  /// selected (renaming files).
+  Future<String?> promptForName(
+    BuildContext context, {
+    required String title,
+    required String confirmLabel,
+    String? description,
+    String initialValue = '',
+    bool selectBaseName = false,
+    String? Function(String name)? validator,
+  }) {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => _NameDialog(
+        title: title,
+        description: description,
+        confirmLabel: confirmLabel,
+        initialValue: initialValue,
+        selectBaseName: selectBaseName,
+        validator: validator,
+      ),
+    );
+  }
 
   Future<void> showRenameDialog(
     BuildContext blocContext,
     FileSystemEntity entity,
   ) async {
-    final textController = TextEditingController(text: p.basename(entity.path));
-    final newName = await showDialog<String>(
-      context: blocContext, // Use the main context to show the dialog
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Rename'),
-          content: TextField(controller: textController, autofocus: true),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, textController.text),
-              child: const Text('Rename'),
-            ),
-          ],
-        );
+    final oldName = p.basename(entity.path);
+    final isDirectory = entity is Directory;
+    final newName = await promptForName(
+      blocContext,
+      title: isDirectory ? 'Rename folder' : 'Rename file',
+      confirmLabel: 'Rename',
+      initialValue: oldName,
+      selectBaseName: !isDirectory,
+      validator: (name) {
+        if (name == oldName) return '';
+        if (File(p.join(entity.parent.path, name)).existsSync() ||
+            Directory(p.join(entity.parent.path, name)).existsSync()) {
+          return 'An item with this name already exists.';
+        }
+        return null;
       },
     );
 
-    if (newName != null && newName.isNotEmpty) {
+    if (newName != null && newName.isNotEmpty && newName != oldName) {
       try {
         final newPath = p.join(entity.parent.path, newName);
         await repository.rename(entity.path, newPath);
+        if (!blocContext.mounted) return;
         // Use the passed-in blocContext, which is guaranteed to have the BLoC
         final currentState = blocContext.read<FileExplorerBloc>().state;
         if (currentState is FileExplorerLoaded) {
@@ -159,8 +170,46 @@ class FileActionsService {
           );
         }
       } catch (e) {
-        // ... error handling
-        print("Error renaming: $e");
+        debugPrint('Error renaming: $e');
+        if (blocContext.mounted) {
+          _toast(blocContext, "Couldn't rename \"$oldName\": ${_reason(e)}");
+        }
+      }
+    }
+  }
+
+  /// Asks for a name and creates a folder in [parentPath].
+  Future<void> showCreateFolderDialog(
+    BuildContext blocContext,
+    String parentPath,
+  ) async {
+    final name = await promptForName(
+      blocContext,
+      title: 'New folder',
+      confirmLabel: 'Create',
+      initialValue: 'New folder',
+      validator: (name) {
+        if (Directory(p.join(parentPath, name)).existsSync() ||
+            File(p.join(parentPath, name)).existsSync()) {
+          return 'An item with this name already exists.';
+        }
+        return null;
+      },
+    );
+    if (name == null || name.isEmpty) return;
+    try {
+      await repository.createDirectory(p.join(parentPath, name));
+      if (!blocContext.mounted) return;
+      final currentState = blocContext.read<FileExplorerBloc>().state;
+      if (currentState is FileExplorerLoaded) {
+        blocContext.read<FileExplorerBloc>().add(
+          LoadDirectory(currentState.path),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error creating folder: $e');
+      if (blocContext.mounted) {
+        _toast(blocContext, "Couldn't create the folder: ${_reason(e)}");
       }
     }
   }
@@ -169,34 +218,20 @@ class FileActionsService {
     BuildContext blocContext,
     FileSystemEntity entity,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: blocContext,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Delete'),
-          content: Text(
-            'Are you sure you want to delete "${p.basename(entity.path)}"? This cannot be undone.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text(
-                'Delete',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-            ),
-          ],
-        );
-      },
+    final name = p.basename(entity.path);
+    final confirmed = await _confirmDelete(
+      blocContext,
+      title: 'Delete "$name"?',
+      message: entity is Directory
+          ? 'This folder and everything in it will be permanently deleted. '
+              "This can't be undone."
+          : "This file will be permanently deleted. This can't be undone.",
     );
 
     if (confirmed == true) {
       try {
         await repository.delete(entity.path, recursive: true);
+        if (!blocContext.mounted) return;
         final currentState = blocContext.read<FileExplorerBloc>().state;
         if (currentState is FileExplorerLoaded) {
           blocContext.read<FileExplorerBloc>().add(
@@ -204,7 +239,10 @@ class FileActionsService {
           );
         }
       } catch (e) {
-        print("Error deleting: $e");
+        debugPrint('Error deleting: $e');
+        if (blocContext.mounted) {
+          _toast(blocContext, "Couldn't delete \"$name\": ${_reason(e)}");
+        }
       }
     }
   }
@@ -214,30 +252,19 @@ class FileActionsService {
     List<FileSystemEntity> files,
   ) async {
     if (files.isEmpty) return;
+    if (files.length == 1) {
+      await showDeleteConfirmationDialog(context, files.single);
+      if (context.mounted) {
+        context.read<FileExplorerBloc>().add(ToggleSelectionMode(enable: false));
+      }
+      return;
+    }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('Delete ${files.length} items?'),
-          content: const Text(
-            'Are you sure you want to delete these items? This cannot be undone.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text(
-                'Delete',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-            ),
-          ],
-        );
-      },
+    final confirmed = await _confirmDelete(
+      context,
+      title: 'Delete ${files.length} items?',
+      message: "The selected items will be permanently deleted. This can't be "
+          'undone.',
     );
 
     if (confirmed == true) {
@@ -247,16 +274,18 @@ class FileActionsService {
           await repository.delete(file.path, recursive: true);
           successCount++;
         } catch (e) {
-          print("Error deleting ${file.path}: $e");
+          debugPrint('Error deleting ${file.path}: $e');
         }
       }
 
       if (context.mounted) {
-        if (successCount > 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Deleted $successCount items')),
-          );
-        }
+        final failed = files.length - successCount;
+        _toast(
+          context,
+          failed == 0
+              ? 'Deleted $successCount items'
+              : "Deleted $successCount items. $failed couldn't be deleted.",
+        );
 
         final currentState = context.read<FileExplorerBloc>().state;
         if (currentState is FileExplorerLoaded) {
@@ -271,84 +300,65 @@ class FileActionsService {
     }
   }
 
-  void showInfoSheet(FileSystemEntity entity, BuildContext context) {
-    showModalBottomSheet(
+  Future<bool?> _confirmDelete(
+    BuildContext context, {
+    required String title,
+    required String message,
+  }) {
+    return showDialog<bool>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            Future<int>? sizeFuture;
-            if (entity is Directory) {
-              // If it's a directory, start the calculation
-              sizeFuture = calculateDirectorySize(entity);
-            } else if (entity is File) {
-              // If it's a file, get the size directly
-              sizeFuture = entity.length();
-            }
-
-            return Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    p.basename(entity.path),
-                    style: Theme.of(context).textTheme.headlineSmall,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const Divider(height: 24),
-                  InfoRow(title: 'Path', content: entity.path),
-                  const SizedBox(height: 12),
-                  FutureBuilder<int>(
-                    future: sizeFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return InfoRow(
-                          title: 'Size',
-                          content: 'Calculating...',
-                        );
-                      }
-                      if (snapshot.hasError) {
-                        return InfoRow(title: 'Size', content: 'Error');
-                      }
-                      // Use the 'filesize' package to format the bytes
-                      return InfoRow(
-                        title: 'Size',
-                        content: filesize(snapshot.data ?? 0),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  FutureBuilder<FileStat>(
-                    future: entity.stat(),
-                    builder: (context, snapshot) {
-                      if (snapshot.hasData) {
-                        // Use the 'intl' package to format the date
-                        final formattedDate = DateFormat.yMMMd()
-                            .add_jms()
-                            .format(snapshot.data!.modified);
-                        return InfoRow(
-                          title: 'Modified',
-                          content: formattedDate,
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    },
-                  ),
-                ],
+      builder: (dialogContext) {
+        final colors = dialogContext.colors;
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.destructive,
+                foregroundColor: colors.destructiveForeground,
               ),
-            );
-          },
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
         );
       },
     );
   }
 
-  static Future<int> calculateDirectorySize(Directory dir) async {
-    // ... same size calculation logic
-    return 0; // Placeholder
+  void showInfoSheet(FileSystemEntity entity, BuildContext context) {
+    AppSheet.show<void>(context, child: _PropertiesSheet(entity: entity));
+  }
+
+  static Future<int> calculateDirectorySize(Directory dir) async =>
+      (await _scanDirectory(dir)).bytes;
+
+  /// Total size and number of files / folders under [dir]; unreadable
+  /// sub-folders are skipped.
+  static Future<({int bytes, int files, int folders})> _scanDirectory(
+    Directory dir,
+  ) async {
+    var bytes = 0;
+    var files = 0;
+    var folders = 0;
+    await for (final entity in dir
+        .list(recursive: true, followLinks: false)
+        .handleError((Object _) {})) {
+      if (entity is File) {
+        files++;
+        try {
+          bytes += (await entity.stat()).size;
+        } catch (_) {}
+      } else if (entity is Directory) {
+        folders++;
+      }
+    }
+    return (bytes: bytes, files: files, folders: folders);
   }
 
   /// Anchor for the iPad share popover: the widget that triggered the
@@ -373,15 +383,32 @@ class FileActionsService {
     }
   }
 
+  /// Shares several items at once. A single folder is zipped first; with
+  /// several items, folders are skipped.
+  void shareMany(BuildContext context, List<FileSystemEntity> entities) {
+    if (entities.isEmpty) return;
+    if (entities.length == 1) return share(context, entities.single);
+    final files = entities.whereType<File>().toList();
+    if (files.isEmpty) {
+      _toast(context, 'Folders can only be shared one at a time.');
+      return;
+    }
+    if (files.length != entities.length) {
+      _toast(context, 'Folders were skipped. Share them one at a time.');
+    }
+    SharePlus.instance.share(ShareParams(
+      files: [for (final f in files) XFile(f.path)],
+      sharePositionOrigin: _shareOrigin(context),
+    ));
+  }
+
   Future<void> shareZippedFolder(
     BuildContext context,
     Directory directory,
   ) async {
     final origin = _shareOrigin(context);
     // Show a loading indicator
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Zipping folder for sharing...')),
-    );
+    _toast(context, 'Zipping folder for sharing…');
 
     final tempDir = await getTemporaryDirectory();
     final zipPath = p.join(tempDir.path, '${p.basename(directory.path)}.zip');
@@ -408,12 +435,7 @@ class FileActionsService {
       ));
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to zip folder: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _toast(context, "Couldn't zip the folder: ${_reason(e)}");
     } finally {
       // Clean up the temporary file
       final tempFile = File(zipPath);
@@ -421,5 +443,375 @@ class FileActionsService {
         await tempFile.delete();
       }
     }
+  }
+
+  static void _toast(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  static String _reason(Object error) => switch (error) {
+        FileSystemException(:final osError?) => osError.message,
+        FileSystemException(:final message) => message,
+        _ => error.toString(),
+      };
+}
+
+/// File icon, name and "size · type · date" at the top of the sheets.
+class _EntityHeader extends StatelessWidget {
+  const _EntityHeader({required this.entity, this.iconSize = 40});
+
+  final FileSystemEntity entity;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final name = p.basename(entity.path);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          EntityIcon(entity: entity, size: iconSize),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name.isEmpty ? entity.path : name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                EntityStatBuilder(
+                  entity: entity,
+                  builder: (context, stat) => Text(
+                    [
+                      if (stat != null && entity is File)
+                        EntityFormat.size(stat.size),
+                      EntityFormat.kind(entity),
+                      if (stat != null) EntityFormat.date(stat.modified),
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A row in an action sheet (dropdown-menu style).
+class _SheetAction extends StatelessWidget {
+  const _SheetAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.detail,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String? detail;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final fg = destructive ? colors.destructive : colors.foreground;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        height: 44,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: destructive ? colors.destructive : colors.mutedForeground,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  label,
+                  style: text.bodyMedium?.copyWith(
+                    color: fg,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (detail != null) Text(detail!, style: text.bodySmall),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetDivider extends StatelessWidget {
+  const _SheetDivider();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Divider(height: 1, color: context.colors.border),
+      );
+}
+
+/// Name prompt used for rename, new folder and archive names.
+class _NameDialog extends StatefulWidget {
+  const _NameDialog({
+    required this.title,
+    required this.confirmLabel,
+    required this.initialValue,
+    required this.selectBaseName,
+    this.description,
+    this.validator,
+  });
+
+  final String title;
+  final String? description;
+  final String confirmLabel;
+  final String initialValue;
+  final bool selectBaseName;
+
+  /// Returns an error message, '' to just disable the button, or null.
+  final String? Function(String name)? validator;
+
+  @override
+  State<_NameDialog> createState() => _NameDialogState();
+}
+
+class _NameDialogState extends State<_NameDialog> {
+  late final TextEditingController _controller;
+  String? _error;
+  bool _valid = false;
+
+  static final _illegal = RegExp(r'[\\/:*?"<>|]');
+
+  @override
+  void initState() {
+    super.initState();
+    final value = widget.initialValue;
+    final ext = p.extension(value);
+    final end = widget.selectBaseName && ext.isNotEmpty && ext != value
+        ? value.length - ext.length
+        : value.length;
+    _controller = TextEditingController(text: value)
+      ..selection = TextSelection(baseOffset: 0, extentOffset: end);
+    _validate(value);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _validate(String raw) {
+    final name = raw.trim();
+    String? error;
+    if (name.isEmpty) {
+      error = '';
+    } else if (_illegal.hasMatch(name) || name == '.' || name == '..') {
+      error = 'Names can\'t contain \\ / : * ? " < > |';
+    } else {
+      error = widget.validator?.call(name);
+    }
+    _valid = error == null;
+    _error = error == null || error.isEmpty ? null : error;
+  }
+
+  void _submit() {
+    if (_valid) Navigator.pop(context, _controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.description != null) ...[
+              Text(widget.description!),
+              const SizedBox(height: 16),
+            ],
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              onChanged: (value) => setState(() => _validate(value)),
+              onSubmitted: (_) => _submit(),
+              style: Theme.of(context).textTheme.bodyMedium,
+              decoration: InputDecoration(errorText: _error),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _valid ? _submit : null,
+          child: Text(widget.confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
+/// Properties: type, size (folders are measured in the background),
+/// location and dates.
+class _PropertiesSheet extends StatefulWidget {
+  const _PropertiesSheet({required this.entity});
+
+  final FileSystemEntity entity;
+
+  @override
+  State<_PropertiesSheet> createState() => _PropertiesSheetState();
+}
+
+class _PropertiesSheetState extends State<_PropertiesSheet> {
+  static final _dateTime = DateFormat.yMMMd().add_jm();
+
+  late final Future<FileStat> _stat = widget.entity.stat();
+  late final Future<({int bytes, int files, int folders})>? _scan =
+      widget.entity is Directory
+          ? FileActionsService._scanDirectory(widget.entity as Directory)
+          : null;
+
+  @override
+  Widget build(BuildContext context) {
+    final entity = widget.entity;
+    final text = Theme.of(context).textTheme;
+    final number = NumberFormat.decimalPattern();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Properties', style: text.titleLarge),
+        const SizedBox(height: 16),
+        _EntityHeader(entity: entity, iconSize: 44),
+        const SizedBox(height: 16),
+        FutureBuilder<FileStat>(
+          future: _stat,
+          builder: (context, statSnap) {
+            final stat = statSnap.data;
+            return _DetailsCard(
+              children: [
+                InfoRow(title: 'Type', content: EntityFormat.kind(entity)),
+                if (_scan != null)
+                  FutureBuilder(
+                    future: _scan,
+                    builder: (context, snap) {
+                      final scan = snap.data;
+                      if (snap.hasError) {
+                        return const InfoRow(title: 'Size', content: '—');
+                      }
+                      if (scan == null) {
+                        return const InfoRow(
+                          title: 'Size',
+                          content: 'Calculating…',
+                          muted: true,
+                        );
+                      }
+                      return InfoRow(
+                        title: 'Size',
+                        content: '${filesize(scan.bytes, 1)} · '
+                            '${number.format(scan.files)} '
+                            '${scan.files == 1 ? 'file' : 'files'}, '
+                            '${number.format(scan.folders)} '
+                            '${scan.folders == 1 ? 'folder' : 'folders'}',
+                      );
+                    },
+                  )
+                else
+                  InfoRow(
+                    title: 'Size',
+                    content: stat == null
+                        ? '…'
+                        : '${filesize(stat.size, 1)} '
+                            '(${number.format(stat.size)} bytes)',
+                  ),
+                InfoRow(
+                  title: 'Location',
+                  content: entity.parent.path,
+                  selectable: true,
+                ),
+                InfoRow(
+                  title: 'Modified',
+                  content: stat == null ? '…' : _dateTime.format(stat.modified),
+                ),
+                InfoRow(
+                  title: 'Accessed',
+                  content: stat == null ? '…' : _dateTime.format(stat.accessed),
+                ),
+                if (!Platform.isWindows && stat != null)
+                  InfoRow(title: 'Permissions', content: stat.modeString()),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: entity.path));
+            FileActionsService._toast(context, 'Path copied');
+          },
+          icon: const Icon(LucideIcons.copy, size: 16),
+          label: const Text('Copy path'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Bordered card with hairlines between its rows.
+class _DetailsCard extends StatelessWidget {
+  const _DetailsCard({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) Divider(height: 1, color: colors.border),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              child: children[i],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }

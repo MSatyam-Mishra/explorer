@@ -1,4 +1,7 @@
 import 'dart:io' as io;
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
+import 'package:explorer/features/viewer_vector/widgets/vector_canvas.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -16,6 +19,7 @@ class RiveViewerScreen extends StatefulWidget {
 class _RiveViewerScreenState extends State<RiveViewerScreen> {
   late PageController _pageController;
   List<io.File> _files = [];
+  int _index = 0;
   bool _isLoading = true;
 
   @override
@@ -42,7 +46,8 @@ class _RiveViewerScreenState extends State<RiveViewerScreen> {
       final safeIndex = initialIndex != -1 ? initialIndex : 0;
 
       setState(() {
-        _files = files;
+        _files = files.isEmpty ? [widget.riveFile] : files;
+        _index = safeIndex;
         _isLoading = false;
         _pageController = PageController(initialPage: safeIndex);
       });
@@ -58,28 +63,42 @@ class _RiveViewerScreenState extends State<RiveViewerScreen> {
 
   @override
   void dispose() {
-    _pageController.dispose();
+    if (!_isLoading) _pageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: PageView.builder(
-        controller: _pageController,
-        scrollDirection: Axis.horizontal,
-        itemCount: _files.length,
-        itemBuilder: (context, index) {
-          return RivePlayerPage(file: _files[index]);
-        },
+    final current = _isLoading ? widget.riveFile : _files[_index];
+    return ExplorerScaffold(
+      title: p.basename(current.path),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_files.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: CountPill('${_index + 1} / ${_files.length}'),
+            ),
+          const CanvasBackgroundButton(),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: Padding(
+        padding: EdgeInsets.only(
+          top: DockedGlossyTopBar.contentTopInset(context),
+        ),
+        child: _isLoading
+            ? const ViewerLoading()
+            : PageView.builder(
+                controller: _pageController,
+                scrollDirection: Axis.horizontal,
+                itemCount: _files.length,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (context, index) {
+                  return RivePlayerPage(file: _files[index]);
+                },
+              ),
       ),
     );
   }
@@ -125,7 +144,7 @@ class _RivePlayerPageState extends State<RivePlayerPage> {
       debugPrint('Error loading Rive file: $e');
       if (mounted) {
         setState(() {
-          _error = 'Failed to load Rive file: $e';
+          _error = '$e';
           _isLoading = false;
         });
       }
@@ -140,31 +159,37 @@ class _RivePlayerPageState extends State<RivePlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return ExplorerScaffold(
-      backgroundColor: Colors.black,
-      title: p.basename(widget.file.path),
-      body: Center(
-        child: _isLoading
-            ? const CircularProgressIndicator()
-            : _error != null
-                ? Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : _controller == null
-                    ? const Text(
-                        'Unable to initialize Rive controller',
-                        style: TextStyle(color: Colors.white),
-                      )
-                    : RiveWidget(
-                        controller: _controller!,
-                        fit: Fit.contain,
-                      ),
-      ),
+    final Widget content;
+    if (_isLoading) {
+      content = const ViewerLoading();
+    } else if (_error != null) {
+      content = ViewerMessage(
+        icon: LucideIcons.fileX2,
+        title: "Couldn't play this animation",
+        message: "It isn't a valid Rive file, or it needs a newer player.",
+        details: _error,
+      );
+    } else if (_controller == null) {
+      content = const ViewerMessage(
+        icon: LucideIcons.fileX2,
+        title: "Couldn't play this animation",
+        message: 'Unable to initialize the Rive player.',
+      );
+    } else {
+      content = Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.paddingOf(context).bottom,
+        ),
+        child: RiveWidget(controller: _controller!, fit: Fit.contain),
+      );
+    }
+    return ValueListenableBuilder<CanvasBackground>(
+      valueListenable: canvasBackground,
+      builder: (context, background, _) =>
+          VectorCanvas(background: background, child: content),
     );
   }
 }

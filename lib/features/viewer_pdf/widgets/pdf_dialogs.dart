@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -123,11 +124,13 @@ class _PasswordDialogState extends State<_PasswordDialog> {
               decoration: InputDecoration(
                 labelText: 'Password',
                 errorText: widget.confirm ? null : _error,
-                suffixIcon: IconButton(
+                prefixIcon: const Icon(LucideIcons.keyRound, size: 16),
+                suffixIcon: ViewerAction(
+                  icon: _obscure ? LucideIcons.eye : LucideIcons.eyeOff,
                   tooltip: _obscure ? 'Show password' : 'Hide password',
-                  icon: Icon(
-                    _obscure ? Icons.visibility_outlined : Icons.visibility_off,
-                  ),
+                  iconSize: 16,
+                  size: 36,
+                  color: context.colors.mutedForeground,
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
               ),
@@ -140,6 +143,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
                 onSubmitted: (_) => _submit(),
                 decoration: InputDecoration(
                   labelText: 'Repeat password',
+                  prefixIcon: const Icon(LucideIcons.keyRound, size: 16),
                   errorText: _error,
                 ),
               ),
@@ -148,7 +152,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
@@ -220,7 +224,7 @@ class _GoToPageDialogState extends State<_GoToPageDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
@@ -296,14 +300,11 @@ class _TextInputDialogState extends State<_TextInputDialog> {
           onSubmitted: widget.multiline
               ? null
               : (value) => Navigator.pop(context, value.trim()),
-          decoration: InputDecoration(
-            hintText: widget.hint,
-            border: const OutlineInputBorder(),
-          ),
+          decoration: InputDecoration(hintText: widget.hint),
         ),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
@@ -321,14 +322,13 @@ Future<Color?> showPdfColorPicker(BuildContext context, Color current) {
   return showDialog<Color>(
     context: context,
     builder: (context) {
-      final outline = Theme.of(context).colorScheme.outline;
       return AlertDialog(
         title: const Text('Colour'),
         content: SizedBox(
-          width: 300,
+          width: 296,
           child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               for (final color in pdfPaletteColors)
                 Semantics(
@@ -337,18 +337,14 @@ Future<Color?> showPdfColorPicker(BuildContext context, Color current) {
                   label: 'Colour ${color.toARGB32().toRadixString(16)}',
                   child: InkResponse(
                     onTap: () => Navigator.pop(context, color),
-                    radius: 24,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: color.toARGB32() == current.toARGB32()
-                              ? Theme.of(context).colorScheme.primary
-                              : outline.withValues(alpha: 0.5),
-                          width: color.toARGB32() == current.toARGB32() ? 3 : 1,
+                    radius: 22,
+                    child: SizedBox.square(
+                      dimension: 40,
+                      child: Center(
+                        child: ViewerSwatch(
+                          color: color,
+                          size: 28,
+                          selected: color.toARGB32() == current.toARGB32(),
                         ),
                       ),
                     ),
@@ -358,7 +354,7 @@ Future<Color?> showPdfColorPicker(BuildContext context, Color current) {
           ),
         ),
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
@@ -379,10 +375,11 @@ Future<UnsavedChoice?> showUnsavedPdfDialog(BuildContext context) {
       content: const Text('This PDF has changes that have not been saved.'),
       actions: [
         TextButton(
+          style: TextButton.styleFrom(foregroundColor: context.colors.destructive),
           onPressed: () => Navigator.pop(context, UnsavedChoice.discard),
           child: const Text('Discard'),
         ),
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context, UnsavedChoice.saveCopy),
           child: const Text('Save as copy'),
         ),
@@ -401,32 +398,10 @@ Future<bool> showPdfConfirmDialog(
   required String message,
   required String confirmLabel,
   bool destructive = false,
-}) async {
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (context) {
-      final scheme = Theme.of(context).colorScheme;
-      return AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: destructive
-                ? FilledButton.styleFrom(
-                    backgroundColor: scheme.error,
-                    foregroundColor: scheme.onError,
-                  )
-                : null,
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(confirmLabel),
-          ),
-        ],
-      );
-    },
-  );
-  return result ?? false;
-}
+}) => showViewerConfirm(
+  context,
+  title: title,
+  message: message,
+  confirmLabel: confirmLabel,
+  destructive: destructive,
+);

@@ -7,7 +7,7 @@ import 'package:explorer/features/viewer_pdf/models/pdf_edit_models.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_document_ops.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_page_rasterizer.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_dialogs.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:file_picker/file_picker.dart';
@@ -767,7 +767,6 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
     return PopScope(
       canPop: _items.isEmpty && !_applying,
       onPopInvokedWithResult: (didPop, _) async {
@@ -776,29 +775,34 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
       },
       child: ExplorerScaffold(
         title: 'Page ${widget.pageNumber}',
-        trailing: ExplorerTopBar.actions(context, [
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.fit_screen_outlined, color: iconColor),
-            tooltip: 'Reset zoom',
-            onPressed: () => setState(() => _zoom.value = Matrix4.identity()),
-          ),
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: _applying
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: iconColor,
-                    ),
-                  )
-                : Icon(Icons.check, color: iconColor),
-            tooltip: 'Apply to page',
-            onPressed: _items.isEmpty || _applying ? null : _apply,
-          ),
-        ]),
+        trailing: ViewerActions(
+          children: [
+            ViewerAction(
+              icon: LucideIcons.scan,
+              tooltip: 'Reset zoom',
+              onPressed: () => setState(() => _zoom.value = Matrix4.identity()),
+            ),
+            const SizedBox(width: 4),
+            Tooltip(
+              message: 'Apply to page',
+              child: FilledButton.icon(
+                onPressed: _items.isEmpty || _applying ? null : _apply,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                icon: _applying
+                    ? ViewerSpinner(
+                        size: 14,
+                        color: context.colors.primaryForeground,
+                      )
+                    : const Icon(LucideIcons.check, size: 16),
+                label: const Text('Apply'),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
         body: AbsorbPointer(absorbing: _applying, child: _buildBody(context)),
       ),
     );
@@ -807,31 +811,33 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
   Widget _buildBody(BuildContext context) {
     final top = DockedGlossyTopBar.contentTopInset(context);
     final padding = MediaQuery.paddingOf(context);
-    return Padding(
-      padding: EdgeInsets.only(
-        top: top,
-        left: padding.left,
-        right: padding.right,
-      ),
-      child: Column(
-        children: [
-          Expanded(child: _buildPageArea(context)),
-          Padding(
-            padding: EdgeInsets.fromLTRB(8, 4, 8, 8 + padding.bottom),
-            child: _buildToolbar(context),
-          ),
-        ],
+    return ColoredBox(
+      color: ViewerSurface.canvas(context),
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: top,
+          left: padding.left,
+          right: padding.right,
+        ),
+        child: Column(
+          children: [
+            Expanded(child: _buildPageArea(context)),
+            Padding(
+              padding: EdgeInsets.fromLTRB(8, 4, 8, 8 + padding.bottom),
+              child: Center(child: _buildToolbar(context)),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildPageArea(BuildContext context) {
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(_error!, textAlign: TextAlign.center),
-        ),
+      return ViewerMessage(
+        icon: LucideIcons.fileWarning,
+        title: "Couldn't show this page",
+        message: _error,
       );
     }
     return LayoutBuilder(
@@ -847,21 +853,12 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
         );
         final pageSize = _pageSize * _scale;
         final hand = _tool == PageCanvasTool.hand;
-        final scheme = Theme.of(context).colorScheme;
+        final colors = context.colors;
 
         final page = Container(
           width: pageSize.width,
           height: pageSize.height,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          decoration: ViewerSurface.page(context),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanStart: hand ? null : _onPanStart,
@@ -883,7 +880,9 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                 if (_pageImage != null)
                   RawImage(image: _pageImage, fit: BoxFit.fill)
                 else
-                  const Center(child: CircularProgressIndicator()),
+                  const Center(
+                    child: ViewerSpinner(size: 22, color: Color(0xFF9CA3AF)),
+                  ),
                 CustomPaint(
                   painter: _CanvasPainter(
                     items: _items,
@@ -898,7 +897,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                         : 1,
                     selected: _selected,
                     scale: _scale,
-                    selectionColor: scheme.primary,
+                    selectionColor: colors.ring,
                   ),
                 ),
               ],
@@ -926,27 +925,42 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
   }
 
   Widget _buildToolbar(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
+    final compact = MediaQuery.sizeOf(context).width < 480;
+    final size = compact ? 36.0 : 40.0;
+    final iconSize = compact ? 18.0 : 20.0;
     final selected = _selected != null && _selected! < _items.length
         ? _items[_selected!]
         : null;
 
     Widget tool(PageCanvasTool value, IconData icon, String tooltip) {
-      final active = _tool == value;
-      return IconButton(
+      return ViewerAction(
         tooltip: tooltip,
-        isSelected: active,
-        style: active
-            ? IconButton.styleFrom(
-                backgroundColor: scheme.secondaryContainer,
-                foregroundColor: scheme.onSecondaryContainer,
-              )
-            : null,
+        icon: icon,
+        size: size,
+        iconSize: iconSize,
+        selected: _tool == value,
         onPressed: () => _setTool(value),
-        icon: Icon(icon),
       );
     }
 
+    Widget action(
+      IconData icon,
+      String tooltip,
+      VoidCallback? onPressed, {
+      bool destructive = false,
+    }) {
+      return ViewerAction(
+        tooltip: tooltip,
+        icon: icon,
+        size: size,
+        iconSize: iconSize,
+        color: destructive && onPressed != null ? colors.destructive : null,
+        onPressed: onPressed,
+      );
+    }
+
+    final textTool = _tool == PageCanvasTool.text;
     final sizeOptions = switch (_tool) {
       PageCanvasTool.highlighter => _highlighterWidths,
       PageCanvasTool.text => _fontSizes,
@@ -957,130 +971,125 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
       PageCanvasTool.text => _fontSize,
       _ => _penWidth,
     };
+    String sizeLabel(double size) =>
+        '${size % 1 == 0 ? size.round() : size} pt';
 
-    final divider = SizedBox(
-      height: 24,
-      child: VerticalDivider(width: 12, color: scheme.outlineVariant),
+    final sizeMenu = ViewerMenuButton<double>(
+      tooltip: textTool ? 'Text size' : 'Line width',
+      minMenuWidth: 140,
+      onSelected: (value) => setState(() {
+        switch (_tool) {
+          case PageCanvasTool.highlighter:
+            _highlighterWidth = value;
+          case PageCanvasTool.text:
+            _fontSize = value;
+          default:
+            _penWidth = value;
+        }
+      }),
+      itemBuilder: (context) => [
+        for (final size in sizeOptions)
+          viewerMenuItem(
+            value: size,
+            label: textTool ? '${sizeLabel(size)} text' : '${sizeLabel(size)} line',
+            checked: size == currentSize,
+          ),
+      ],
+      child: SizedBox(
+        height: size,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                textTool ? LucideIcons.aLargeSmall : LucideIcons.slidersHorizontal,
+                size: 16,
+                color: colors.foreground,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                sizeLabel(currentSize),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.foreground,
+                ),
+              ),
+              Icon(LucideIcons.chevronDown, size: 14, color: colors.mutedForeground),
+            ],
+          ),
+        ),
+      ),
     );
 
-    return Material(
-      elevation: 6,
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(28),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    return AppPanel(
+      translucent: true,
+      padding: const EdgeInsets.all(4),
+      child: Material(
+        type: MaterialType.transparency,
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
+            Flexible(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    tool(
-                      PageCanvasTool.hand,
-                      Icons.pan_tool_outlined,
-                      'Move and zoom',
-                    ),
+                    tool(PageCanvasTool.hand, LucideIcons.hand, 'Move and zoom'),
                     tool(
                       PageCanvasTool.select,
-                      Icons.near_me_outlined,
+                      LucideIcons.mousePointer2,
                       'Select',
                     ),
-                    tool(PageCanvasTool.pen, Icons.edit_outlined, 'Pen'),
+                    tool(PageCanvasTool.pen, LucideIcons.penTool, 'Pen'),
                     tool(
                       PageCanvasTool.highlighter,
-                      Icons.highlight,
+                      LucideIcons.highlighter,
                       'Highlighter',
                     ),
-                    tool(
-                      PageCanvasTool.eraser,
-                      Icons.auto_fix_normal_outlined,
-                      'Eraser',
-                    ),
-                    tool(PageCanvasTool.text, Icons.text_fields, 'Text'),
-                    divider,
-                    IconButton(
-                      tooltip: 'Add image or stamp',
-                      onPressed: _addImage,
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                    ),
-                    IconButton(
-                      tooltip: 'Add signature',
-                      onPressed: _addSignature,
-                      icon: const Icon(Icons.draw_outlined),
-                    ),
-                    divider,
+                    tool(PageCanvasTool.eraser, LucideIcons.eraser, 'Eraser'),
+                    tool(PageCanvasTool.text, LucideIcons.type, 'Text'),
+                    const ViewerToolDivider(),
+                    action(LucideIcons.imagePlus, 'Add image or stamp', _addImage),
+                    action(LucideIcons.signature, 'Add signature', _addSignature),
+                    const ViewerToolDivider(),
                     IconButton(
                       tooltip: 'Colour',
-                      onPressed: _pickColor,
-                      icon: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          color: _color,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: scheme.outline),
+                      constraints: BoxConstraints.tightFor(
+                        width: size,
+                        height: size,
+                      ),
+                      padding: EdgeInsets.zero,
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                      onPressed: _pickColor,
+                      icon: ViewerSwatch(color: _color, size: iconSize),
                     ),
-                    PopupMenuButton<double>(
-                      tooltip: _tool == PageCanvasTool.text
-                          ? 'Text size'
-                          : 'Line width',
-                      icon: const Icon(Icons.line_weight),
-                      initialValue: currentSize,
-                      onSelected: (value) => setState(() {
-                        switch (_tool) {
-                          case PageCanvasTool.highlighter:
-                            _highlighterWidth = value;
-                          case PageCanvasTool.text:
-                            _fontSize = value;
-                          default:
-                            _penWidth = value;
-                        }
-                      }),
-                      itemBuilder: (context) => [
-                        for (final size in sizeOptions)
-                          PopupMenuItem(
-                            value: size,
-                            child: Text(
-                              _tool == PageCanvasTool.text
-                                  ? '${size.round()} pt text'
-                                  : '${size % 1 == 0 ? size.round() : size} pt line',
-                            ),
-                          ),
-                      ],
-                    ),
+                    sizeMenu,
                   ],
                 ),
               ),
             ),
-            divider,
+            const ViewerToolDivider(),
             if (selected is _TextItem)
-              IconButton(
-                tooltip: 'Edit text',
-                onPressed: () => _editText(_selected!),
-                icon: const Icon(Icons.edit_note),
-              ),
+              action(LucideIcons.squarePen, 'Edit text', () => _editText(_selected!)),
             if (selected != null)
-              IconButton(
-                tooltip: 'Delete',
-                onPressed: _deleteSelected,
-                icon: const Icon(Icons.delete_outline),
+              action(
+                LucideIcons.trash2,
+                'Delete',
+                _deleteSelected,
+                destructive: true,
               ),
-            IconButton(
-              tooltip: 'Undo',
-              onPressed: _undo.isEmpty ? null : _undoLast,
-              icon: const Icon(Icons.undo),
-            ),
+            action(LucideIcons.undo2, 'Undo', _undo.isEmpty ? null : _undoLast),
           ],
         ),
       ),
     );
   }
 }
-
 class _CanvasPainter extends CustomPainter {
   _CanvasPainter({
     required this.items,
@@ -1194,7 +1203,7 @@ class _CanvasPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5,
         );
-        canvas.drawCircle(rect.bottomRight, 8, Paint()..color = Colors.white);
+        canvas.drawCircle(rect.bottomRight, 8, Paint()..color = const Color(0xFFFFFFFF));
         canvas.drawCircle(
           rect.bottomRight,
           8,
@@ -1280,22 +1289,23 @@ class _SignaturePadDialogState extends State<_SignaturePadDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     return AlertDialog(
       title: const Text('Draw your signature'),
-      contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       content: SizedBox(
         width: 480,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Signing happens on paper: white in both modes.
             AspectRatio(
               aspectRatio: 2.4,
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: scheme.outline),
+                  border: Border.all(color: colors.input),
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -1312,10 +1322,10 @@ class _SignaturePadDialogState extends State<_SignaturePadDialog> {
                         _strokeWidth,
                       ),
                       child: _strokes.isEmpty
-                          ? Center(
+                          ? const Center(
                               child: Text(
                                 'Sign here',
-                                style: TextStyle(color: Colors.grey.shade500),
+                                style: TextStyle(color: Color(0xFF9CA3AF)),
                               ),
                             )
                           : null,
@@ -1339,31 +1349,27 @@ class _SignaturePadDialogState extends State<_SignaturePadDialog> {
                       ])
                         IconButton(
                           tooltip: 'Ink colour',
-                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 40,
+                            height: 40,
+                          ),
+                          padding: EdgeInsets.zero,
                           onPressed: () => setState(() => _color = color),
-                          icon: Container(
-                            width: 22,
-                            height: 22,
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _color == color
-                                    ? scheme.primary
-                                    : scheme.outline,
-                                width: _color == color ? 3 : 1,
-                              ),
-                            ),
+                          icon: ViewerSwatch(
+                            color: color,
+                            size: 22,
+                            selected: _color == color,
                           ),
                         ),
                     ],
                   ),
                 ),
-                TextButton(
+                TextButton.icon(
                   onPressed: _strokes.isEmpty
                       ? null
                       : () => setState(_strokes.clear),
-                  child: const Text('Clear'),
+                  icon: const Icon(LucideIcons.eraser, size: 16),
+                  label: const Text('Clear'),
                 ),
               ],
             ),
@@ -1371,7 +1377,7 @@ class _SignaturePadDialogState extends State<_SignaturePadDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),

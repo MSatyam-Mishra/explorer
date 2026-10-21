@@ -4,8 +4,8 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:explorer/core/services/bookmark_service.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/foundation.dart';
@@ -50,6 +50,12 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   bool _retryable = false;
 
   ReaderSettings _settings = ReaderSettings.lastKnown ?? const ReaderSettings();
+
+  /// The app's brightness, which the "Auto" reader theme follows.
+  Brightness _brightness = Brightness.light;
+
+  /// [_settings] with the "Auto" theme resolved: what the page shows.
+  ReaderSettings get _effective => _settings.resolved(_brightness);
 
   /// A load requested while the WebView didn't exist yet (it is created by
   /// the first build, concurrently with opening the book, and recreated
@@ -113,6 +119,19 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   void initState() {
     super.initState();
     _open();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final brightness = Theme.of(context).brightness;
+    if (brightness == _brightness) return;
+    final before = _effective;
+    _brightness = brightness;
+    // The app switched light/dark while an "Auto" themed page is open.
+    if (_effective != before && _web != null && !_docLoading) {
+      _js('window.ER && ER.applySettings(${jsonEncode(_effective.toJs())})');
+    }
   }
 
   @override
@@ -381,7 +400,7 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       'anchors': _anchorsFor(index),
       'dir': info.metadata.rtl ? 'rtl' : 'auto',
       'fixed': info.spine[index].fixedLayout,
-      'settings': _settings.toJs(),
+      'settings': _effective.toJs(),
       'hinge': _hinge,
       'hasPrev': _adjacent(index, -1) != null,
       'hasNext': _adjacent(index, 1) != null,
@@ -644,19 +663,26 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Open external link?'),
-        content: SelectableText(href),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'copy'),
-            child: const Text('Copy'),
+        content: SelectableText(
+          href,
+          style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+            color: ctx.colors.mutedForeground,
           ),
-          TextButton(
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'copy'),
+            icon: const Icon(LucideIcons.copy, size: 16),
+            label: const Text('Copy'),
+          ),
+          OutlinedButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.pop(ctx, 'open'),
-            child: const Text('Open'),
+            icon: const Icon(LucideIcons.externalLink, size: 16),
+            label: const Text('Open'),
           ),
         ],
       ),
@@ -826,7 +852,10 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
     setState(() => _settings = s);
     unawaited(s.save());
     if (!_docLoading) {
-      _js('window.ER && ER.applySettings(${jsonEncode(s.toJs())})');
+      _js(
+        'window.ER && ER.applySettings('
+        '${jsonEncode(s.resolved(_brightness).toJs())})',
+      );
     }
   }
 
@@ -934,52 +963,53 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
         (_panelPreference ?? !verticalHinge);
     _syncHinge(!docked && verticalHinge ? fold : null);
 
-    final fg = ClearGlassForeground.icon(context);
     final bookmarked = _currentBookmark() != null;
 
     return ExplorerScaffold(
       title: info?.metadata.title ?? widget.epubFile.uri.pathSegments.last,
       trailing: info == null
           ? null
-          : ExplorerTopBar.actions(context, [
-              ExplorerTopBar.iconButton(
-                context: context,
-                icon: Icon(Icons.search, color: fg),
-                tooltip: 'Search in book',
-                onPressed: _openSearch,
-              ),
-              ExplorerTopBar.iconButton(
-                context: context,
-                icon: Icon(
-                  bookmarked ? Icons.bookmark : Icons.bookmark_border,
-                  color: fg,
+          : ViewerActions(
+              children: [
+                ViewerAction(
+                  icon: LucideIcons.search,
+                  tooltip: 'Search in book',
+                  onPressed: _openSearch,
                 ),
-                tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
-                onPressed: _docLoading || _docError != null
-                    ? null
-                    : _toggleBookmark,
-              ),
-              Builder(
-                builder: (barContext) => ExplorerTopBar.iconButton(
-                  context: barContext,
-                  icon: Icon(Icons.toc, color: fg),
-                  tooltip: 'Contents & bookmarks',
-                  onPressed: () {
-                    if (wide) {
-                      setState(() => _panelPreference = !docked);
-                    } else {
-                      Scaffold.maybeOf(barContext)?.openDrawer();
-                    }
-                  },
+                ViewerAction(
+                  icon: bookmarked
+                      ? LucideIcons.bookmarkCheck
+                      : LucideIcons.bookmarkPlus,
+                  tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
+                  selected: bookmarked,
+                  onPressed: _docLoading || _docError != null
+                      ? null
+                      : _toggleBookmark,
                 ),
-              ),
-              ExplorerTopBar.iconButton(
-                context: context,
-                icon: Icon(Icons.text_format, color: fg),
-                tooltip: 'Reading settings',
-                onPressed: _openSettings,
-              ),
-            ]),
+                Builder(
+                  builder: (barContext) => ViewerAction(
+                    icon: wide
+                        ? (docked
+                              ? LucideIcons.panelLeftClose
+                              : LucideIcons.panelLeft)
+                        : LucideIcons.listTree,
+                    tooltip: 'Contents & bookmarks',
+                    onPressed: () {
+                      if (wide) {
+                        setState(() => _panelPreference = !docked);
+                      } else {
+                        Scaffold.maybeOf(barContext)?.openDrawer();
+                      }
+                    },
+                  ),
+                ),
+                ViewerAction(
+                  icon: LucideIcons.aLargeSmall,
+                  tooltip: 'Reading settings',
+                  onPressed: _openSettings,
+                ),
+              ],
+            ),
       drawer: info != null && !docked ? _buildDrawer(context) : null,
       body: Column(
         children: [
@@ -992,14 +1022,11 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
 
   Widget _buildDrawer(BuildContext context) {
     final width = math.min(380.0, MediaQuery.sizeOf(context).width * 0.88);
-    return Drawer(
+    return AppSidebar(
       width: width,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      child: SafeArea(
-        child: Builder(
-          builder: (drawerContext) => _buildPanel(
-            onDone: () => Scaffold.maybeOf(drawerContext)?.closeDrawer(),
-          ),
+      child: Builder(
+        builder: (drawerContext) => _buildPanel(
+          onDone: () => Scaffold.maybeOf(drawerContext)?.closeDrawer(),
         ),
       ),
     );
@@ -1062,7 +1089,7 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
             key: const ValueKey('toc-pane'),
             width: panelWidth,
             child: Material(
-              color: Theme.of(context).colorScheme.surface,
+              color: context.colors.background,
               child: _buildPanel(
                 onClose: () => setState(() => _panelPreference = false),
               ),
@@ -1084,7 +1111,7 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   }
 
   Widget _buildReader(BuildContext context) {
-    final theme = _settings.theme;
+    final theme = _effective.theme;
     final overall = _displayOverall;
     final status = _docLoading
         ? ''
@@ -1275,41 +1302,35 @@ class _EpubViewerScreenState extends State<EpubViewerScreen> {
   }
 
   Widget _buildDocError(ReaderTheme theme, int? prev, int? next) {
-    final fg = theme.foreground;
+    // A card in the app's colours, so its text and buttons stay readable
+    // on every page theme.
     return ColoredBox(
       color: theme.background,
       child: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.report_gmailerrorred, size: 48, color: fg.withValues(alpha: 0.6)),
-              const SizedBox(height: 12),
-              Text(
-                _docError ?? '',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: fg),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                children: [
-                  if (prev != null)
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.chevron_left),
-                      label: const Text('Previous section'),
-                      onPressed: () => _openSpine(prev, const {'type': 'end'}),
-                    ),
-                  if (next != null)
-                    FilledButton.icon(
-                      icon: const Icon(Icons.chevron_right),
-                      label: const Text('Next section'),
-                      onPressed: () => _openSpine(next, const {'type': 'start'}),
-                    ),
-                ],
-              ),
-            ],
+          padding: const EdgeInsets.all(16),
+          child: AppPanel(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: ViewerMessage(
+              icon: LucideIcons.fileWarning,
+              destructive: true,
+              title: "Couldn't show this section",
+              message: _docError,
+              actions: [
+                if (prev != null)
+                  OutlinedButton.icon(
+                    icon: const Icon(LucideIcons.chevronLeft, size: 16),
+                    label: const Text('Previous section'),
+                    onPressed: () => _openSpine(prev, const {'type': 'end'}),
+                  ),
+                if (next != null)
+                  FilledButton.icon(
+                    icon: const Icon(LucideIcons.chevronRight, size: 16),
+                    label: const Text('Next section'),
+                    onPressed: () => _openSpine(next, const {'type': 'start'}),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1452,46 +1473,23 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ReadableWidth(
-          maxWidth: 480,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.menu_book_outlined,
-                size: 64,
-                color: theme.colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 20),
-              Wrap(
-                spacing: 12,
-                alignment: WrapAlignment.center,
-                children: [
-                  OutlinedButton(
-                    onPressed: () => Navigator.maybePop(context),
-                    child: const Text('Close'),
-                  ),
-                  if (onRetry != null)
-                    FilledButton(
-                      onPressed: onRetry,
-                      child: const Text('Try again'),
-                    ),
-                ],
-              ),
-            ],
-          ),
+    return ViewerMessage(
+      icon: LucideIcons.bookX,
+      destructive: true,
+      title: "Couldn't open this book",
+      message: message,
+      actions: [
+        OutlinedButton(
+          onPressed: () => Navigator.maybePop(context),
+          child: const Text('Close'),
         ),
-      ),
+        if (onRetry != null)
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Try again'),
+          ),
+      ],
     );
   }
 }

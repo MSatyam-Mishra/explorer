@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:explorer/core/services/local_content_server.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -96,43 +97,52 @@ class _MarkdownPreviewState extends State<MarkdownPreview> {
   }
 
   String _page(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    String hex(Color c) =>
-        '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return '''<!DOCTYPE html><html><head><meta charset="utf-8">
+    final c = context.colors;
+    String hex(Color color) =>
+        '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+    String rgba(Color color, double alpha) =>
+        'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, '
+        '${(color.b * 255).round()}, $alpha)';
+    final dark = context.isDarkMode;
+    return """<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${MarkdownPreview._csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }
   body { margin: 0; padding: ${widget.topPadding + 16}px 20px 48px;
-    font: 16px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
-    color: ${hex(scheme.onSurface)}; background: ${hex(scheme.surface)};
-    word-wrap: break-word; }
-  #content { max-width: 860px; margin: 0 auto; }
-  a { color: ${hex(scheme.primary)}; }
-  img { max-width: 100%; }
-  pre { background: ${dark ? '#1e1e1e' : '#f4f4f4'}; padding: 12px;
-    border-radius: 8px; overflow-x: auto; }
-  code { font-family: "JetBrains Mono", Consolas, monospace; font-size: .9em; }
-  :not(pre) > code { background: ${dark ? '#2a2a2a' : '#eeeeee'};
-    padding: 2px 5px; border-radius: 4px; }
-  blockquote { margin: 0; padding: 0 1em;
-    border-left: 4px solid ${hex(scheme.outlineVariant)};
-    color: ${hex(scheme.onSurfaceVariant)}; }
+    font: 15px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: ${hex(c.foreground)}; background: ${hex(c.background)};
+    word-wrap: break-word; -webkit-text-size-adjust: 100%; }
+  #content { max-width: 780px; margin: 0 auto; }
+  h1, h2, h3, h4, h5, h6 { line-height: 1.25; font-weight: 600;
+    letter-spacing: -0.01em; margin: 1.6em 0 0.6em; }
+  h1 { font-size: 1.9em; } h2 { font-size: 1.45em; } h3 { font-size: 1.2em; }
+  #content > :first-child { margin-top: 0; }
+  p, ul, ol, blockquote, pre, table { margin: 0 0 1em; }
+  a { color: ${hex(c.primary)}; text-underline-offset: 3px; }
+  img { max-width: 100%; border-radius: 8px; }
+  pre { background: ${hex(c.muted)}; border: 1px solid ${hex(c.border)};
+    padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
+  code { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo,
+    Consolas, monospace; font-size: .875em; }
+  :not(pre) > code { background: ${hex(c.muted)}; padding: 2px 6px;
+    border-radius: 6px; }
+  blockquote { padding: 0 1em; border-left: 3px solid ${hex(c.border)};
+    color: ${hex(c.mutedForeground)}; }
   table { border-collapse: collapse; display: block; overflow-x: auto; }
-  th, td { border: 1px solid ${hex(scheme.outlineVariant)}; padding: 6px 12px; }
-  h1, h2 { border-bottom: 1px solid ${hex(scheme.outlineVariant)};
-    padding-bottom: .3em; }
-  hr { border: 0; border-top: 1px solid ${hex(scheme.outlineVariant)}; }
-  input[type=checkbox] { margin-right: .5em; }
-</style></head><body><div id="content">${MarkdownPreview.toHtml(widget.markdown)}</div></body></html>''';
+  th, td { border: 1px solid ${hex(c.border)}; padding: 6px 12px; }
+  th { background: ${rgba(c.muted, 0.6)}; font-weight: 600; text-align: left; }
+  h1, h2 { border-bottom: 1px solid ${hex(c.border)}; padding-bottom: .3em; }
+  hr { border: 0; border-top: 1px solid ${hex(c.border)}; margin: 2em 0; }
+  input[type=checkbox] { margin-right: .5em; accent-color: ${hex(c.primary)}; }
+  ::selection { background: ${rgba(c.primary, 0.25)}; }
+</style></head><body><div id="content">${MarkdownPreview.toHtml(widget.markdown)}</div></body></html>""";
   }
 
   @override
   Widget build(BuildContext context) {
     final base = _base;
-    if (base == null) return const Center(child: CircularProgressIndicator());
+    if (base == null) return const ViewerLoading();
     return InAppWebView(
       initialData: InAppWebViewInitialData(
         data: _page(context),

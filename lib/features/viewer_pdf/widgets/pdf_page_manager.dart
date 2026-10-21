@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/features/viewer_pdf/models/pdf_edit_models.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_page_rasterizer.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_page_thumbnail.dart';
@@ -215,25 +216,39 @@ class _PdfPageManagerState extends State<PdfPageManager> {
   Widget build(BuildContext context) {
     final metas = widget.metas;
     if (metas == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ViewerSpinner(size: 20));
     }
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final hasSelection = _selected.isNotEmpty;
     final hasChanges = _hasChanges;
     final enabled = !widget.busy;
     final selectedRealPages = _items.any(
       (item) => _selected.contains(item.id) && !item.entry.isBlank,
     );
+    final allSelected = hasSelection && _selected.length == _items.length;
+
+    Widget tool(IconData icon, String tooltip, VoidCallback? onPressed,
+        {bool destructive = false}) {
+      return ViewerAction(
+        icon: icon,
+        tooltip: tooltip,
+        size: 36,
+        iconSize: 18,
+        color: destructive && onPressed != null ? colors.destructive : null,
+        onPressed: onPressed,
+      );
+    }
 
     final header = Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 4, 4),
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       child: Row(
         children: [
-          IconButton(
-            tooltip: hasSelection ? 'Clear selection' : 'Select all',
-            icon: Icon(hasSelection ? Icons.deselect : Icons.select_all),
-            onPressed: enabled
-                ? () => setState(() {
+          Checkbox(
+            tristate: true,
+            value: allSelected ? true : (hasSelection ? null : false),
+            onChanged: enabled
+                ? (_) => setState(() {
                     if (hasSelection) {
                       _selected.clear();
                     } else {
@@ -249,74 +264,76 @@ class _PdfPageManagerState extends State<PdfPageManager> {
                   : '${_items.length} pages',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelLarge,
+              style: text.labelLarge,
             ),
           ),
-          IconButton(
-            tooltip: 'Rotate left',
-            icon: const Icon(Icons.rotate_left),
-            onPressed: enabled && hasSelection
-                ? () => _rotateSelected(3)
-                : null,
+          tool(
+            LucideIcons.rotateCcw,
+            'Rotate left',
+            enabled && hasSelection ? () => _rotateSelected(3) : null,
           ),
-          IconButton(
-            tooltip: 'Rotate right',
-            icon: const Icon(Icons.rotate_right),
-            onPressed: enabled && hasSelection
-                ? () => _rotateSelected(1)
-                : null,
+          tool(
+            LucideIcons.rotateCw,
+            'Rotate right',
+            enabled && hasSelection ? () => _rotateSelected(1) : null,
           ),
-          IconButton(
-            tooltip: 'Delete pages',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: enabled && hasSelection ? _deleteSelected : null,
+          tool(
+            LucideIcons.trash2,
+            'Delete pages',
+            enabled && hasSelection ? _deleteSelected : null,
+            destructive: true,
           ),
-          IconButton(
-            tooltip: hasSelection
+          tool(
+            LucideIcons.filePlus2,
+            hasSelection
                 ? 'Insert blank page after selection'
                 : 'Add blank page at the end',
-            icon: const Icon(Icons.note_add_outlined),
-            onPressed: enabled ? _insertBlank : null,
+            enabled ? _insertBlank : null,
           ),
-          PopupMenuButton<_MoreAction>(
+          ViewerMenuButton<_MoreAction>(
             tooltip: 'More page actions',
+            size: 36,
             enabled: enabled,
             onSelected: _onMore,
             itemBuilder: (context) => [
-              PopupMenuItem(
+              viewerMenuItem(
                 value: _MoreAction.moveUp,
+                icon: LucideIcons.arrowUp,
+                label: 'Move up',
                 enabled: hasSelection,
-                child: const Text('Move up'),
               ),
-              PopupMenuItem(
+              viewerMenuItem(
                 value: _MoreAction.moveDown,
+                icon: LucideIcons.arrowDown,
+                label: 'Move down',
                 enabled: hasSelection,
-                child: const Text('Move down'),
               ),
-              PopupMenuItem(
+              viewerMenuItem(
                 value: _MoreAction.moveFirst,
+                icon: LucideIcons.arrowUpToLine,
+                label: 'Move to start',
                 enabled: hasSelection,
-                child: const Text('Move to start'),
               ),
-              PopupMenuItem(
+              viewerMenuItem(
                 value: _MoreAction.moveLast,
+                icon: LucideIcons.arrowDownToLine,
+                label: 'Move to end',
                 enabled: hasSelection,
-                child: const Text('Move to end'),
               ),
-              const PopupMenuDivider(),
-              PopupMenuItem(
+              viewerMenuDivider(),
+              viewerMenuItem(
                 value: _MoreAction.extract,
+                icon: LucideIcons.fileOutput,
+                label: hasChanges
+                    ? 'Extract (apply changes first)'
+                    : 'Extract to new PDF',
                 enabled: selectedRealPages && !hasChanges,
-                child: Text(
-                  hasChanges
-                      ? 'Extract (apply changes first)'
-                      : 'Extract to new PDF',
-                ),
               ),
-              PopupMenuItem(
+              viewerMenuItem(
                 value: _MoreAction.insertPdf,
+                icon: LucideIcons.fileInput,
+                label: 'Insert PDF…',
                 enabled: !hasChanges,
-                child: const Text('Insert PDF…'),
               ),
             ],
           ),
@@ -329,6 +346,10 @@ class _PdfPageManagerState extends State<PdfPageManager> {
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: _items.length,
       onReorderItem: enabled ? _onReorder : (_, _) {},
+      proxyDecorator: (child, index, animation) => Material(
+        color: Colors.transparent,
+        child: AppPanel(child: child),
+      ),
       itemBuilder: (context, index) {
         final item = _items[index];
         final entry = item.entry;
@@ -344,79 +365,95 @@ class _PdfPageManagerState extends State<PdfPageManager> {
             : displaySize.width / displaySize.height;
         // Keep a turned page inside the thumbnail column.
         final thumbWidth = entry.quarterTurns.isOdd
-            ? math.min(56.0, 72 * aspect)
-            : 56.0;
+            ? math.min(52.0, 68 * aspect)
+            : 52.0;
         final notes = <String>[
           if (entry.isBlank) 'New blank page',
           if (source != null && source != index) 'Was page ${source + 1}',
           if (entry.quarterTurns != 0) 'Rotated ${entry.quarterTurns * 90}°',
         ];
-        return Material(
+        return Padding(
           key: ValueKey(item.id),
-          color: selected
-              ? scheme.primary.withValues(alpha: 0.12)
-              : Colors.transparent,
-          child: InkWell(
-            onTap: !enabled
-                ? null
-                : hasSelection
-                ? () => _toggle(item)
-                : source != null
-                ? () => widget.onOpenPage(source)
-                : null,
-            onLongPress: enabled ? () => _toggle(item) : null,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-              child: Row(
-                children: [
-                  Checkbox(
-                    value: selected,
-                    onChanged: enabled ? (_) => _toggle(item) : null,
-                  ),
-                  SizedBox(
-                    width: 76,
-                    child: Center(
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: widget.currentPage,
-                        builder: (context, current, _) => PdfPageThumbnail(
-                          rasterizer: widget.rasterizer,
-                          pageNumber: source == null ? null : source + 1,
-                          displaySize: displaySize,
-                          width: thumbWidth,
-                          quarterTurns: entry.quarterTurns,
-                          highlighted: source != null && current == source + 1,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+          child: Material(
+            color: selected ? colors.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: !enabled
+                  ? null
+                  : hasSelection
+                  ? () => _toggle(item)
+                  : source != null
+                  ? () => widget.onOpenPage(source)
+                  : null,
+              onLongPress: enabled ? () => _toggle(item) : null,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 6, 4, 6),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: selected,
+                      onChanged: enabled ? (_) => _toggle(item) : null,
+                    ),
+                    SizedBox(
+                      width: 68,
+                      child: Center(
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: widget.currentPage,
+                          builder: (context, current, _) => PdfPageThumbnail(
+                            rasterizer: widget.rasterizer,
+                            pageNumber: source == null ? null : source + 1,
+                            displaySize: displaySize,
+                            width: thumbWidth,
+                            quarterTurns: entry.quarterTurns,
+                            highlighted:
+                                source != null && current == source + 1,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Page ${index + 1}',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                        if (notes.isNotEmpty)
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            notes.join(' · '),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall,
+                            'Page ${index + 1}',
+                            style: text.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                              color: selected
+                                  ? colors.accentForeground
+                                  : colors.foreground,
+                            ),
                           ),
-                      ],
+                          if (notes.isNotEmpty)
+                            Text(
+                              notes.join(' · '),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.bodySmall,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  ReorderableDragStartListener(
-                    index: index,
-                    enabled: enabled,
-                    child: const Padding(
-                      padding: EdgeInsets.all(10),
-                      child: Icon(Icons.drag_handle),
+                    ReorderableDragStartListener(
+                      index: index,
+                      enabled: enabled,
+                      child: Tooltip(
+                        message: 'Drag to reorder',
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Icon(
+                            LucideIcons.gripVertical,
+                            size: 18,
+                            color: colors.mutedForeground,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -427,35 +464,38 @@ class _PdfPageManagerState extends State<PdfPageManager> {
     return Column(
       children: [
         header,
-        const Divider(height: 1),
+        Divider(height: 1, color: colors.border),
         Expanded(child: list),
-        if (hasChanges) ...[
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: enabled ? () => setState(_reset) : null,
-                    child: const Text('Discard'),
+        if (hasChanges)
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: colors.border)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: enabled ? () => setState(_reset) : null,
+                      child: const Text('Discard'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: enabled
-                        ? () => widget.onApply([
-                            for (final item in _items) item.entry,
-                          ])
-                        : null,
-                    child: const Text('Apply'),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: enabled
+                          ? () => widget.onApply([
+                              for (final item in _items) item.entry,
+                            ])
+                          : null,
+                      child: const Text('Apply changes'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ],
       ],
     );
   }

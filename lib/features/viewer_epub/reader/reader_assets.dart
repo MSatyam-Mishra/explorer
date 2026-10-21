@@ -27,6 +27,9 @@ html[data-er-theme] {
   background-image: none !important;
   color: var(--er-fg);
 }
+html[data-er-theme="dark"], html[data-er-theme="black"] {
+  color-scheme: dark;
+}
 html[data-er-theme] body {
   background-color: transparent !important;
   background-image: none !important;

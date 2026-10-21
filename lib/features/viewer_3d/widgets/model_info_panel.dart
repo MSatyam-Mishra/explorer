@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:explorer/features/viewer_3d/models/viewer_3d_models.dart';
 import 'package:explorer/features/viewer_3d/services/three_d_viewer_controller.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -47,7 +47,7 @@ class ModelInfoPanel extends StatelessWidget {
           );
         }
         return ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 8, 12, 24),
           children: children,
         );
       },
@@ -55,9 +55,8 @@ class ModelInfoPanel extends StatelessWidget {
   }
 
   List<Widget> _buildChildren(BuildContext context) {
-    final fg = ClearGlassForeground.icon(context);
-    final muted = fg.withValues(alpha: 0.68);
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final stats = controller.stats;
     final ready = controller.isReady;
 
@@ -67,95 +66,81 @@ class ModelInfoPanel extends StatelessWidget {
     ].join(' · ');
 
     return [
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  fileName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: ClearGlassForeground.title(context),
-                ),
-                if (subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(color: muted, fontSize: 13)),
-                ],
-              ],
-            ),
-          ),
-          if (onClose != null)
-            IconButton(
-              icon: Icon(Icons.close, color: fg),
-              tooltip: 'Hide details',
-              onPressed: onClose,
-            ),
-        ],
+      PanelHeader(
+        title: fileName,
+        subtitle: subtitle,
+        onClose: onClose,
+        closeTooltip: 'Hide details',
       ),
-      const SizedBox(height: 12),
       if (!ready)
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            controller.phase == ViewerPhase.error
-                ? (controller.errorMessage ?? 'The model could not be displayed.')
-                : 'Loading model…',
-            style: TextStyle(color: muted),
+          padding: const EdgeInsets.only(top: 12),
+          child: Row(
+            children: [
+              if (controller.phase != ViewerPhase.error) ...[
+                const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  controller.phase == ViewerPhase.error
+                      ? (controller.errorMessage ??
+                          'The model could not be displayed.')
+                      : 'Loading model…',
+                  style: text.bodySmall,
+                ),
+              ),
+            ],
           ),
         ),
       if (controller.warnings.isNotEmpty)
         _WarningsBox(warnings: controller.warnings),
       if (stats != null) ...[
-        _SectionTitle('Model', color: muted),
-        _StatsTable(stats: stats, color: fg, muted: muted),
+        const _SectionTitle('Model'),
+        _StatsTable(stats: stats),
       ],
       if (ready && controller.clips.isNotEmpty) ...[
-        _SectionTitle('Animations', color: muted),
-        _AnimationList(controller: controller, color: fg, muted: muted),
+        const _SectionTitle('Animations'),
+        _AnimationList(controller: controller),
       ],
       if (ready) ...[
-        _SectionTitle('View', color: muted),
+        const _SectionTitle('View'),
         _ToggleRow(
-          icon: Icons.threesixty,
+          icon: LucideIcons.rotate3d,
           label: 'Auto-rotate',
           value: controller.autoRotate,
           onChanged: controller.setAutoRotate,
-          color: fg,
         ),
         if (controller.hasMeshes)
           _ToggleRow(
-            icon: Icons.change_history,
+            icon: LucideIcons.box,
             label: 'Wireframe',
             value: controller.wireframe,
             onChanged: controller.setWireframe,
-            color: fg,
           ),
         _ToggleRow(
-          icon: Icons.grid_4x4,
+          icon: LucideIcons.grid3x3,
           label: 'Ground grid',
           value: controller.grid,
           onChanged: controller.setGrid,
-          color: fg,
         ),
         _ToggleRow(
-          icon: Icons.open_with,
+          icon: LucideIcons.move3d,
           label: 'Axes',
           value: controller.axes,
           onChanged: controller.setAxes,
-          color: fg,
         ),
         _ToggleRow(
-          icon: Icons.screen_rotation_alt,
+          icon: LucideIcons.axis3d,
           label: 'Z axis is up',
           value: controller.zUp,
           onChanged: controller.setZUp,
-          color: fg,
         ),
         if (controller.hasMeshes) ...[
-          _SectionTitle('Shading', color: muted),
+          const _SectionTitle('Shading'),
           SegmentedButton<ViewerShading>(
             segments: [
               for (final s in ViewerShading.values)
@@ -164,11 +149,10 @@ class ModelInfoPanel extends StatelessWidget {
             selected: {controller.shading},
             showSelectedIcon: false,
             onSelectionChanged: (v) => controller.setShading(v.first),
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
           ),
         ],
         if (controller.hasPoints) ...[
-          _SectionTitle('Point size', color: muted),
+          const _SectionTitle('Point size'),
           Slider(
             // Logarithmic scale: -2..2 maps to 0.25×..4×.
             value: (math.log(controller.pointScale) / math.ln2).clamp(-2.0, 2.0),
@@ -181,43 +165,40 @@ class ModelInfoPanel extends StatelessWidget {
             ),
           ),
         ],
-        _SectionTitle('Background', color: muted),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
+        const _SectionTitle('Background'),
+        SegmentedButton<ViewerBackground>(
+          segments: [
             for (final b in ViewerBackground.values)
-              ChoiceChip(
-                label: Text(b.label),
-                selected: controller.background == b,
-                onSelected: (_) => controller.setBackground(b),
-              ),
+              ButtonSegment(value: b, label: Text(b.label)),
           ],
+          selected: {controller.background},
+          showSelectedIcon: false,
+          onSelectionChanged: (v) => controller.setBackground(v.first),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(
-              child: FilledButton.tonalIcon(
+              child: OutlinedButton.icon(
                 onPressed: controller.resetView,
-                icon: const Icon(Icons.center_focus_strong_outlined),
+                icon: const Icon(LucideIcons.scan, size: 16),
                 label: const Text('Reset view'),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: FilledButton.tonalIcon(
+              child: OutlinedButton.icon(
                 onPressed: onScreenshot,
-                icon: const Icon(Icons.photo_camera_outlined),
+                icon: const Icon(LucideIcons.camera, size: 16),
                 label: const Text('Screenshot'),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Text(
           'Drag to rotate · pinch to zoom · two fingers to pan · double-tap to reset',
-          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          style: text.bodySmall?.copyWith(color: colors.mutedForeground),
         ),
       ],
     ];
@@ -225,26 +206,13 @@ class ModelInfoPanel extends StatelessWidget {
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text, {required this.color});
+  const _SectionTitle(this.text);
 
   final String text;
-  final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 6),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          color: color,
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.8,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      SectionLabel(text, padding: const EdgeInsets.fromLTRB(0, 20, 0, 8));
 }
 
 class _WarningsBox extends StatelessWidget {
@@ -254,53 +222,27 @@ class _WarningsBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.tertiaryContainer.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.warning_amber_rounded, color: scheme.onTertiaryContainer, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final w in warnings)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      w,
-                      style: TextStyle(color: scheme.onTertiaryContainer, fontSize: 13),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return ViewerNotice(
+      icon: LucideIcons.triangleAlert,
+      tone: Tone.warning,
+      margin: const EdgeInsets.only(top: 12),
+      title: warnings.length == 1
+          ? 'Part of the model is missing'
+          : '${warnings.length} problems',
+      message: warnings.join('\n'),
     );
   }
 }
 
 class _StatsTable extends StatelessWidget {
-  const _StatsTable({
-    required this.stats,
-    required this.color,
-    required this.muted,
-  });
+  const _StatsTable({required this.stats});
 
   final ModelStats stats;
-  final Color color;
-  final Color muted;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final n = NumberFormat.decimalPattern();
     final rows = <(String, String)>[
       if (stats.meshes > 0) ('Meshes', n.format(stats.meshes)),
@@ -317,37 +259,61 @@ class _StatsTable extends StatelessWidget {
         '${_dim(stats.sizeX)} × ${_dim(stats.sizeY)} × ${_dim(stats.sizeZ)}',
       ),
     ];
-    return Column(
-      children: [
-        for (final (label, value) in rows)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Row(
-              children: [
-                Expanded(child: Text(label, style: TextStyle(color: muted))),
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Text(
-                    value,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                border: i == 0
+                    ? null
+                    : Border(top: BorderSide(color: colors.border)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      rows[i].$1,
+                      style: text.bodySmall?.copyWith(fontSize: 13),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      rows[i].$2,
+                      textAlign: TextAlign.right,
+                      style: text.bodyMedium?.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            decoration: BoxDecoration(
+              color: colors.muted.withValues(alpha: 0.5),
+              border: Border(top: BorderSide(color: colors.border)),
+              borderRadius:
+                  const BorderRadius.vertical(bottom: Radius.circular(8)),
+            ),
+            child: Text(
+              'Sizes are in model units',
+              textAlign: TextAlign.right,
+              style: text.bodySmall?.copyWith(fontSize: 11),
             ),
           ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Text(
-            'Sizes are in model units',
-            style: TextStyle(color: muted, fontSize: 11),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -365,20 +331,14 @@ class _StatsTable extends StatelessWidget {
 }
 
 class _AnimationList extends StatelessWidget {
-  const _AnimationList({
-    required this.controller,
-    required this.color,
-    required this.muted,
-  });
+  const _AnimationList({required this.controller});
 
   final ThreeDViewerController controller;
-  final Color color;
-  final Color muted;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final clips = controller.clips;
-    final primary = Theme.of(context).colorScheme.primary;
     Widget tile({
       required int index,
       required String title,
@@ -386,25 +346,16 @@ class _AnimationList extends StatelessWidget {
     }) {
       final active = controller.animationIndex == index;
       final playing = active && controller.animationPlaying;
-      return ListTile(
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(
-          playing ? Icons.pause_circle_filled : Icons.play_circle_outline,
-          color: active ? primary : color,
+      return ListRow(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        selected: active,
+        leading: IconBox(
+          playing ? LucideIcons.pause : LucideIcons.play,
+          size: 32,
+          color: active ? colors.primary : colors.foreground,
         ),
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: active ? primary : color,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-          ),
-        ),
-        subtitle: subtitle == null
-            ? null
-            : Text(subtitle, style: TextStyle(color: muted, fontSize: 12)),
+        title: title,
+        subtitle: subtitle,
         onTap: () => active
             ? controller.toggleAnimation()
             : controller.playAnimation(index),
@@ -412,6 +363,7 @@ class _AnimationList extends StatelessWidget {
     }
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final clip in clips)
           tile(
@@ -425,7 +377,7 @@ class _AnimationList extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
               onPressed: controller.stopAnimation,
-              icon: const Icon(Icons.stop),
+              icon: const Icon(LucideIcons.square, size: 14),
               label: const Text('Stop'),
             ),
           ),
@@ -440,24 +392,32 @@ class _ToggleRow extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onChanged,
-    required this.color,
   });
 
   final IconData icon;
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      secondary: Icon(icon, color: color, size: 20),
-      title: Text(label, style: TextStyle(color: color)),
-      value: value,
-      onChanged: onChanged,
+    final colors = context.colors;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: colors.mutedForeground),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            ),
+            Switch(value: value, onChanged: onChanged),
+          ],
+        ),
+      ),
     );
   }
 }

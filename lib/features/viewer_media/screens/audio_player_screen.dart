@@ -1,5 +1,10 @@
+import 'dart:async';
 import 'dart:io';
+
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
+import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
@@ -16,13 +21,20 @@ class AudioPlayerScreen extends StatefulWidget {
 class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
   late AudioPlayer _player;
   bool _isPlaying = false;
+  bool _loading = true;
+  String? _error;
+  int? _size;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
+  final List<StreamSubscription<Object?>> _subscriptions = [];
 
   @override
   void initState() {
     super.initState();
     _player = AudioPlayer();
+    widget.audioFile.length().then((size) {
+      if (mounted) setState(() => _size = size);
+    }, onError: (Object _) {});
     _initPlayer();
   }
 
@@ -31,9 +43,12 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
       await _player.setFilePath(widget.audioFile.path);
       // Left the screen while loading: the player is already disposed.
       if (!mounted) return;
-      _duration = _player.duration ?? Duration.zero;
+      setState(() {
+        _duration = _player.duration ?? Duration.zero;
+        _loading = false;
+      });
 
-      _player.playerStateStream.listen((state) {
+      _subscriptions.add(_player.playerStateStream.listen((state) {
         if (mounted) {
           setState(() {
             _isPlaying = state.playing;
@@ -44,30 +59,34 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
             }
           });
         }
-      });
+      }));
 
-      _player.positionStream.listen((pos) {
+      _subscriptions.add(_player.positionStream.listen((pos) {
         if (mounted) {
           setState(() {
             _position = pos;
           });
         }
-      });
+      }));
 
       // Auto play
       _player.play();
     } catch (e) {
       debugPrint('Error loading audio: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading audio: $e')));
+        setState(() {
+          _loading = false;
+          _error = '$e';
+        });
       }
     }
   }
 
   @override
   void dispose() {
+    for (final s in _subscriptions) {
+      s.cancel();
+    }
     _player.dispose();
     super.dispose();
   }
@@ -75,132 +94,240 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
+    return d.inHours > 0 ? '${d.inHours}:$minutes:$seconds' : '$minutes:$seconds';
+  }
+
+  void _seekBy(Duration delta) {
+    var target = _position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > _duration) target = _duration;
+    _player.seek(target);
   }
 
   @override
   Widget build(BuildContext context) {
     final title = p.basename(widget.audioFile.path);
+    final top = DockedGlossyTopBar.contentTopInset(context);
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
+    Widget body;
+    if (_error != null) {
+      body = ViewerMessage(
+        icon: LucideIcons.fileAudio,
+        title: "Can't play this file",
+        message: 'Its format may not be supported on this device.',
+        details: _error,
+      );
+    } else {
+      body = _playerView(context, title);
+    }
 
     return ExplorerScaffold(
       title: title,
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).colorScheme.primaryContainer,
-              Theme.of(context).scaffoldBackgroundColor,
-            ],
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Placeholder Artwork
-              Container(
-                width: 250,
-                height: 250,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 20,
-                      offset: Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  Icons.music_note,
-                  size: 100,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-              const SizedBox(height: 40),
+      body: Padding(
+        padding: EdgeInsets.fromLTRB(24, top + 16, 24, bottom + 24),
+        child: body,
+      ),
+    );
+  }
 
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+  Widget _playerView(BuildContext context, String title) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final ext = p.extension(widget.audioFile.path).replaceFirst('.', '');
+    final subtitle = [
+      if (ext.isNotEmpty) ext.toUpperCase(),
+      if (_size != null) filesize(_size, 1),
+      if (_duration > Duration.zero) _formatDuration(_duration),
+    ].join(' · ');
+    final maxSeconds = _duration.inMilliseconds / 1000;
+    final positionSeconds =
+        (_position.inMilliseconds / 1000).clamp(0, maxSeconds).toDouble();
+    final timeStyle = text.labelMedium?.copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
-              const SizedBox(height: 40),
-
-              // Sliders
-              Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Artwork shrinks on short (landscape) screens.
+        final art = (constraints.maxHeight - 300).clamp(96.0, 280.0);
+        return Center(
+          child: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Slider(
-                    value: _position.inSeconds.toDouble().clamp(
-                      0,
-                      _duration.inSeconds.toDouble(),
+                  Container(
+                    width: art,
+                    height: art,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          colors.primary.withValues(alpha: 0.22),
+                          colors.muted,
+                        ],
+                      ),
                     ),
+                    child: Icon(
+                      LucideIcons.music,
+                      size: art * 0.32,
+                      color: colors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Text(
+                    p.basenameWithoutExtension(title),
+                    textAlign: TextAlign.center,
+                    style: text.titleLarge,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: text.bodySmall),
+                  ],
+                  const SizedBox(height: 24),
+                  Slider(
+                    value: positionSeconds,
                     min: 0,
-                    max: _duration.inSeconds.toDouble(),
-                    onChanged: (value) {
-                      _player.seek(Duration(seconds: value.toInt()));
-                    },
+                    max: maxSeconds <= 0 ? 1 : maxSeconds,
+                    onChanged: _loading || maxSeconds <= 0
+                        ? null
+                        : (value) => _player.seek(
+                              Duration(milliseconds: (value * 1000).round()),
+                            ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(_formatDuration(_position)),
-                        Text(_formatDuration(_duration)),
+                        Text(_formatDuration(_position), style: timeStyle),
+                        Text(_formatDuration(_duration), style: timeStyle),
                       ],
                     ),
                   ),
-                ],
-              ),
-
-              const SizedBox(height: 20),
-
-              // Controls
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: () {
-                      final newPos = _position - const Duration(seconds: 10);
-                      _player.seek(
-                        newPos < Duration.zero ? Duration.zero : newPos,
-                      );
-                    },
-                    icon: Icon(Icons.replay_10, size: 32),
-                  ),
-                  const SizedBox(width: 20),
-                  FloatingActionButton.large(
-                    onPressed: () {
-                      if (_isPlaying) {
-                        _player.pause();
-                      } else {
-                        _player.play();
-                      }
-                    },
-                    child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-                  ),
-                  const SizedBox(width: 20),
-                  IconButton(
-                    onPressed: () {
-                      final newPos = _position + const Duration(seconds: 10);
-                      _player.seek(newPos > _duration ? _duration : newPos);
-                    },
-                    icon: Icon(Icons.forward_10, size: 32),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SkipButton(
+                        forward: false,
+                        onPressed: _loading
+                            ? null
+                            : () => _seekBy(const Duration(seconds: -10)),
+                      ),
+                      const SizedBox(width: 28),
+                      _PlayButton(
+                        playing: _isPlaying,
+                        loading: _loading,
+                        onPressed: () =>
+                            _isPlaying ? _player.pause() : _player.play(),
+                      ),
+                      const SizedBox(width: 28),
+                      _SkipButton(
+                        forward: true,
+                        onPressed: _loading
+                            ? null
+                            : () => _seekBy(const Duration(seconds: 10)),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PlayButton extends StatelessWidget {
+  const _PlayButton({
+    required this.playing,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  final bool playing;
+  final bool loading;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Tooltip(
+      message: playing ? 'Pause' : 'Play',
+      child: Material(
+        color: colors.primary,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: loading ? null : onPressed,
+          child: SizedBox.square(
+            dimension: 68,
+            child: loading
+                ? Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: colors.primaryForeground,
+                    ),
+                  )
+                : Icon(
+                    playing ? LucideIcons.pause : LucideIcons.play,
+                    size: 28,
+                    color: colors.primaryForeground,
+                  ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 10-second skip: a circular arrow with "10" inside.
+class _SkipButton extends StatelessWidget {
+  const _SkipButton({required this.forward, required this.onPressed});
+
+  final bool forward;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final fg = onPressed == null ? colors.mutedForeground : colors.foreground;
+    return IconButton(
+      tooltip: forward ? 'Forward 10 seconds' : 'Back 10 seconds',
+      onPressed: onPressed,
+      constraints: const BoxConstraints.tightFor(width: 52, height: 52),
+      padding: EdgeInsets.zero,
+      icon: Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(
+            forward ? LucideIcons.rotateCw : LucideIcons.rotateCcw,
+            size: 32,
+            color: fg,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '10',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: fg,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

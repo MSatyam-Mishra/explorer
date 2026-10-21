@@ -6,7 +6,7 @@ import 'package:explorer/features/viewer_image/image_codec.dart';
 import 'package:explorer/features/viewer_image/raw_image.dart';
 import 'package:explorer/features/viewer_image/screens/image_editor_screen.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:filesize/filesize.dart';
@@ -141,9 +141,24 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     }
   }
 
+  void _toggleDetails(BuildContext context) {
+    if (AdaptiveSplitView.isSplit(context, minWidthForSplit: 720)) {
+      setState(() => _showInfo = !_showInfo);
+    } else {
+      AppSheet.show<void>(
+        context,
+        maxHeightFraction: 0.7,
+        child: _ImageInfoPane(file: _current, inSheet: true),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
+    return ImmersiveTheme(child: Builder(builder: _build));
+  }
+
+  Widget _build(BuildContext context) {
     // Decode at about twice the screen resolution (room to zoom) instead of
     // the full sensor size.
     final maxSide = (MediaQuery.sizeOf(context).longestSide *
@@ -160,8 +175,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         pageController: _pageController,
         itemCount: _images.length,
         backgroundDecoration: const BoxDecoration(color: Colors.black),
-        loadingBuilder: (context, event) =>
-            const Center(child: CircularProgressIndicator()),
+        loadingBuilder: (context, event) => const ViewerLoading(),
         builder: (context, index) {
           final file = _images[index];
           return PhotoViewGalleryPageOptions(
@@ -178,25 +192,48 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         },
         onPageChanged: (index) => setState(() => _currentIndex = index),
     );
+    final raw = RawImages.isRaw(_current.path);
     // Always the same Stack, so swiping onto a raw doesn't re-parent (and
     // reset) the gallery mid-gesture.
     final galleryWithBadge = Stack(
       fit: StackFit.expand,
       children: [
         gallery,
-        if (RawImages.isRaw(_current.path))
+        if (_images.length > 1 || raw)
           Positioned(
             left: 16,
+            right: 16,
             bottom: MediaQuery.paddingOf(context).bottom + 16,
-            child: const IgnorePointer(child: _RawBadge()),
+            child: IgnorePointer(
+              child: Center(
+                child: _OverlayPill(
+                  children: [
+                    if (_images.length > 1)
+                      Text('${_currentIndex + 1} / ${_images.length}'),
+                    if (_images.length > 1 && raw)
+                      const _PillDivider(),
+                    if (raw) const Text('RAW · embedded preview'),
+                  ],
+                ),
+              ),
+            ),
           ),
       ],
     );
 
-    final infoPane = _ImageInfoPane(
-      key: ValueKey(_current.path),
-      file: _current,
-      onClose: () => setState(() => _showInfo = false),
+    final infoPane = SizedBox(
+      height: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: context.colors.background,
+          border: Border(left: BorderSide(color: context.colors.border)),
+        ),
+        child: _ImageInfoPane(
+          key: ValueKey(_current.path),
+          file: _current,
+          onClose: () => setState(() => _showInfo = false),
+        ),
+      ),
     );
 
     final body = _showInfo && AdaptiveSplitView.isSplit(context, minWidthForSplit: 720)
@@ -204,6 +241,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             minWidthForSplit: 720,
             secondaryOnLeading: false,
             secondaryWidth: 320,
+            divider: false,
             primary: galleryWithBadge,
             secondary: Padding(
               padding: EdgeInsets.only(
@@ -221,73 +259,83 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       },
       child: ExplorerScaffold(
         backgroundColor: Colors.black,
-        title: '${_currentIndex + 1} / ${_images.length}  ·  ${p.basename(_current.path)}',
-        trailing: ExplorerTopBar.actions(context, [
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.edit_outlined, color: iconColor),
-            tooltip: 'Edit',
-            onPressed: _edit,
-          ),
-          Builder(
-            builder: (buttonContext) => ExplorerTopBar.iconButton(
-              context: buttonContext,
-              icon: Icon(Icons.share_outlined, color: iconColor),
-              tooltip: 'Share',
-              onPressed: () => _share(buttonContext),
+        title: p.basename(_current.path),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIconButton(
+              icon: const Icon(LucideIcons.squarePen),
+              tooltip: 'Edit',
+              onPressed: _edit,
             ),
-          ),
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.info_outline, color: iconColor),
-            tooltip: 'Details',
-            onPressed: () {
-              if (AdaptiveSplitView.isSplit(context, minWidthForSplit: 720)) {
-                setState(() => _showInfo = !_showInfo);
-              } else {
-                showModalBottomSheet<void>(
-                  context: context,
-                  showDragHandle: true,
-                  isScrollControlled: true,
-                  builder: (_) => FractionallySizedBox(
-                    heightFactor: 0.6,
-                    child: _ImageInfoPane(file: _current),
-                  ),
-                );
-              }
-            },
-          ),
-        ]),
+            Builder(
+              builder: (buttonContext) => AppIconButton(
+                icon: const Icon(LucideIcons.share2),
+                tooltip: 'Share',
+                onPressed: () => _share(buttonContext),
+              ),
+            ),
+            AppIconButton(
+              icon: Icon(
+                LucideIcons.info,
+                color: _showInfo &&
+                        AdaptiveSplitView.isSplit(context, minWidthForSplit: 720)
+                    ? context.colors.primary
+                    : null,
+              ),
+              tooltip: 'Details',
+              onPressed: () => _toggleDetails(context),
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
         body: body,
       ),
     );
   }
 }
 
-/// Marks a camera raw shown through its embedded preview.
-class _RawBadge extends StatelessWidget {
-  const _RawBadge();
+/// Translucent caption over the photo (counter, raw notice).
+class _OverlayPill extends StatelessWidget {
+  const _OverlayPill({required this.children});
+
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    final colors = context.colors;
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24),
+        color: colors.background.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
       ),
-      child: const Text(
-        'RAW · embedded preview',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: DefaultTextStyle.merge(
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: colors.foreground,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: children),
         ),
       ),
     );
   }
+}
+
+class _PillDivider extends StatelessWidget {
+  const _PillDivider();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: SizedBox(
+          width: 1,
+          height: 12,
+          child: ColoredBox(color: context.colors.border),
+        ),
+      );
 }
 
 class _UnsupportedImage extends StatelessWidget {
@@ -299,46 +347,39 @@ class _UnsupportedImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final raw = RawImages.isRaw(file.path);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              raw ? Icons.camera_outlined : Icons.broken_image_outlined,
-              color: Colors.white54,
-              size: 64,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              raw
-                  ? error is RawPreviewUnavailable
-                      ? "This raw photo doesn't include a preview image. "
-                          'Open it in a raw editor to see it.'
-                      : "This raw photo's preview couldn't be read."
-                  : "This image format isn't supported on this device.",
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Open with another app'),
-              onPressed: () => FileOpener.openExternally(context, file),
-            ),
-          ],
+    return ViewerMessage(
+      icon: raw ? LucideIcons.camera : LucideIcons.imageOff,
+      title: raw ? "Can't show this raw photo" : "Can't show this image",
+      message: raw
+          ? error is RawPreviewUnavailable
+              ? "This raw photo doesn't include a preview image. "
+                  'Open it in a raw editor to see it.'
+              : "This raw photo's preview couldn't be read."
+          : "This image format isn't supported on this device.",
+      actions: [
+        FilledButton.icon(
+          icon: const Icon(LucideIcons.externalLink, size: 16),
+          label: const Text('Open with another app'),
+          onPressed: () => FileOpener.openExternally(context, file),
         ),
-      ),
+      ],
     );
   }
 }
 
 class _ImageInfoPane extends StatefulWidget {
-  const _ImageInfoPane({super.key, required this.file, this.onClose});
+  const _ImageInfoPane({
+    super.key,
+    required this.file,
+    this.onClose,
+    this.inSheet = false,
+  });
 
   final File file;
   final VoidCallback? onClose;
+
+  /// Inside a bottom sheet, which scrolls and pads its content itself.
+  final bool inSheet;
 
   @override
   State<_ImageInfoPane> createState() => _ImageInfoPaneState();
@@ -392,38 +433,36 @@ class _ImageInfoPaneState extends State<_ImageInfoPane> {
   @override
   Widget build(BuildContext context) {
     final details = _details;
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface,
-      child: details == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text('Details', style: theme.textTheme.titleMedium),
-                    ),
-                    if (widget.onClose != null)
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: widget.onClose,
-                      ),
-                  ],
-                ),
-                for (final e in {
-                  if (_dimensions != null) 'Dimensions': _dimensions!,
-                  ...details,
-                }.entries)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(e.key, style: theme.textTheme.labelMedium),
-                    subtitle: SelectableText(e.value),
-                  ),
-              ],
-            ),
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PanelHeader(
+          title: 'Details',
+          onClose: widget.onClose,
+          closeTooltip: 'Hide details',
+        ),
+        const SizedBox(height: 8),
+        if (details == null)
+          const ViewerLoading()
+        else
+          DetailList(
+            entries: {
+              if (_dimensions != null) 'Dimensions': _dimensions!,
+              ...details,
+            }.entries,
+          ),
+      ],
+    );
+    if (widget.inSheet) return content;
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        8,
+        8,
+        16 + MediaQuery.paddingOf(context).bottom,
+      ),
+      child: content,
     );
   }
 }

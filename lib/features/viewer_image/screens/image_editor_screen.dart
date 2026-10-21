@@ -6,7 +6,7 @@ import 'package:explorer/core/files/safe_write.dart';
 import 'package:explorer/features/viewer_image/image_codec.dart';
 import 'package:explorer/features/viewer_image/raw_image.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -121,18 +121,24 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     }
   }
 
-  Future<bool> _confirmDiscard() async {
+  /// [themed] is a context inside the editor's (dark) theme.
+  Future<bool> _confirmDiscard(BuildContext themed) async {
     if (_edits.isIdentity) return true;
     final discard = await showDialog<bool>(
-      context: context,
+      context: themed,
       builder: (context) => AlertDialog(
         title: const Text('Discard edits?'),
+        content: const Text('Your changes to this image will be lost.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Keep editing'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.colors.destructive,
+              foregroundColor: context.colors.destructiveForeground,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Discard'),
           ),
@@ -142,94 +148,132 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     return discard ?? false;
   }
 
+  void _reset() => setState(() {
+        _edits
+          ..quarterTurns = 0
+          ..flipHorizontal = false
+          ..flipVertical = false
+          ..crop = null
+          ..brightness = 0
+          ..contrast = 0
+          ..saturation = 0
+          ..filter = ImageFilterPreset.none;
+        _aspect = null;
+      });
+
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
+    return ImmersiveTheme(child: Builder(builder: _build));
+  }
+
+  Widget _build(BuildContext context) {
     final ready = _source != null && !_saving;
+    // A raw's preview is worth exporting even without edits.
+    final canSave = ready && (_isRaw || !_edits.isIdentity);
 
     return PopScope(
       canPop: _edits.isIdentity,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (await _confirmDiscard() && context.mounted) Navigator.pop(context);
+        if (await _confirmDiscard(context) && context.mounted) {
+          Navigator.pop(context);
+        }
       },
       child: ExplorerScaffold(
         title: 'Edit ${p.basename(widget.file.path)}',
         backgroundColor: Colors.black,
-        trailing: ExplorerTopBar.actions(context, [
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.restart_alt, color: iconColor),
-            tooltip: 'Reset',
-            onPressed: ready && !_edits.isIdentity
-                ? () => setState(() {
-                      _edits
-                        ..quarterTurns = 0
-                        ..flipHorizontal = false
-                        ..flipVertical = false
-                        ..crop = null
-                        ..brightness = 0
-                        ..contrast = 0
-                        ..saturation = 0
-                        ..filter = ImageFilterPreset.none;
-                      _aspect = null;
-                    })
-                : null,
-          ),
-          PopupMenuButton<String>(
-            // A raw's preview is worth exporting even without edits.
-            enabled: ready && (_isRaw || !_edits.isIdentity),
-            tooltip: 'Save',
-            icon: Icon(Icons.save_outlined, color: iconColor),
-            onSelected: (choice) => switch (choice) {
-              'save' => _save(asCopy: false),
-              'jpg' => _save(asCopy: true, format: 'jpg'),
-              'png' => _save(asCopy: true, format: 'png'),
-              _ => _save(asCopy: true),
-            },
-            itemBuilder: (_) => [
-              if (_isRaw) ...const [
-                PopupMenuItem(value: 'jpg', child: Text('Save as JPEG copy')),
-                PopupMenuItem(value: 'png', child: Text('Save as PNG copy')),
-              ] else ...[
-                if (_canOverwrite)
-                  const PopupMenuItem(value: 'save', child: Text('Save')),
-                PopupMenuItem(
-                  value: 'copy',
-                  child: Text(
-                    _canOverwrite ? 'Save as copy' : 'Save as PNG copy',
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIconButton(
+              icon: const Icon(LucideIcons.refreshCcw),
+              tooltip: 'Reset',
+              onPressed: ready && !_edits.isIdentity ? _reset : null,
+            ),
+            const SizedBox(width: 4),
+            MenuIconButton<String>(
+              tooltip: 'Save',
+              enabled: canSave,
+              onSelected: (choice) => switch (choice) {
+                'save' => _save(asCopy: false),
+                'jpg' => _save(asCopy: true, format: 'jpg'),
+                'png' => _save(asCopy: true, format: 'png'),
+                _ => _save(asCopy: true),
+              },
+              itemBuilder: (_) => [
+                if (_isRaw) ...[
+                  menuItem(
+                    value: 'jpg',
+                    icon: LucideIcons.fileImage,
+                    label: 'Save as JPEG copy',
                   ),
-                ),
+                  menuItem(
+                    value: 'png',
+                    icon: LucideIcons.fileImage,
+                    label: 'Save as PNG copy',
+                  ),
+                ] else ...[
+                  if (_canOverwrite)
+                    menuItem(
+                      value: 'save',
+                      icon: LucideIcons.save,
+                      label: 'Save',
+                    ),
+                  menuItem(
+                    value: 'copy',
+                    icon: LucideIcons.copy,
+                    label: _canOverwrite ? 'Save as copy' : 'Save as PNG copy',
+                  ),
+                ],
               ],
-            ],
-          ),
-        ]),
+              child: _SaveTrigger(enabled: canSave),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
         body: _buildBody(context),
       ),
     );
   }
 
   Widget _buildBody(BuildContext context) {
+    final top = DockedGlossyTopBar.contentTopInset(context);
     if (_error != null) {
-      return Center(
-        child: Text(_error!, style: const TextStyle(color: Colors.white70)),
+      return Padding(
+        padding: EdgeInsets.only(top: top),
+        child: ViewerMessage(
+          icon: LucideIcons.imageOff,
+          title: "This image can't be edited",
+          details: _error,
+        ),
       );
     }
     if (_source == null || _saving) {
-      return const Center(child: CircularProgressIndicator());
+      return Padding(
+        padding: EdgeInsets.only(top: top),
+        child: ViewerLoading(label: _saving ? 'Saving…' : null),
+      );
     }
-    final top = DockedGlossyTopBar.contentTopInset(context);
     final wide = WindowSize.of(context).isAtLeastMedium &&
         MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
     final preview = Padding(
       padding: const EdgeInsets.all(16),
       child: _buildPreview(),
     );
-    final tools = Theme(
-      data: ThemeData(brightness: Brightness.dark, colorSchemeSeed: Theme.of(context).colorScheme.primary),
-      child: Material(color: const Color(0xFF151515), child: _buildTools(wide)),
-    );
+    final colors = context.colors;
     final bottom = MediaQuery.paddingOf(context).bottom;
+    final tools = DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: wide
+            ? Border(left: BorderSide(color: colors.border))
+            : Border(top: BorderSide(color: colors.border)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottom),
+        child: _buildTools(wide),
+      ),
+    );
     return Padding(
       padding: EdgeInsets.only(top: top),
       child: wide
@@ -242,10 +286,7 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
           : Column(
               children: [
                 Expanded(child: preview),
-                Padding(
-                  padding: EdgeInsets.only(bottom: bottom),
-                  child: tools,
-                ),
+                tools,
               ],
             ),
     );
@@ -324,33 +365,35 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     };
     return Column(
       mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_isRaw)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Editing the embedded preview '
-                    '(${_source!.width} × ${_source!.height}). '
-                    'The raw file is not changed; edits are saved as a copy.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
+          ViewerNotice(
+            icon: LucideIcons.info,
+            message: 'Editing the embedded preview '
+                '(${_source!.width} × ${_source!.height}). '
+                'The raw file is not changed; edits are saved as a copy.',
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: SegmentedButton<_Tool>(
             showSelectedIcon: false,
             segments: const [
-              ButtonSegment(value: _Tool.crop, icon: Icon(Icons.crop_rotate), label: Text('Crop')),
-              ButtonSegment(value: _Tool.adjust, icon: Icon(Icons.tune), label: Text('Adjust')),
-              ButtonSegment(value: _Tool.filters, icon: Icon(Icons.filter), label: Text('Filters')),
+              ButtonSegment(
+                value: _Tool.crop,
+                icon: Icon(LucideIcons.crop, size: 16),
+                label: Text('Crop'),
+              ),
+              ButtonSegment(
+                value: _Tool.adjust,
+                icon: Icon(LucideIcons.slidersHorizontal, size: 16),
+                label: Text('Adjust'),
+              ),
+              ButtonSegment(
+                value: _Tool.filters,
+                icon: Icon(LucideIcons.wandSparkles, size: 16),
+                label: Text('Filters'),
+              ),
             ],
             selected: {_tool},
             onSelectionChanged: (s) => setState(() => _tool = s.first),
@@ -374,56 +417,68 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       '9:16': 9 / 16,
     };
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              IconButton(
-                icon: const Icon(Icons.rotate_left),
+              ToolButton(
+                icon: LucideIcons.rotateCcw,
                 tooltip: 'Rotate left',
+                size: 44,
+                iconSize: 20,
                 onPressed: () => _rotate(3),
               ),
-              IconButton(
-                icon: const Icon(Icons.rotate_right),
+              ToolButton(
+                icon: LucideIcons.rotateCw,
                 tooltip: 'Rotate right',
+                size: 44,
+                iconSize: 20,
                 onPressed: () => _rotate(1),
               ),
-              IconButton(
-                icon: const Icon(Icons.flip),
+              // Lucide names these by their axis line: flipVertical2 draws
+              // a vertical line with arrows left and right.
+              ToolButton(
+                icon: LucideIcons.flipVertical2,
                 tooltip: 'Flip horizontally',
-                isSelected: _edits.flipHorizontal,
+                size: 44,
+                iconSize: 20,
+                selected: _edits.flipHorizontal,
                 onPressed: () => setState(
                     () => _edits.flipHorizontal = !_edits.flipHorizontal),
               ),
-              IconButton(
-                icon: const RotatedBox(quarterTurns: 1, child: Icon(Icons.flip)),
+              ToolButton(
+                icon: LucideIcons.flipHorizontal2,
                 tooltip: 'Flip vertically',
-                isSelected: _edits.flipVertical,
+                size: 44,
+                iconSize: 20,
+                selected: _edits.flipVertical,
                 onPressed: () =>
                     setState(() => _edits.flipVertical = !_edits.flipVertical),
               ),
             ],
           ),
+          const SizedBox(height: 4),
           SizedBox(
-            height: 44,
-            child: ListView(
+            height: 40,
+            child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              children: [
-                for (final e in ratios.entries)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ChoiceChip(
-                      label: Text(e.key),
-                      selected: e.value == null
-                          ? _aspect == null
-                          : _aspect != null && (_aspect! - e.value!).abs() < 1e-6,
-                      onSelected: (_) => _setAspect(e.value),
-                    ),
+              itemCount: ratios.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
+              itemBuilder: (context, i) {
+                final e = ratios.entries.elementAt(i);
+                return Center(
+                  child: ChoiceChip(
+                    label: Text(e.key),
+                    selected: e.value == null
+                        ? _aspect == null
+                        : _aspect != null && (_aspect! - e.value!).abs() < 1e-6,
+                    onSelected: (_) => _setAspect(e.value),
                   ),
-              ],
+                );
+              },
             ),
           ),
         ],
@@ -431,40 +486,73 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
     );
   }
 
-  Widget _buildAdjustTools() {
-    Widget slider(String label, double value, ValueChanged<double> onChanged) {
-      return Row(
-        children: [
-          SizedBox(width: 92, child: Text(label)),
-          Expanded(
-            child: Slider(
-              value: value,
-              min: -100,
-              max: 100,
-              divisions: 200,
-              label: value.round().toString(),
-              onChanged: (v) => setState(() => onChanged(v)),
+  // The tool panels read the theme from a context inside [ImmersiveTheme],
+  // not the State's own (light in light mode).
+  Widget _buildAdjustTools() => Builder(builder: _adjustTools);
+
+  Widget _adjustTools(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    Widget slider(
+      IconData icon,
+      String label,
+      double value,
+      ValueChanged<double> onChanged,
+    ) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: colors.mutedForeground),
+            const SizedBox(width: 8),
+            SizedBox(width: 80, child: Text(label, style: text.bodyMedium)),
+            Expanded(
+              child: Slider(
+                value: value,
+                min: -100,
+                max: 100,
+                divisions: 200,
+                label: value.round().toString(),
+                onChanged: (v) => setState(() => onChanged(v)),
+              ),
             ),
-          ),
-          SizedBox(width: 36, child: Text(value.round().toString())),
-        ],
+            SizedBox(
+              width: 36,
+              child: Text(
+                value.round().toString(),
+                textAlign: TextAlign.right,
+                style: text.labelMedium?.copyWith(
+                  color: value.round() == 0
+                      ? colors.mutedForeground
+                      : colors.foreground,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          slider('Brightness', _edits.brightness, (v) => _edits.brightness = v),
-          slider('Contrast', _edits.contrast, (v) => _edits.contrast = v),
-          slider('Saturation', _edits.saturation, (v) => _edits.saturation = v),
+          slider(LucideIcons.sun, 'Brightness', _edits.brightness,
+              (v) => _edits.brightness = v),
+          slider(LucideIcons.contrast, 'Contrast', _edits.contrast,
+              (v) => _edits.contrast = v),
+          slider(LucideIcons.droplet, 'Saturation', _edits.saturation,
+              (v) => _edits.saturation = v),
         ],
       ),
     );
   }
 
-  Widget _buildFilterTools() {
+  Widget _buildFilterTools() => Builder(builder: _filterTools);
+
+  Widget _filterTools(BuildContext context) {
     const names = {
       ImageFilterPreset.none: 'Original',
       ImageFilterPreset.vivid: 'Vivid',
@@ -474,49 +562,65 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
       ImageFilterPreset.sepia: 'Sepia',
       ImageFilterPreset.invert: 'Invert',
     };
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     return SizedBox(
-      height: 112,
+      height: 120,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         children: [
           for (final e in names.entries)
-            GestureDetector(
-              onTap: () => setState(() => _edits.filter = e.key),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: _edits.filter == e.key
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.transparent,
-                          width: 2,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: ColorFiltered(
-                        colorFilter: ColorFilter.matrix(
-                          (ImageEdits()..filter = e.key).colorMatrix() ??
-                              const [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
-                        ),
-                        child: Image(
-                          image: ResizeImage(
-                            ImageCodec.providerFor(widget.file),
-                            width: 128,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => setState(() => _edits.filter = e.key),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 68,
+                        height: 68,
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: _edits.filter == e.key
+                                ? colors.primary
+                                : colors.border,
+                            width: 2,
                           ),
-                          fit: BoxFit.cover,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(7),
+                          child: ColorFiltered(
+                            colorFilter: ColorFilter.matrix(
+                              (ImageEdits()..filter = e.key).colorMatrix() ??
+                                  const [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+                            ),
+                            child: Image(
+                              image: ResizeImage(
+                                ImageCodec.providerFor(widget.file),
+                                width: 128,
+                              ),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(e.value, style: const TextStyle(fontSize: 12)),
-                  ],
+                      const SizedBox(height: 6),
+                      Text(
+                        e.value,
+                        style: text.labelMedium?.copyWith(
+                          color: _edits.filter == e.key
+                              ? colors.foreground
+                              : colors.mutedForeground,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -526,7 +630,47 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   }
 }
 
-/// Darkens everything outside a normalised crop rect.
+/// The header's Save button; opens the save menu.
+class _SaveTrigger extends StatelessWidget {
+  const _SaveTrigger({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: Container(
+        height: 34,
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        decoration: BoxDecoration(
+          color: colors.primary,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Save',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: colors.primaryForeground,
+                  ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              LucideIcons.chevronDown,
+              size: 16,
+              color: colors.primaryForeground,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Darkens everything outside a normalised crop rect.
 class _DimPainter extends CustomPainter {
   _DimPainter(this.rect);
 

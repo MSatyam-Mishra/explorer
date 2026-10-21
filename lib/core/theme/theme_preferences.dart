@@ -11,12 +11,9 @@ abstract final class ThemePreferences {
 
   static Future<AppThemeSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final modeName = prefs.getString(_keyThemeMode);
-    final colorId = prefs.getString(_keyColorThemeId);
-
     return AppThemeSettings(
-      themeMode: _parseThemeMode(modeName),
-      colorThemeId: _resolveColorThemeId(colorId),
+      themeMode: _parseThemeMode(prefs.getString(_keyThemeMode)),
+      colorThemeId: AppColorThemes.migrate(prefs.getString(_keyColorThemeId)),
       fileIconStyle: FileIconStyle.parse(prefs.getString(_keyFileIconStyle)),
     );
   }
@@ -28,19 +25,9 @@ abstract final class ThemePreferences {
     await prefs.setString(_keyFileIconStyle, settings.fileIconStyle.name);
   }
 
-  static String _resolveColorThemeId(String? stored) {
-    if (stored == null || stored.isEmpty) return AppColorThemes.oceanId;
-    return stored;
-  }
-
-  static ThemeMode _parseThemeMode(String? value) {
-    switch (value) {
-      case 'light':
-        return ThemeMode.light;
-      case 'dark':
-        return ThemeMode.dark;
-      default:
-        return ThemeMode.dark;
-    }
-  }
+  static ThemeMode _parseThemeMode(String? value) => switch (value) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
 }

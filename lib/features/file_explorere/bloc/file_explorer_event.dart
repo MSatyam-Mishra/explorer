@@ -31,3 +31,6 @@ class ChangeSortOrder extends FileExplorerEvent {
 }
 
 class ClearSelection extends FileExplorerEvent {}
+
+/// Selects every entry in the current folder.
+class SelectAll extends FileExplorerEvent {}

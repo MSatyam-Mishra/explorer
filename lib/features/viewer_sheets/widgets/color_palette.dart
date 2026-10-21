@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import 'grid_colors.dart';
@@ -17,10 +18,9 @@ Future<ColorChoice?> showColorPalette(
   return showDialog<ColorChoice>(
     context: context,
     builder: (context) {
-      final scheme = Theme.of(context).colorScheme;
       return AlertDialog(
         title: Text(title),
-        contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
         content: SizedBox(
           width: 300,
           child: Column(
@@ -28,31 +28,30 @@ Future<ColorChoice?> showColorPalette(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               OutlinedButton.icon(
-                icon: const Icon(Icons.format_color_reset_outlined),
+                icon: const Icon(LucideIcons.ban, size: 16),
                 label: Text(noneLabel),
                 onPressed: () => Navigator.pop(context, const ColorChoice(null)),
               ),
               const SizedBox(height: 12),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 2,
+                runSpacing: 2,
                 children: [
                   for (final c in kSheetPalette)
                     Semantics(
                       button: true,
+                      selected: current == c,
                       label: '#${(c & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}',
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(18),
+                      child: InkResponse(
+                        radius: 20,
                         onTap: () => Navigator.pop(context, ColorChoice(c)),
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: Color(c),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: current == c ? scheme.primary : scheme.outlineVariant,
-                              width: current == c ? 3 : 1,
+                        child: SizedBox.square(
+                          dimension: 40,
+                          child: Center(
+                            child: ViewerSwatch(
+                              color: Color(c),
+                              size: 26,
+                              selected: current == c,
                             ),
                           ),
                         ),
@@ -64,7 +63,7 @@ Future<ColorChoice?> showColorPalette(
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         ],
       );
     },

@@ -4,6 +4,7 @@ import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/localsend/localsend.dart';
 import 'package:explorer/features/localsend/localsend_controller.dart';
 import 'package:explorer/features/localsend/widgets/localsend_common.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 
 /// This device's identity, the running incoming transfer and received files.
@@ -48,104 +49,116 @@ class _ThisDeviceSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final settings = controller.settings;
     if (settings == null) return const SizedBox.shrink();
     final port = controller.serverPort ?? settings.port;
     final addresses = controller.localAddresses;
     final error = controller.serverError;
     final pin = settings.pin;
+    final live = error == null;
     return LsSection(
       title: 'Receive',
-      icon: Icons.download,
+      icon: LucideIcons.download,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: theme.colorScheme.onSurface.withValues(
-                  alpha: 0.08,
-                ),
-                foregroundColor: theme.colorScheme.onSurface,
-                child: Icon(lsDeviceIcon(settings.deviceType), size: 28),
-              ),
+              IconBox(lsDeviceIcon(settings.deviceType), size: 48),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(settings.alias, style: theme.textTheme.titleLarge),
                     Text(
-                      error == null
-                          ? 'Visible to nearby devices while this screen is open'
-                          : 'Not receiving',
-                      style: theme.textTheme.bodySmall,
+                      settings.alias,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.titleMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: live
+                                ? context.toneColor(Tone.success)
+                                : colors.destructive,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            live
+                                ? 'Visible to nearby devices while this screen is open'
+                                : 'Not receiving',
+                            style: text.bodySmall,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          if (error != null) ...[
-            Text(error, style: TextStyle(color: theme.colorScheme.error)),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: controller.retryServer,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ),
-          ] else
+          const SizedBox(height: 12),
+          if (error != null)
+            ViewerNotice(
+              icon: LucideIcons.circleAlert,
+              tone: Tone.destructive,
+              margin: EdgeInsets.zero,
+              message: error,
+              actions: [
+                TextButton(
+                  onPressed: controller.retryServer,
+                  child: const Text('Retry'),
+                ),
+              ],
+            )
+          else
             Wrap(
-              spacing: 8,
+              spacing: 6,
               runSpacing: 6,
               children: [
                 for (final a in addresses.take(3))
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    avatar: const Icon(Icons.lan_outlined, size: 16),
-                    label: Text('$a:$port'),
+                  StatusBadge(
+                    '$a:$port',
+                    icon: LucideIcons.network,
+                    outline: true,
                   ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  avatar: Icon(
-                    settings.https ? Icons.lock_outline : Icons.lock_open,
-                    size: 16,
-                  ),
-                  label: Text(settings.https ? 'HTTPS' : 'HTTP'),
+                StatusBadge(
+                  settings.https ? 'HTTPS' : 'HTTP',
+                  icon: settings.https ? LucideIcons.lock : LucideIcons.lockOpen,
+                  outline: true,
                 ),
                 if (pin != null && pin.isNotEmpty)
-                  const Chip(
-                    visualDensity: VisualDensity.compact,
-                    avatar: Icon(Icons.pin_outlined, size: 16),
-                    label: Text('PIN required'),
+                  const StatusBadge(
+                    'PIN required',
+                    icon: LucideIcons.keyRound,
+                    outline: true,
                   ),
                 if (settings.autoAcceptTrusted)
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    avatar: const Icon(Icons.verified_user_outlined, size: 16),
-                    label: Text(
-                      'Auto-accept ${controller.trusted.length} trusted',
-                    ),
+                  StatusBadge(
+                    'Auto-accept ${controller.trusted.length} trusted',
+                    icon: LucideIcons.shieldCheck,
+                    outline: true,
                   ),
               ],
             ),
-          const SizedBox(height: 8),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.folder_outlined),
-            title: const Text('Save to'),
-            subtitle: Text(
-              settings.destination,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.open_in_new),
+          const SizedBox(height: 12),
+          ListRow(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            leading: const IconBox(LucideIcons.folderDown),
+            title: 'Save to',
+            subtitle: settings.destination,
+            trailing: ToolButton(
+              icon: LucideIcons.externalLink,
               tooltip: 'Open folder',
               onPressed: () async {
                 await Directory(settings.destination).create(recursive: true);
@@ -156,18 +169,22 @@ class _ThisDeviceSection extends StatelessWidget {
             ),
           ),
           if (controller.destinationFallback)
-            Text(
-              'The Download folder is not writable (storage permission?), '
-              'so files go to the app folder above. Change it in settings.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
-              ),
+            const ViewerNotice(
+              icon: LucideIcons.triangleAlert,
+              tone: Tone.warning,
+              margin: EdgeInsets.only(top: 8),
+              message:
+                  'The Download folder is not writable (storage permission?), '
+                  'so files go to the app folder above. Change it in settings.',
             ),
           if (controller.multicastError != null)
-            Text(
-              'Other devices may not find this one automatically '
-              '(${controller.multicastError}); they can add it by IP.',
-              style: theme.textTheme.bodySmall,
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Other devices may not find this one automatically '
+                '(${controller.multicastError}); they can add it by IP.',
+                style: text.bodySmall,
+              ),
             ),
         ],
       ),
@@ -198,16 +215,20 @@ class _ReceiveProgressSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final total = session.totalBytes;
     final received = session.receivedBytes;
     final files = session.files.values.toList();
     final active = session.isActive;
+    final ok = session.state == LsReceiveState.finished &&
+        session.failedCount == 0;
     return LsSection(
       title: 'From ${session.sender.alias}',
       icon: lsDeviceIcon(session.sender.deviceType),
       trailing: active
           ? TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: context.colors.destructive,
+              ),
               onPressed: controller.cancelReceive,
               child: const Text('Cancel'),
             )
@@ -215,18 +236,18 @@ class _ReceiveProgressSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(_stateText()),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
+          LsProgress(
+            status: _stateText(),
+            tone: active
+                ? Tone.neutral
+                : ok
+                ? Tone.success
+                : Tone.destructive,
             value: total == 0 ? (active ? null : 1) : received / total,
-            borderRadius: BorderRadius.circular(4),
+            detail:
+                '${lsSize(received)} / ${lsSize(total)} · ${session.doneCount}/${files.length} files',
           ),
-          const SizedBox(height: 4),
-          Text(
-            '${lsSize(received)} / ${lsSize(total)} · ${session.doneCount}/${files.length} files',
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 240),
             child: ListView.builder(
@@ -236,36 +257,22 @@ class _ReceiveProgressSection extends StatelessWidget {
                 final f = files[i];
                 final size = f.dto.size;
                 final saved = f.savedPath;
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
+                return ListRow(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                   leading: LsFileIcon(f.dto.fileName, size: 32),
-                  title: Text(
-                    f.dto.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: switch (f.status) {
+                  title: f.dto.fileName,
+                  subtitleWidget: switch (f.status) {
                     LsReceiveFileStatus.receiving => LinearProgressIndicator(
                       value: size == 0 ? null : f.received / size,
                     ),
-                    LsReceiveFileStatus.failed => Text(
-                      f.error ?? 'Failed',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                    _ => Text(lsSize(size)),
-                  },
-                  trailing: switch (f.status) {
-                    LsReceiveFileStatus.done => Icon(
-                      Icons.check_circle,
-                      color: theme.colorScheme.primary,
-                    ),
-                    LsReceiveFileStatus.failed => Icon(
-                      Icons.error,
-                      color: theme.colorScheme.error,
-                    ),
+                    LsReceiveFileStatus.failed => LsErrorText(f.error ?? 'Failed'),
                     _ => null,
                   },
+                  subtitle: lsSize(size),
+                  trailing: LsFileState(
+                    done: f.status == LsReceiveFileStatus.done,
+                    failed: f.status == LsReceiveFileStatus.failed,
+                  ),
                   onTap: saved == null
                       ? null
                       : () => FileOpener.open(context, File(saved)),
@@ -287,30 +294,30 @@ class _ReceivedSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = controller.received;
-    final theme = Theme.of(context);
     return LsSection(
       title: 'Received',
-      icon: Icons.inventory_2_outlined,
+      icon: LucideIcons.inbox,
+      subtitle: items.isEmpty
+          ? null
+          : '${items.length} ${items.length == 1 ? 'file' : 'files'}',
       child: items.isEmpty
-          ? Text(
+          ? const LsHint(
               'Files you receive while this screen is open appear here.',
-              style: theme.textTheme.bodyMedium,
+              icon: LucideIcons.inbox,
             )
           : Column(
               children: [
                 for (final item in items.take(200))
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: LsFileIcon(item.path),
-                    title: Text(
-                      item.fileName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                  ListRow(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
                     ),
-                    subtitle: Text('${lsSize(item.size)} · from ${item.from}'),
+                    leading: LsFileIcon(item.path),
+                    title: item.fileName,
+                    subtitle: '${lsSize(item.size)} · from ${item.from}',
                     onTap: () => _open(context, item),
-                    trailing: PopupMenuButton<String>(
-                      tooltip: 'More',
+                    trailing: MenuIconButton<String>(
                       onSelected: (v) {
                         switch (v) {
                           case 'open':
@@ -321,15 +328,21 @@ class _ReceivedSection extends StatelessWidget {
                             controller.removeReceived(item);
                         }
                       },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'open', child: Text('Open')),
-                        PopupMenuItem(
-                          value: 'folder',
-                          child: Text('Show in folder'),
+                      itemBuilder: (_) => [
+                        menuItem(
+                          value: 'open',
+                          icon: LucideIcons.fileSearch,
+                          label: 'Open',
                         ),
-                        PopupMenuItem(
+                        menuItem(
+                          value: 'folder',
+                          icon: LucideIcons.folderOpen,
+                          label: 'Show in folder',
+                        ),
+                        menuItem(
                           value: 'remove',
-                          child: Text('Remove from list'),
+                          icon: LucideIcons.listX,
+                          label: 'Remove from list',
                         ),
                       ],
                     ),

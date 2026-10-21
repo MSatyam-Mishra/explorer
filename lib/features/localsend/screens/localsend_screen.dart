@@ -2,12 +2,11 @@ import 'dart:io';
 
 import 'package:explorer/core/services/localsend/localsend.dart';
 import 'package:explorer/features/localsend/localsend_controller.dart';
-import 'package:explorer/features/localsend/widgets/localsend_common.dart';
 import 'package:explorer/features/localsend/widgets/localsend_dialogs.dart';
 import 'package:explorer/features/localsend/widgets/localsend_receive_panel.dart';
 import 'package:explorer/features/localsend/widgets/localsend_send_panel.dart';
 import 'package:explorer/features/localsend/widgets/localsend_settings_sheet.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -16,9 +15,16 @@ import 'package:flutter/material.dart';
 /// folders) to, or receive files from, devices running LocalSend on the same
 /// network. The receiver and discovery run only while this screen is open.
 class LocalSendScreen extends StatefulWidget {
-  const LocalSendScreen({super.key, this.initialItems = const []});
+  const LocalSendScreen({
+    super.key,
+    this.initialItems = const [],
+    @visibleForTesting this.controller,
+  });
 
   final List<FileSystemEntity> initialItems;
+
+  /// Replaces the screen's own controller (tests and screenshots).
+  final LocalSendController? controller;
 
   @override
   State<LocalSendScreen> createState() => _LocalSendScreenState();
@@ -26,9 +32,9 @@ class LocalSendScreen extends StatefulWidget {
 
 class _LocalSendScreenState extends State<LocalSendScreen>
     with SingleTickerProviderStateMixin {
-  late final LocalSendController _controller = LocalSendController(
-    initialItems: widget.initialItems,
-  );
+  late final LocalSendController _controller =
+      widget.controller ??
+      LocalSendController(initialItems: widget.initialItems);
   late final TabController _tabs;
   String? _shownReceiveSession;
 
@@ -86,7 +92,6 @@ class _LocalSendScreenState extends State<LocalSendScreen>
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) => PopScope(
@@ -97,7 +102,7 @@ class _LocalSendScreenState extends State<LocalSendScreen>
             Navigator.of(context).pop();
           }
         },
-        child: _scaffold(context, iconColor),
+        child: _scaffold(context),
       ),
     );
   }
@@ -109,42 +114,43 @@ class _LocalSendScreenState extends State<LocalSendScreen>
   Future<bool> _confirmLeave() async {
     final answer = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => lsThemed(
-        context,
-        AlertDialog(
-          title: const Text('Stop the transfer?'),
-          content: const Text(
-            'Leaving this screen cancels the running transfer and stops nearby sharing.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Stay'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Stop and leave'),
-            ),
-          ],
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Stop the transfer?'),
+        content: const Text(
+          'Leaving this screen cancels the running transfer and stops nearby sharing.',
         ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: dialogContext.colors.destructive,
+              foregroundColor: dialogContext.colors.destructiveForeground,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Stop and leave'),
+          ),
+        ],
       ),
     );
     return answer ?? false;
   }
 
-  Widget _scaffold(BuildContext context, Color iconColor) => ExplorerScaffold(
+  Widget _scaffold(BuildContext context) => ExplorerScaffold(
     title: 'Nearby share',
-    trailing: ExplorerTopBar.actions(context, [
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(Icons.settings_outlined, color: iconColor),
+    trailing: Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: AppIconButton(
+        icon: const Icon(LucideIcons.settings),
         tooltip: 'Settings',
         onPressed: _controller.settings == null
             ? null
             : () => showLsSettingsSheet(context, _controller),
       ),
-    ]),
-    body: Theme(data: lsTheme(context), child: _body(context)),
+    ),
+    body: _body(context),
   );
 
   Widget _body(BuildContext context) {
@@ -153,23 +159,16 @@ class _LocalSendScreenState extends State<LocalSendScreen>
     if (_controller.starting) {
       return Padding(
         padding: EdgeInsets.only(top: top),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Starting nearby sharing…'),
-            ],
-          ),
-        ),
+        child: const ViewerLoading(label: 'Starting nearby sharing…'),
       );
     }
     final error = _controller.startupError;
     if (error != null) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(24, top, 24, bottom),
-        child: Center(child: Text(error, textAlign: TextAlign.center)),
+      return ViewerMessage(
+        icon: LucideIcons.wifiOff,
+        title: "Nearby sharing couldn't start",
+        message: error,
+        padding: EdgeInsets.fromLTRB(24, top + 24, 24, bottom),
       );
     }
 
@@ -177,33 +176,41 @@ class _LocalSendScreenState extends State<LocalSendScreen>
       builder: (context, constraints) {
         if (constraints.maxWidth >= 840) {
           // Tablet / desktop: send and receive side by side.
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: LsSendPanel(
-                  controller: _controller,
-                  padding: EdgeInsets.fromLTRB(16, top + 4, 8, bottom),
-                ),
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: LsSendPanel(
+                      controller: _controller,
+                      padding: EdgeInsets.fromLTRB(16, top + 16, 8, bottom),
+                    ),
+                  ),
+                  Expanded(
+                    child: LsReceivePanel(
+                      controller: _controller,
+                      padding: EdgeInsets.fromLTRB(8, top + 16, 16, bottom),
+                    ),
+                  ),
+                ],
               ),
-              Expanded(
-                child: LsReceivePanel(
-                  controller: _controller,
-                  padding: EdgeInsets.fromLTRB(8, top + 4, 16, bottom),
-                ),
-              ),
-            ],
+            ),
           );
         }
         return Column(
           children: [
-            SizedBox(height: top),
-            TabBar(
-              controller: _tabs,
-              tabs: const [
-                Tab(icon: Icon(Icons.upload), text: 'Send'),
-                Tab(icon: Icon(Icons.download), text: 'Receive'),
-              ],
+            SizedBox(height: top + 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: _SegmentTabs(
+                controller: _tabs,
+                tabs: const [
+                  (LucideIcons.upload, 'Send'),
+                  (LucideIcons.download, 'Receive'),
+                ],
+              ),
             ),
             Expanded(
               child: TabBarView(
@@ -223,6 +230,61 @@ class _LocalSendScreenState extends State<LocalSendScreen>
           ],
         );
       },
+    );
+  }
+}
+
+/// shadcn Tabs: a muted track with the selected tab raised.
+class _SegmentTabs extends StatelessWidget {
+  const _SegmentTabs({required this.controller, required this.tabs});
+
+  final TabController controller;
+  final List<(IconData, String)> tabs;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: colors.muted,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: TabBar(
+        controller: controller,
+        dividerColor: Colors.transparent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: BoxDecoration(
+          color: colors.background,
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: context.isDarkMode ? 0.3 : 0.08),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        labelColor: colors.foreground,
+        unselectedLabelColor: colors.mutedForeground,
+        labelStyle: Theme.of(context).textTheme.labelLarge,
+        splashBorderRadius: BorderRadius.circular(7),
+        tabs: [
+          for (final (icon, label) in tabs)
+            Tab(
+              height: 32,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 16),
+                  const SizedBox(width: 8),
+                  Text(label),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

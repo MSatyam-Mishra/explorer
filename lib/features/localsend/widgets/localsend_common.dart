@@ -1,10 +1,9 @@
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/localsend/localsend.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/file_icons/file_icons.dart';
-import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -14,43 +13,16 @@ String lsSize(int bytes) => filesize(bytes, 1);
 String lsSpeed(double bytesPerSecond) =>
     bytesPerSecond <= 0 ? '' : '${filesize(bytesPerSecond.round(), 1)}/s';
 
-double _contrast(Color a, Color b) {
-  final la = a.computeLuminance();
-  final lb = b.computeLuminance();
-  return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
-}
-
-/// The app palettes can have a pale primary in light mode: buttons, tabs and
-/// progress bars here use the text colour instead when primary would be hard
-/// to read on the surface.
-ThemeData lsTheme(BuildContext context) {
-  final theme = Theme.of(context);
-  final scheme = theme.colorScheme;
-  if (_contrast(scheme.primary, scheme.surface) >= 3) return theme;
-  return theme.copyWith(
-    colorScheme: scheme.copyWith(
-      primary: scheme.onSurface,
-      onPrimary: scheme.onSurface.computeLuminance() > 0.5
-          ? Colors.black
-          : Colors.white,
-    ),
-  );
-}
-
-/// Applies [lsTheme] to dialogs and sheets (they use the root theme).
-Widget lsThemed(BuildContext context, Widget child) =>
-    Theme(data: lsTheme(context), child: child);
-
 IconData lsDeviceIcon(LsDeviceType? type) => switch (type) {
-  LsDeviceType.mobile => Icons.smartphone,
-  LsDeviceType.desktop => Icons.computer,
-  LsDeviceType.web => Icons.language,
-  LsDeviceType.headless => Icons.terminal,
-  LsDeviceType.server => Icons.dns,
-  null => Icons.devices_other,
+  LsDeviceType.mobile => LucideIcons.smartphone,
+  LsDeviceType.desktop => LucideIcons.monitor,
+  LsDeviceType.web => LucideIcons.globe,
+  LsDeviceType.headless => LucideIcons.terminal,
+  LsDeviceType.server => LucideIcons.server,
+  null => LucideIcons.monitorSmartphone,
 };
 
-/// Rounded section used by both panels.
+/// Card section used by both panels: icon, title, trailing actions, body.
 class LsSection extends StatelessWidget {
   const LsSection({
     super.key,
@@ -58,51 +30,214 @@ class LsSection extends StatelessWidget {
     required this.child,
     this.trailing,
     this.icon,
+    this.subtitle,
   });
 
   final String title;
+  final String? subtitle;
   final Widget child;
   final Widget? trailing;
   final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
       margin: const EdgeInsets.only(bottom: 12),
-      clipBehavior: Clip.antiAlias,
-      elevation: 0,
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.72),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 40,
+            child: Row(
               children: [
                 if (icon != null) ...[
-                  Icon(icon, size: 20, color: scheme.primary),
+                  Icon(icon, size: 16, color: colors.mutedForeground),
                   const SizedBox(width: 8),
                 ],
                 Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.titleSmall,
+                      ),
+                      if (subtitle != null)
+                        Text(
+                          subtitle!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodySmall,
+                        ),
+                    ],
                   ),
                 ),
-                if (trailing != null) trailing!,
+                ?trailing,
               ],
             ),
-            const SizedBox(height: 8),
-            child,
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
       ),
     );
   }
+}
+
+/// Muted one-line hint inside a section (empty lists).
+class LsHint extends StatelessWidget {
+  const LsHint(this.text, {super.key, this.icon});
+
+  final String text;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.muted.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (icon != null) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icon, size: 16, color: colors.mutedForeground),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Transfer progress: status line, bar and byte/file counts.
+class LsProgress extends StatelessWidget {
+  const LsProgress({
+    super.key,
+    required this.status,
+    required this.value,
+    required this.detail,
+    this.tone = Tone.neutral,
+  });
+
+  final String status;
+
+  /// 0..1, or null while waiting.
+  final double? value;
+  final String detail;
+  final Tone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final percent = value == null ? null : (value! * 100).clamp(0, 100).round();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                status,
+                style: text.bodyMedium?.copyWith(
+                  color: tone == Tone.neutral
+                      ? colors.foreground
+                      : context.toneColor(tone),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            if (percent != null)
+              Text(
+                '$percent%',
+                style: text.labelMedium?.copyWith(
+                  color: colors.foreground,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        LinearProgressIndicator(
+          value: value,
+          color: tone == Tone.destructive ? colors.destructive : null,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          detail,
+          style: text.bodySmall?.copyWith(
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Done / failed mark at the end of a transfer row.
+class LsFileState extends StatelessWidget {
+  const LsFileState({super.key, required this.done, required this.failed});
+
+  final bool done;
+  final bool failed;
+
+  @override
+  Widget build(BuildContext context) {
+    if (done) {
+      return Icon(
+        LucideIcons.circleCheck,
+        size: 18,
+        color: context.toneColor(Tone.success),
+      );
+    }
+    if (failed) {
+      return Icon(
+        LucideIcons.circleX,
+        size: 18,
+        color: context.colors.destructive,
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+/// A failure message under a transfer row's title.
+class LsErrorText extends StatelessWidget {
+  const LsErrorText(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: context.colors.destructive,
+            ),
+      );
 }
 
 /// Icon for a (possibly folder-relative) file name.
@@ -139,12 +274,9 @@ Future<void> lsShowInFolder(BuildContext context, String path) async {
     // Fall back to the in-app listing below.
   }
   if (!context.mounted) return;
-  await ExplorerLiquidGlassBottomSheet.show<void>(
+  await AppSheet.show<void>(
     context,
-    child: lsThemed(
-      context,
-      LsFolderSheet(folder: folder, highlight: isDir ? null : path),
-    ),
+    child: LsFolderSheet(folder: folder, highlight: isDir ? null : path),
   );
 }
 
@@ -197,61 +329,84 @@ class _LsFolderSheetState extends State<LsFolderSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final height = MediaQuery.sizeOf(context).height * 0.66;
-    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final height = MediaQuery.sizeOf(context).height * 0.6;
     final canGoUp =
         !p.equals(_dir, widget.folder) && p.isWithin(widget.folder, _dir);
     return SizedBox(
       height: height,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ListTile(
-            leading: canGoUp
-                ? IconButton(
-                    icon: const Icon(Icons.arrow_upward),
-                    tooltip: 'Up',
-                    onPressed: () {
-                      setState(() => _dir = p.dirname(_dir));
-                      _load();
-                    },
-                  )
-                : const FolderIcon(size: 32),
-            title: Text(
-              p.basename(_dir),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(_dir, maxLines: 2, overflow: TextOverflow.ellipsis),
+          Row(
+            children: [
+              if (canGoUp)
+                AppIconButton(
+                  icon: const Icon(LucideIcons.arrowUp),
+                  tooltip: 'Up',
+                  onPressed: () {
+                    setState(() => _dir = p.dirname(_dir));
+                    _load();
+                  },
+                )
+              else
+                const FolderIcon(size: 36),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      p.basename(_dir),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.titleMedium,
+                    ),
+                    Text(
+                      _dir,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 12),
           const Divider(height: 1),
           Expanded(
             child: _error != null
-                ? Center(child: Text('Cannot open folder: $_error'))
+                ? ViewerMessage(
+                    icon: LucideIcons.folderX,
+                    title: "Can't open this folder",
+                    details: _error,
+                  )
                 : _entries.isEmpty
-                ? const Center(child: Text('Empty folder'))
+                ? const ViewerMessage(
+                    icon: LucideIcons.folderOpen,
+                    title: 'This folder is empty',
+                  )
                 : ListView.builder(
+                    padding: const EdgeInsets.only(top: 8),
                     itemCount: _entries.length,
                     itemBuilder: (context, i) {
                       final e = _entries[i];
                       final name = p.basename(e.path);
                       final isDir = e is Directory;
-                      final selected = e.path == widget.highlight;
-                      return ListTile(
-                        selected: selected,
-                        selectedTileColor: scheme.onSurface.withValues(
-                          alpha: 0.08,
+                      return ListRow(
+                        selected: e.path == widget.highlight,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
                         ),
                         leading: isDir
                             ? const FolderIcon(size: 40)
                             : LsFileIcon(name),
-                        title: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        title: name,
                         subtitle: isDir
                             ? null
-                            : Text(lsSize((e as File).statSync().size)),
+                            : lsSize((e as File).statSync().size),
                         onTap: () {
                           if (isDir) {
                             setState(() => _dir = e.path);

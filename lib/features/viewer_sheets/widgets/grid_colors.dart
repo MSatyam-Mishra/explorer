@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 
-/// Light/dark aware colours for the spreadsheet grid.
+/// Light/dark aware colours for the spreadsheet grid, from the app's
+/// shadcn colour scheme.
 class GridColors {
-  const GridColors({
+  GridColors({
     required this.dark,
     required this.paper,
     required this.gridLine,
@@ -34,47 +36,86 @@ class GridColors {
   final Color editorBackground;
   final Color editorText;
 
-  static final Map<(Brightness, int), GridColors> _cache = {};
+  /// Resolved colours of explicit (document) text colours, without fill.
+  final Map<int, Color> _explicitText = {};
+
+  static final Map<ShadColorScheme, GridColors> _cache = {};
 
   static GridColors of(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final key = (theme.brightness, scheme.primary.toARGB32());
-    return _cache.putIfAbsent(key, () {
-      final dark = theme.brightness == Brightness.dark;
-      final accent = scheme.primary;
-      final header = dark ? const Color(0xFF2A2C30) : const Color(0xFFF3F4F6);
+    final shad = ShadTheme.of(context);
+    final c = shad.colorScheme;
+    final dark = shad.brightness == Brightness.dark;
+    return _cache.putIfAbsent(c, () {
+      final header = c.muted;
       return GridColors(
         dark: dark,
-        paper: dark ? const Color(0xFF1E1F22) : Colors.white,
-        gridLine: dark ? const Color(0xFF3A3C40) : const Color(0xFFE1E3E6),
+        paper: c.background,
+        gridLine: c.border,
         header: header,
-        headerLine: dark ? const Color(0xFF45484D) : const Color(0xFFD3D6DA),
-        headerText: dark ? const Color(0xFFB8BCC2) : const Color(0xFF555A61),
-        headerSelected: Color.alphaBlend(accent.withValues(alpha: dark ? 0.22 : 0.14), header),
-        headerSelectedStrong: Color.alphaBlend(accent.withValues(alpha: dark ? 0.38 : 0.28), header),
-        text: dark ? const Color(0xFFE6E7E9) : const Color(0xFF1F1F1F),
-        accent: accent,
-        selectionFill: accent.withValues(alpha: dark ? 0.22 : 0.12),
-        frozenLine: dark ? const Color(0xFF7A7F87) : const Color(0xFF9AA0A6),
-        editorBackground: dark ? const Color(0xFF26282C) : Colors.white,
-        editorText: dark ? const Color(0xFFF2F2F2) : const Color(0xFF111111),
+        // In dark schemes the border colour equals muted: lift it so the
+        // header cells stay separated.
+        headerLine: Color.alphaBlend(
+          c.foreground.withValues(alpha: dark ? 0.12 : 0.08),
+          header,
+        ),
+        headerText: c.mutedForeground,
+        headerSelected: Color.alphaBlend(
+          c.primary.withValues(alpha: dark ? 0.22 : 0.14),
+          header,
+        ),
+        headerSelectedStrong: Color.alphaBlend(
+          c.primary.withValues(alpha: dark ? 0.38 : 0.28),
+          header,
+        ),
+        text: c.foreground,
+        accent: c.primary,
+        selectionFill: c.primary.withValues(alpha: dark ? 0.22 : 0.12),
+        frozenLine: c.mutedForeground.withValues(alpha: 0.7),
+        editorBackground: c.background,
+        editorText: c.foreground,
       );
     });
   }
 
   /// Text colour for a cell, keeping it readable on dark paper and fills.
+  ///
+  /// The document's own colours are kept where they read well. Colours
+  /// chosen for white paper that would vanish on a dark sheet (black, navy,
+  /// dark red…) are lifted to a lighter shade of the same hue.
   Color textFor({int? explicit, Color? fill}) {
     if (explicit != null) {
       final c = Color(explicit | 0xFF000000);
-      if (fill == null && dark && c.computeLuminance() < 0.08) return text;
-      if (fill == null && !dark && c.computeLuminance() > 0.93) return text;
-      return c;
+      if (fill != null) return c;
+      return _explicitText.putIfAbsent(explicit, () {
+        final contrast = _contrast(c, paper);
+        if (dark && contrast < 4.5) return _lifted(c);
+        if (!dark && contrast < 1.3) return text;
+        return c;
+      });
     }
     if (fill != null) {
-      return fill.computeLuminance() > 0.4 ? const Color(0xFF1F1F1F) : Colors.white;
+      return fill.computeLuminance() > 0.4
+          ? const Color(0xFF1F1F1F)
+          : Colors.white;
     }
     return text;
+  }
+
+  static double _contrast(Color a, Color b) {
+    final la = a.computeLuminance() + 0.05;
+    final lb = b.computeLuminance() + 0.05;
+    return la > lb ? la / lb : lb / la;
+  }
+
+  /// [c] made light enough for dark paper; near-greys become the text colour.
+  Color _lifted(Color c) {
+    final hsl = HSLColor.fromColor(c);
+    if (hsl.saturation < 0.15) return text;
+    for (var l = hsl.lightness.clamp(0.5, 0.95); l <= 0.95; l += 0.05) {
+      final candidate = hsl.withLightness(l).toColor();
+      if (_contrast(candidate, paper) >= 4.5) return candidate;
+    }
+    return hsl.withLightness(0.85).toColor();
   }
 }
 

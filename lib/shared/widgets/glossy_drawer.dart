@@ -1,22 +1,13 @@
-import 'package:explorer/shared/liquid_glass/explorer_liquid_glass.dart';
+import 'package:explorer/shared/ui/app_sidebar.dart';
 import 'package:flutter/material.dart';
 
-/// Side drawer with a full-height liquid-glass lens.
+/// Side drawer in the app's sidebar style.
 class GlossyDrawer extends StatelessWidget {
-  const GlossyDrawer({
-    super.key,
-    required this.child,
-    this.width,
-  });
+  const GlossyDrawer({super.key, required this.child, this.width});
 
   final Widget child;
   final double? width;
 
   @override
-  Widget build(BuildContext context) {
-    return ExplorerLiquidGlassDrawer(
-      width: width,
-      child: child,
-    );
-  }
+  Widget build(BuildContext context) => AppSidebar(width: width, child: child);
 }

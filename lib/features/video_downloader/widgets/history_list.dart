@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/file_icons/file_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -30,7 +31,7 @@ class HistoryList extends StatelessWidget {
         final history = controller.history;
         if (history.isEmpty) {
           return EmptyState(
-            icon: Icons.history,
+            icon: LucideIcons.history,
             title: 'No downloads yet',
             message: 'Finished downloads are listed here.',
             padding: padding,
@@ -41,21 +42,12 @@ class HistoryList extends StatelessWidget {
           itemCount: history.length + 1,
           itemBuilder: (context, i) {
             if (i == 0) {
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${history.length} ${history.length == 1 ? 'download' : 'downloads'}',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => _confirmClear(context),
-                      child: const Text('Clear history'),
-                    ),
-                  ],
+              return SectionLabel(
+                '${history.length} ${history.length == 1 ? 'download' : 'downloads'}',
+                padding: const EdgeInsets.fromLTRB(4, 4, 0, 8),
+                trailing: TextButton(
+                  onPressed: () => _confirmClear(context),
+                  child: const Text('Clear history'),
                 ),
               );
             }
@@ -74,8 +66,8 @@ class HistoryList extends StatelessWidget {
         title: const Text('Clear history?'),
         content: const Text('The list is cleared. Downloaded files are kept.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Clear')),
+          OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Clear')),
         ],
       ),
     );
@@ -93,7 +85,8 @@ class _HistoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final exists = File(entry.filePath).existsSync();
     final subtitle = exists
         ? [
@@ -104,40 +97,86 @@ class _HistoryTile extends StatelessWidget {
           ].where((s) => s.isNotEmpty).join(' · ')
         : 'File no longer exists';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-        leading: Opacity(
-          opacity: exists ? 1 : 0.4,
-          child: FileIcon(path: entry.filePath, size: 40),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: colors.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: colors.border),
         ),
-        title: Text(
-          entry.title.isEmpty ? p.basename(entry.filePath) : entry.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Text(
-          subtitle,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: exists ? null : TextStyle(color: theme.colorScheme.error),
-        ),
-        onTap: exists ? () => _open(context) : null,
-        trailing: PopupMenuButton<_HistoryAction>(
-          tooltip: 'More',
-          onSelected: (action) => _run(context, action, exists),
-          itemBuilder: (context) => [
-            if (exists) ...const [
-              PopupMenuItem(value: _HistoryAction.open, child: Text('Open')),
-              PopupMenuItem(value: _HistoryAction.share, child: Text('Share')),
-            ],
-            const PopupMenuItem(value: _HistoryAction.copyLink, child: Text('Copy link')),
-            if (exists)
-              const PopupMenuItem(value: _HistoryAction.deleteFile, child: Text('Delete file')),
-            const PopupMenuItem(value: _HistoryAction.remove, child: Text('Remove from history')),
-          ],
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: exists ? () => _open(context) : null,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+            child: Row(
+              children: [
+                Opacity(
+                  opacity: exists ? 1 : 0.4,
+                  child: FileIcon(path: entry.filePath, size: 40),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.title.isEmpty ? p.basename(entry.filePath) : entry.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodySmall?.copyWith(
+                          color: exists ? null : colors.destructive,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                MenuIconButton<_HistoryAction>(
+                  onSelected: (action) => _run(context, action, exists),
+                  itemBuilder: (context) => [
+                    if (exists) ...[
+                      menuItem(
+                        value: _HistoryAction.open,
+                        icon: LucideIcons.externalLink,
+                        label: 'Open',
+                      ),
+                      menuItem(
+                        value: _HistoryAction.share,
+                        icon: LucideIcons.share2,
+                        label: 'Share',
+                      ),
+                    ],
+                    menuItem(
+                      value: _HistoryAction.copyLink,
+                      icon: LucideIcons.link,
+                      label: 'Copy link',
+                    ),
+                    const PopupMenuDivider(),
+                    menuItem(
+                      value: _HistoryAction.remove,
+                      icon: LucideIcons.listX,
+                      label: 'Remove from history',
+                    ),
+                    if (exists)
+                      menuItem(
+                        value: _HistoryAction.deleteFile,
+                        icon: LucideIcons.trash2,
+                        label: 'Delete file',
+                        destructive: true,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -167,8 +206,15 @@ class _HistoryTile extends StatelessWidget {
             title: const Text('Delete file?'),
             content: Text('${p.basename(entry.filePath)} will be deleted from this device.'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+              OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.colors.destructive,
+                  foregroundColor: context.colors.destructiveForeground,
+                ),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Delete'),
+              ),
             ],
           ),
         );

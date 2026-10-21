@@ -11,8 +11,9 @@ import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:explorer/features/incoming/incoming_file_screen.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
-import 'package:explorer/shared/widgets/explorer_screen_background.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
@@ -68,24 +69,33 @@ class App extends StatelessWidget {
       create: (_) => ThemeCubit(),
       child: BlocBuilder<ThemeCubit, AppThemeSettings>(
         builder: (context, settings) {
-          return MaterialApp(
-            navigatorKey: _navigatorKey,
-            title: 'Explorer',
-            theme: AppTheme.forSettings(settings, brightness: Brightness.light),
-            darkTheme: AppTheme.forSettings(
-              settings,
-              brightness: Brightness.dark,
-            ),
+          // shadcn/ui theme; ShadApp derives the Material theme from it,
+          // which AppTheme.material completes.
+          return ShadApp.custom(
             themeMode: settings.themeMode,
-            debugShowCheckedModeBanner: false,
-            supportedLocales: const [Locale('en')],
-            localizationsDelegates: const [],
-            builder: (context, child) => ExplorerScreenBackground(
-              child: child ?? const SizedBox.shrink(),
+            theme: AppTheme.shad(settings, Brightness.light),
+            darkTheme: AppTheme.shad(settings, Brightness.dark),
+            appBuilder: (context) => MaterialApp(
+              navigatorKey: _navigatorKey,
+              title: 'Explorer',
+              theme: AppTheme.material(
+                Theme.of(context),
+                ShadTheme.of(context),
+              ),
+              debugShowCheckedModeBanner: false,
+              supportedLocales: const [Locale('en')],
+              localizationsDelegates: const [
+                GlobalShadLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+              ],
+              builder: (context, child) =>
+                  ShadAppBuilder(child: child ?? const SizedBox.shrink()),
+              home: launchItem == null
+                  ? const FileExplorerScreen()
+                  : _screenFor(launchItem!, launchedForIt: true),
             ),
-            home: launchItem == null
-                ? const FileExplorerScreen()
-                : _screenFor(launchItem!, launchedForIt: true),
           );
         },
       ),

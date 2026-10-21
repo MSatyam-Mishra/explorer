@@ -45,6 +45,18 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       }
     });
 
+    on<SelectAll>((event, emit) {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        emit(
+          currentState.copyWith(
+            isSelectionMode: true,
+            selectedItems: Set<FileSystemEntity>.of(currentState.entities),
+          ),
+        );
+      }
+    });
+
     on<ClearSelection>((event, emit) {
       final currentState = state;
       if (currentState is FileExplorerLoaded) {
@@ -55,7 +67,11 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final currentState = state;
       if (currentState is FileExplorerLoaded) {
         await FolderPrefsService().setViewMode(currentState.path, event.mode);
-        emit(currentState.copyWith(viewMode: event.mode));
+        // Another folder may have opened meanwhile; don't bring this one back.
+        final latest = state;
+        if (latest is FileExplorerLoaded && latest.path == currentState.path) {
+          emit(latest.copyWith(viewMode: event.mode));
+        }
       }
     });
 
@@ -73,8 +89,12 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
           event.order,
           pathLabels: currentState.pathLabels,
         );
+        final latest = state;
+        if (latest is! FileExplorerLoaded || latest.path != currentState.path) {
+          return;
+        }
         emit(
-          currentState.copyWith(
+          latest.copyWith(
             sortOption: event.option,
             sortOrder: event.order,
             entities: sortedEntities,
@@ -84,10 +104,16 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
     });
   }
 
+  /// Incremented per [LoadDirectory]; a load that finishes after a newer
+  /// one started drops its result, so the last folder opened always wins.
+  int _loadGeneration = 0;
+
   Future<void> _onLoadDirectory(
     LoadDirectory event,
     Emitter<FileExplorerState> emit,
   ) async {
+    final generation = ++_loadGeneration;
+    bool stale() => generation != _loadGeneration;
     try {
       // Refreshing the folder already on screen (e.g. after a viewer saved a
       // copy) keeps the list and its scroll position instead of flashing a
@@ -95,10 +121,16 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final current = state;
       final refreshing =
           current is FileExplorerLoaded && current.path == event.path;
-      if (!refreshing) emit(FileExplorerLoading());
+      if (!refreshing) emit(FileExplorerLoading(path: event.path));
 
       if (!await repository.exists(event.path)) {
-        emit(FileExplorerError("Directory not found or access denied."));
+        if (stale()) return;
+        emit(
+          FileExplorerError(
+            "Directory not found or access denied.",
+            path: event.path,
+          ),
+        );
         return;
       }
 
@@ -124,6 +156,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
         pathLabels: pathLabels,
       );
 
+      if (stale()) return;
       emit(
         FileExplorerLoaded(
           entities: sortedEntities,
@@ -135,7 +168,13 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
         ),
       );
     } catch (e) {
-      emit(FileExplorerError("Failed to read directory: ${e.toString()}"));
+      if (stale()) return;
+      emit(
+        FileExplorerError(
+          "Failed to read directory: ${e.toString()}",
+          path: event.path,
+        ),
+      );
     }
   }
 

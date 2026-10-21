@@ -2,7 +2,7 @@ import 'package:explorer/core/theme/app_color_theme.dart';
 import 'package:explorer/shared/file_icons/file_icon_style.dart';
 import 'package:flutter/material.dart';
 
-/// User-facing theme configuration (brightness mode, color palette, icons).
+/// User-facing theme configuration (light/dark/system, colours, icons).
 class AppThemeSettings {
   const AppThemeSettings({
     required this.themeMode,
@@ -15,8 +15,6 @@ class AppThemeSettings {
   final FileIconStyle fileIconStyle;
 
   AppColorThemeSpec get colorTheme => AppColorThemes.byId(colorThemeId);
-
-  bool get isDark => themeMode == ThemeMode.dark;
 
   AppThemeSettings copyWith({
     ThemeMode? themeMode,
@@ -31,7 +29,7 @@ class AppThemeSettings {
   }
 
   static AppThemeSettings defaults() => const AppThemeSettings(
-        themeMode: ThemeMode.dark,
-        colorThemeId: AppColorThemes.oceanId,
+        themeMode: ThemeMode.system,
+        colorThemeId: AppColorThemes.defaultId,
       );
 }

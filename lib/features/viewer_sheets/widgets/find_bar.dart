@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -118,61 +119,93 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final theme = Theme.of(context);
     final status = _find.text.isEmpty
         ? ''
         : (_matches.isEmpty ? 'No results' : '${_index + 1} of ${_matches.length}');
-    Widget field(TextEditingController ctrl, String hint, {FocusNode? focus, ValueChanged<String>? onChanged}) {
-      return TextField(
-        controller: ctrl,
-        focusNode: focus,
-        onChanged: onChanged,
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: hint,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+    final options = _matchCase || _wholeCell || _allSheets;
+    Widget field(TextEditingController ctrl, String hint,
+        {FocusNode? focus, ValueChanged<String>? onChanged, IconData? icon}) {
+      return SizedBox(
+        height: 36,
+        child: TextField(
+          controller: ctrl,
+          focusNode: focus,
+          onChanged: onChanged,
+          style: theme.textTheme.bodyMedium,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: hint,
+            prefixIcon: icon == null ? null : Icon(icon, size: 16),
+            prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
         ),
       );
     }
 
     return Focus(
       onKeyEvent: _onKey,
-      child: Material(
-        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.95),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.background,
+          border: Border(top: BorderSide(color: colors.border)),
+        ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
+          padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 children: [
-                  IconButton(
+                  ViewerAction(
                     tooltip: _replaceMode ? 'Hide replace' : 'Show replace',
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(_replaceMode ? Icons.expand_less_rounded : Icons.expand_more_rounded),
+                    icon: _replaceMode ? LucideIcons.chevronDown : LucideIcons.chevronRight,
+                    size: 36,
+                    iconSize: 16,
+                    color: colors.mutedForeground,
                     onPressed: () => setState(() => _replaceMode = !_replaceMode),
                   ),
-                  Expanded(child: field(_find, 'Find', focus: _findFocus, onChanged: _onQueryChanged)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text(status, style: theme.textTheme.bodySmall),
+                  Expanded(
+                    child: field(
+                      _find,
+                      'Find',
+                      focus: _findFocus,
+                      onChanged: _onQueryChanged,
+                      icon: LucideIcons.search,
+                    ),
                   ),
-                  IconButton(
+                  if (status.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text(
+                        status,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ViewerAction(
                     tooltip: 'Previous',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.keyboard_arrow_up_rounded),
+                    icon: LucideIcons.chevronUp,
+                    size: 36,
+                    iconSize: 18,
                     onPressed: _matches.isEmpty ? null : () => _step(-1),
                   ),
-                  IconButton(
+                  ViewerAction(
                     tooltip: 'Next',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                    icon: LucideIcons.chevronDown,
+                    size: 36,
+                    iconSize: 18,
                     onPressed: _matches.isEmpty ? null : () => _step(1),
                   ),
-                  PopupMenuButton<String>(
+                  ViewerMenuButton<String>(
                     tooltip: 'Options',
-                    icon: const Icon(Icons.tune_rounded),
+                    icon: LucideIcons.slidersHorizontal,
+                    badge: options,
+                    size: 36,
+                    minMenuWidth: 190,
                     onSelected: (v) {
                       setState(() {
                         if (v == 'case') _matchCase = !_matchCase;
@@ -182,31 +215,58 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
                       _search();
                     },
                     itemBuilder: (_) => [
-                      CheckedPopupMenuItem(value: 'case', checked: _matchCase, child: const Text('Match case')),
-                      CheckedPopupMenuItem(value: 'whole', checked: _wholeCell, child: const Text('Entire cell')),
-                      CheckedPopupMenuItem(value: 'all', checked: _allSheets, child: const Text('All sheets')),
+                      viewerMenuItem(
+                        value: 'case',
+                        icon: LucideIcons.caseSensitive,
+                        label: 'Match case',
+                        checked: _matchCase,
+                      ),
+                      viewerMenuItem(
+                        value: 'whole',
+                        icon: LucideIcons.squareDashed,
+                        label: 'Entire cell',
+                        checked: _wholeCell,
+                      ),
+                      viewerMenuItem(
+                        value: 'all',
+                        icon: LucideIcons.layers,
+                        label: 'All sheets',
+                        checked: _allSheets,
+                      ),
                     ],
                   ),
-                  IconButton(
+                  ViewerAction(
                     tooltip: 'Close',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.close_rounded),
+                    icon: LucideIcons.x,
+                    size: 36,
+                    iconSize: 18,
                     onPressed: widget.onClose,
                   ),
                 ],
               ),
               if (_replaceMode)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6, left: 40, right: 4),
+                  padding: const EdgeInsets.only(top: 6, left: 36, right: 4),
                   child: Row(
                     children: [
-                      Expanded(child: field(_replace, 'Replace with')),
+                      Expanded(
+                        child: field(_replace, 'Replace with', icon: LucideIcons.replace),
+                      ),
                       const SizedBox(width: 6),
-                      TextButton(
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
                         onPressed: _matches.isEmpty ? null : _replaceCurrent,
                         child: const Text('Replace'),
                       ),
-                      TextButton(
+                      const SizedBox(width: 6),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
                         onPressed: _find.text.isEmpty ? null : _replaceAll,
                         child: const Text('All'),
                       ),

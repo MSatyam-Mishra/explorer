@@ -8,7 +8,7 @@ import 'package:explorer/features/viewer_3d/services/three_d_viewer_controller.d
 import 'package:explorer/features/viewer_3d/widgets/model_info_panel.dart';
 import 'package:explorer/features/viewer_3d/widgets/viewer_status_views.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/foundation.dart';
@@ -520,7 +520,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
       setState(() => _showDockedPanel = true);
       return;
     }
-    ExplorerLiquidGlassBottomSheet.show<void>(
+    AppSheet.show<void>(
       context,
       maxHeightFraction: 0.72,
       child: ModelInfoPanel(
@@ -577,13 +577,13 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     final showPanel = split && _showDockedPanel;
     final fold = FoldInfo.of(context);
     final hinge = fold != null && fold.isVertical ? fold.bounds : null;
+    // Opaque card: blurs can't sample the WebView on Android.
     final panel = !showPanel
         ? null
-        : ClearGlassPanel(
-            borderRadius: 24,
+        : AppPanel(
             margin: EdgeInsets.fromLTRB(
               0,
-              DockedGlossyTopBar.contentTopInset(context),
+              DockedGlossyTopBar.contentTopInset(context) + 12,
               12,
               12 + MediaQuery.paddingOf(context).bottom,
             ),
@@ -607,7 +607,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
             child: panel,
           ),
         ] else if (panel != null)
-          SizedBox(width: 320, child: panel),
+          SizedBox(width: 340, child: panel),
       ],
     );
   }
@@ -657,10 +657,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
   }
 
   Widget _buildActions(BuildContext context, bool split) {
-    final fg = ClearGlassForeground.icon(context);
-    final active = Theme.of(context).colorScheme.primary;
     final ready = _viewer.isReady;
-    final iconColor = ready ? fg : fg.withValues(alpha: 0.4);
 
     Widget toggle({
       required IconData icon,
@@ -668,77 +665,84 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
       required bool value,
       required ValueChanged<bool> onChanged,
     }) {
-      return ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(icon, color: ready && value ? active : iconColor),
+      return ToolButton(
+        icon: icon,
         tooltip: tooltip,
+        size: 40,
+        iconSize: 20,
+        selected: ready && value,
         onPressed: ready ? () => onChanged(!value) : null,
       );
     }
 
-    final reset = ExplorerTopBar.iconButton(
-      context: context,
-      icon: Icon(Icons.center_focus_strong_outlined, color: iconColor),
+    final reset = AppIconButton(
+      icon: const Icon(LucideIcons.scan),
       tooltip: 'Reset view',
       onPressed: ready ? _viewer.resetView : null,
     );
     final autoRotate = toggle(
-      icon: Icons.threesixty,
+      icon: LucideIcons.rotate3d,
       tooltip: 'Auto-rotate',
       value: _viewer.autoRotate,
       onChanged: _viewer.setAutoRotate,
     );
-    final info = ExplorerTopBar.iconButton(
-      context: context,
-      icon: Icon(
-        Icons.info_outline,
-        color: split && _showDockedPanel ? active : fg,
-      ),
+    final info = ToolButton(
+      icon: LucideIcons.panelRight,
       tooltip: 'Details & controls',
+      size: 40,
+      iconSize: 20,
+      selected: split && _showDockedPanel,
       onPressed: _toggleInfo,
     );
 
     if (!split) {
-      return ExplorerTopBar.actions(context, [
-        reset,
-        autoRotate,
-        info,
-        _MoreMenu(
-          controller: _viewer,
-          color: iconColor,
-          enabled: ready,
-          onScreenshot: _takeScreenshot,
-          onOpenWith: _openWithAnotherApp,
-        ),
-      ]);
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          reset,
+          autoRotate,
+          info,
+          _MoreMenu(
+            controller: _viewer,
+            enabled: ready,
+            onScreenshot: _takeScreenshot,
+            onOpenWith: _openWithAnotherApp,
+          ),
+          const SizedBox(width: 4),
+        ],
+      );
     }
 
-    return ExplorerTopBar.actions(context, [
-      reset,
-      autoRotate,
-      if (_viewer.hasMeshes)
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        reset,
+        autoRotate,
+        if (_viewer.hasMeshes)
+          toggle(
+            icon: LucideIcons.box,
+            tooltip: 'Wireframe',
+            value: _viewer.wireframe,
+            onChanged: _viewer.setWireframe,
+          ),
         toggle(
-          icon: Icons.change_history,
-          tooltip: 'Wireframe',
-          value: _viewer.wireframe,
-          onChanged: _viewer.setWireframe,
+          icon: LucideIcons.grid3x3,
+          tooltip: 'Ground grid',
+          value: _viewer.grid,
+          onChanged: _viewer.setGrid,
         ),
-      toggle(
-        icon: Icons.grid_4x4,
-        tooltip: 'Ground grid',
-        value: _viewer.grid,
-        onChanged: _viewer.setGrid,
-      ),
-      if (ready && _viewer.clips.isNotEmpty)
-        _AnimationMenu(controller: _viewer, color: fg),
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(Icons.photo_camera_outlined, color: iconColor),
-        tooltip: 'Screenshot',
-        onPressed: ready ? _takeScreenshot : null,
-      ),
-      info,
-    ]);
+        if (ready && _viewer.clips.isNotEmpty)
+          _AnimationMenu(controller: _viewer),
+        AppIconButton(
+          icon: const Icon(LucideIcons.camera),
+          tooltip: 'Screenshot',
+          onPressed: ready ? _takeScreenshot : null,
+        ),
+        const ToolDivider(),
+        info,
+        const SizedBox(width: 4),
+      ],
+    );
   }
 }
 
@@ -746,23 +750,19 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
 class _MoreMenu extends StatelessWidget {
   const _MoreMenu({
     required this.controller,
-    required this.color,
     required this.enabled,
     required this.onScreenshot,
     required this.onOpenWith,
   });
 
   final ThreeDViewerController controller;
-  final Color color;
   final bool enabled;
   final VoidCallback onScreenshot;
   final VoidCallback onOpenWith;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: 'More',
-      icon: Icon(Icons.more_vert, color: color),
+    return MenuIconButton<String>(
       onSelected: (value) {
         switch (value) {
           case 'wireframe':
@@ -781,49 +781,43 @@ class _MoreMenu extends StatelessWidget {
       },
       itemBuilder: (context) => [
         if (enabled && controller.hasMeshes)
-          CheckedPopupMenuItem(
+          menuItem(
             value: 'wireframe',
+            icon: LucideIcons.box,
+            label: 'Wireframe',
             checked: controller.wireframe,
-            child: const Text('Wireframe'),
           ),
         if (enabled)
-          CheckedPopupMenuItem(
+          menuItem(
             value: 'grid',
+            icon: LucideIcons.grid3x3,
+            label: 'Ground grid',
             checked: controller.grid,
-            child: const Text('Ground grid'),
           ),
         if (enabled)
-          CheckedPopupMenuItem(
+          menuItem(
             value: 'axes',
+            icon: LucideIcons.move3d,
+            label: 'Axes',
             checked: controller.axes,
-            child: const Text('Axes'),
           ),
         if (enabled && controller.clips.isNotEmpty)
-          const PopupMenuItem(
+          menuItem(
             value: 'animations',
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.animation),
-              title: Text('Animations…'),
-            ),
+            icon: LucideIcons.film,
+            label: 'Animations…',
           ),
         if (enabled) const PopupMenuDivider(),
         if (enabled)
-          const PopupMenuItem(
+          menuItem(
             value: 'screenshot',
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.photo_camera_outlined),
-              title: Text('Save screenshot'),
-            ),
+            icon: LucideIcons.camera,
+            label: 'Save screenshot',
           ),
-        const PopupMenuItem(
+        menuItem(
           value: 'open',
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.open_in_new),
-            title: Text('Open with another app'),
-          ),
+          icon: LucideIcons.externalLink,
+          label: 'Open with another app',
         ),
       ],
     );
@@ -831,29 +825,33 @@ class _MoreMenu extends StatelessWidget {
 }
 
 void _showAnimationSheet(BuildContext context, ThreeDViewerController controller) {
-  ExplorerLiquidGlassBottomSheet.show<void>(
+  AppSheet.show<void>(
     context,
     maxHeightFraction: 0.5,
     child: ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        final fg = ClearGlassForeground.icon(context);
-        final primary = Theme.of(context).colorScheme.primary;
+        final colors = context.colors;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Animations', style: ClearGlassForeground.title(context)),
-            const SizedBox(height: 8),
+            Text('Animations', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
             for (final entry in _clipEntries(controller))
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  controller.animationIndex == entry.$1 && controller.animationPlaying
-                      ? Icons.pause_circle_filled
-                      : Icons.play_circle_outline,
-                  color: controller.animationIndex == entry.$1 ? primary : fg,
+              ListRow(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                selected: controller.animationIndex == entry.$1,
+                leading: IconBox(
+                  controller.animationIndex == entry.$1 &&
+                          controller.animationPlaying
+                      ? LucideIcons.pause
+                      : LucideIcons.play,
+                  size: 32,
+                  color: controller.animationIndex == entry.$1
+                      ? colors.primary
+                      : colors.foreground,
                 ),
-                title: Text(entry.$2, style: TextStyle(color: fg)),
+                title: entry.$2,
                 onTap: () => controller.animationIndex == entry.$1
                     ? controller.toggleAnimation()
                     : controller.playAnimation(entry.$1),
@@ -863,7 +861,7 @@ void _showAnimationSheet(BuildContext context, ThreeDViewerController controller
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: controller.stopAnimation,
-                  icon: const Icon(Icons.stop),
+                  icon: const Icon(LucideIcons.square, size: 14),
                   label: const Text('Stop'),
                 ),
               ),
@@ -883,16 +881,15 @@ List<(int, String)> _clipEntries(ThreeDViewerController controller) => [
 
 /// Top-bar animation picker (wide screens).
 class _AnimationMenu extends StatelessWidget {
-  const _AnimationMenu({required this.controller, required this.color});
+  const _AnimationMenu({required this.controller});
 
   final ThreeDViewerController controller;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<int>(
+    return MenuIconButton<int>(
       tooltip: 'Animations',
-      icon: Icon(Icons.animation, color: color),
+      icon: LucideIcons.film,
       onSelected: (value) {
         if (value == -3) {
           controller.stopAnimation();
@@ -902,14 +899,14 @@ class _AnimationMenu extends StatelessWidget {
       },
       itemBuilder: (context) => [
         for (final entry in _clipEntries(controller))
-          CheckedPopupMenuItem(
+          menuItem(
             value: entry.$1,
+            label: entry.$2,
             checked: controller.animationIndex == entry.$1,
-            child: Text(entry.$2, maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         if (controller.animationIndex != -2) ...[
           const PopupMenuDivider(),
-          const PopupMenuItem(value: -3, child: Text('Stop')),
+          menuItem(value: -3, icon: LucideIcons.square, label: 'Stop'),
         ],
       ],
     );
@@ -924,7 +921,7 @@ class _AnimationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final clips = controller.clips;
     final index = controller.animationIndex;
     final name = index == -1
@@ -932,61 +929,74 @@ class _AnimationBar extends StatelessWidget {
         : index >= 0 && index < clips.length
             ? clips[index].name
             : 'Animations';
-    return Material(
-      color: scheme.surfaceContainerHigh.withValues(alpha: 0.92),
-      elevation: 4,
-      shadowColor: Colors.black38,
-      shape: const StadiumBorder(),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: controller.animationPlaying ? 'Pause' : 'Play',
-              icon: Icon(
-                controller.animationPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                color: scheme.primary,
-              ),
-              onPressed: controller.toggleAnimation,
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220),
-              child: PopupMenuButton<int>(
-                tooltip: 'Choose animation',
-                onSelected: controller.playAnimation,
-                itemBuilder: (context) => [
-                  for (final entry in _clipEntries(controller))
-                    CheckedPopupMenuItem(
-                      value: entry.$1,
-                      checked: controller.animationIndex == entry.$1,
-                      child: Text(entry.$2, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 10, 12, 10),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: scheme.onSurface,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      Icon(Icons.arrow_drop_down, color: scheme.onSurfaceVariant),
-                    ],
+    return AppPanel(
+      borderRadius: 999,
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: colors.primary,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: controller.toggleAnimation,
+              child: Tooltip(
+                message: controller.animationPlaying ? 'Pause' : 'Play',
+                child: SizedBox.square(
+                  dimension: 36,
+                  child: Icon(
+                    controller.animationPlaying
+                        ? LucideIcons.pause
+                        : LucideIcons.play,
+                    size: 16,
+                    color: colors.primaryForeground,
                   ),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: PopupMenuButton<int>(
+              tooltip: 'Choose animation',
+              onSelected: controller.playAnimation,
+              position: PopupMenuPosition.over,
+              itemBuilder: (context) => [
+                for (final entry in _clipEntries(controller))
+                  menuItem(
+                    value: entry.$1,
+                    label: entry.$2,
+                    checked: controller.animationIndex == entry.$1,
+                  ),
+              ],
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      LucideIcons.chevronsUpDown,
+                      size: 14,
+                      color: colors.mutedForeground,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

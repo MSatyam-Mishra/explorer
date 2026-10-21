@@ -1,10 +1,11 @@
 import 'package:explorer/core/formats/archive_backend.dart';
 import 'package:explorer/core/formats/archive_index.dart';
 import 'package:explorer/features/viewer_archive/archive_ui_utils.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/file_icons/file_icons.dart';
 import 'package:flutter/material.dart';
 
-const double kArchiveRowHeight = 68;
+const double kArchiveRowHeight = 64;
 
 /// One row of the archive listing: a folder or a file.
 class ArchiveEntryTile extends StatelessWidget {
@@ -38,8 +39,8 @@ class ArchiveEntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.65);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final f = folder;
     final e = entry;
     final name = f?.name ?? e!.name;
@@ -75,42 +76,42 @@ class ArchiveEntryTile extends StatelessWidget {
       if (e != null && e.isEncrypted || (f?.anyEncrypted ?? false))
         Tooltip(
           message: 'Encrypted',
-          child: Icon(Icons.lock_outline, size: 16, color: theme.colorScheme.primary),
+          child: Icon(LucideIcons.lock, size: 14, color: colors.mutedForeground),
         ),
       if (e?.unsupportedReason != null)
         Tooltip(
           message: e!.unsupportedReason!,
-          child: Icon(Icons.block, size: 16, color: theme.colorScheme.error),
+          child: Icon(LucideIcons.ban, size: 14, color: colors.destructive),
         ),
       if (e != null && e.unsafePath)
         Tooltip(
           message: 'Stored with an unsafe path; it will be extracted inside '
               'the destination folder.',
           child: Icon(
-            Icons.warning_amber_rounded,
-            size: 16,
-            color: theme.colorScheme.tertiary,
+            LucideIcons.triangleAlert,
+            size: 14,
+            color: context.toneColor(Tone.warning),
           ),
         ),
     ];
 
-    return Material(
-      color: selected
-          ? theme.colorScheme.primary.withValues(alpha: 0.12)
-          : Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: SizedBox(
-          height: kArchiveRowHeight,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        color: selected ? colors.accent : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
               children: [
                 f != null
                     ? const FolderIcon(size: 40)
                     : FileIcon(path: name, size: 40),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -123,8 +124,7 @@ class ArchiveEntryTile extends StatelessWidget {
                               name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 16,
+                              style: text.bodyMedium?.copyWith(
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -135,18 +135,24 @@ class ArchiveEntryTile extends StatelessWidget {
                           ],
                         ],
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 2),
                       Text(
                         subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13, color: muted),
+                        style: text.bodySmall,
                       ),
                     ],
                   ),
                 ),
                 if (selecting)
-                  Checkbox(value: selected, onChanged: (_) => onTap()),
+                  Checkbox(value: selected, onChanged: (_) => onTap())
+                else if (f != null)
+                  Icon(
+                    LucideIcons.chevronRight,
+                    size: 16,
+                    color: colors.mutedForeground,
+                  ),
               ],
             ),
           ),
@@ -185,9 +191,9 @@ class _ArchiveSkeletonState extends State<ArchiveSkeleton>
 
   @override
   Widget build(BuildContext context) {
-    final base = Theme.of(context).colorScheme.onSurface;
+    final base = context.colors.muted;
     return FadeTransition(
-      opacity: Tween(begin: 0.45, end: 0.9).animate(_pulse),
+      opacity: Tween(begin: 0.5, end: 1.0).animate(_pulse),
       child: Column(
         children: [
           for (var i = 0; i < widget.rows; i++)
@@ -197,8 +203,8 @@ class _ArchiveSkeletonState extends State<ArchiveSkeleton>
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    _bar(base, 40, 40, 10),
-                    const SizedBox(width: 16),
+                    _bar(base, 40, 40, 8),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -206,7 +212,7 @@ class _ArchiveSkeletonState extends State<ArchiveSkeleton>
                         children: [
                           FractionallySizedBox(
                             widthFactor: 0.4 + (i * 37 % 40) / 100,
-                            child: _bar(base, null, 14, 6),
+                            child: _bar(base, null, 12, 6),
                           ),
                           const SizedBox(height: 8),
                           FractionallySizedBox(
@@ -229,7 +235,7 @@ class _ArchiveSkeletonState extends State<ArchiveSkeleton>
     width: w,
     height: h,
     decoration: BoxDecoration(
-      color: base.withValues(alpha: 0.08),
+      color: base,
       borderRadius: BorderRadius.circular(r),
     ),
   );

@@ -10,7 +10,8 @@ import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/viewer_archive/archive_ui_utils.dart';
 import 'package:explorer/features/viewer_archive/widgets/archive_dialogs.dart';
 import 'package:explorer/features/viewer_archive/widgets/archive_entry_tile.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
+import 'package:explorer/shared/file_icons/file_icons.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -290,6 +291,10 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
               child: const Text('Keep going'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: context.colors.destructive,
+                foregroundColor: context.colors.destructiveForeground,
+              ),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Stop'),
             ),
@@ -551,8 +556,17 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
       final go = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          icon: const Icon(Icons.warning_amber_rounded),
-          title: const Text('Unusually large'),
+          title: Row(
+            children: [
+              Icon(
+                LucideIcons.triangleAlert,
+                size: 18,
+                color: context.toneColor(Tone.warning),
+              ),
+              const SizedBox(width: 10),
+              const Text('Unusually large'),
+            ],
+          ),
           content: Text(
             'This ${formatBytes(summary.archiveSize)} archive expands to '
             '${formatBytes(total)} (${total ~/ summary.archiveSize}× its size). '
@@ -626,52 +640,56 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
   void _showInfo() {
     final s = _summary;
     if (s == null) return;
-    final theme = Theme.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        Widget row(String k, String v) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 120,
-                    child: Text(k, style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.outline,
-                    )),
-                  ),
-                  Expanded(child: SelectableText(v)),
-                ],
+    final ratio = ratioLabel(s.index.totalSize, s.archiveSize);
+    AppSheet.show<void>(
+      context,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              FileIcon(path: _archiveName, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _archiveName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      s.formatLabel,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
-            );
-        final ratio = ratioLabel(s.index.totalSize, s.archiveSize);
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_archiveName, style: theme.textTheme.titleLarge),
-                const SizedBox(height: 12),
-                row('Format', s.formatLabel),
-                row('Files', '${s.index.fileCount}'),
-                row('Folders', '${s.index.folders.length - 1}'),
-                row('Unpacked', formatBytes(s.index.totalSize)),
-                row('On disk', '${formatBytes(s.archiveSize)}'
-                    '${ratio == null ? '' : ' ($ratio)'}'),
-                if (s.index.anyEncrypted) row('Encryption', 'Password protected'),
-                if (s.isSequential)
-                  row('Note', 'Solid/streamed archive: opening a file unpacks '
-                      'everything stored before it.'),
-                if (s.volumes.length > 1)
-                  row('Parts', s.volumes.map(p.basename).join('\n')),
-              ],
-            ),
+            ],
           ),
-        );
-      },
+          const SizedBox(height: 12),
+          DetailList(
+            labelWidth: 110,
+            entries: {
+              'Format': s.formatLabel,
+              'Files': '${s.index.fileCount}',
+              'Folders': '${s.index.folders.length - 1}',
+              'Unpacked': formatBytes(s.index.totalSize),
+              'On disk': '${formatBytes(s.archiveSize)}'
+                  '${ratio == null ? '' : ' ($ratio)'}',
+              if (s.index.anyEncrypted) 'Encryption': 'Password protected',
+              if (s.isSequential)
+                'Note': 'Solid/streamed archive: opening a file unpacks '
+                    'everything stored before it.',
+              if (s.volumes.length > 1)
+                'Parts': s.volumes.map(p.basename).join('\n'),
+            }.entries,
+          ),
+        ],
+      ),
     );
   }
 
@@ -681,7 +699,6 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
     final ready = _summary != null;
     return PopScope<Object?>(
       canPop: false,
@@ -696,76 +713,72 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
             : _searching
             ? _searchBar
             : null,
-        trailing: ExplorerTopBar.actions(context, [
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.search, color: iconColor),
-            tooltip: 'Search in archive',
-            onPressed: ready ? () => setState(() => _searching = true) : null,
-          ),
-          PopupMenuButton<Object>(
-            tooltip: 'Sort',
-            enabled: ready,
-            icon: Icon(Icons.sort, color: iconColor),
-            onSelected: (v) => setState(() {
-              if (v is _SortKey) {
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIconButton(
+              icon: const Icon(LucideIcons.search),
+              tooltip: 'Search in archive',
+              onPressed: ready ? () => setState(() => _searching = true) : null,
+            ),
+            MenuIconButton<_SortKey>(
+              tooltip: 'Sort',
+              enabled: ready,
+              icon: LucideIcons.arrowUpDown,
+              onSelected: (v) => setState(() {
                 if (_sortKey == v) {
                   _ascending = !_ascending;
                 } else {
                   _sortKey = v;
                   _ascending = v == _SortKey.name || v == _SortKey.type;
                 }
-              }
-            }),
-            itemBuilder: (context) => [
-              for (final (key, label) in [
-                (_SortKey.name, 'Name'),
-                (_SortKey.size, 'Size'),
-                (_SortKey.date, 'Date'),
-                (_SortKey.type, 'Type'),
-              ])
-                CheckedPopupMenuItem<Object>(
-                  value: key,
-                  checked: _sortKey == key,
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(label)),
-                      if (_sortKey == key)
-                        Icon(
-                          _ascending ? Icons.arrow_upward : Icons.arrow_downward,
-                          size: 16,
-                        ),
-                    ],
+              }),
+              itemBuilder: (context) => [
+                for (final (key, label) in [
+                  (_SortKey.name, 'Name'),
+                  (_SortKey.size, 'Size'),
+                  (_SortKey.date, 'Date'),
+                  (_SortKey.type, 'Type'),
+                ])
+                  menuItem(
+                    value: key,
+                    label: label,
+                    icon: _sortKey == key
+                        ? (_ascending
+                            ? LucideIcons.arrowUpNarrowWide
+                            : LucideIcons.arrowDownWideNarrow)
+                        : null,
+                    checked: _sortKey == key,
                   ),
+              ],
+            ),
+            AppIconButton(
+              icon: const Icon(LucideIcons.packageOpen),
+              tooltip: 'Extract all',
+              onPressed: ready && _job == null ? () => _extract() : null,
+            ),
+            MenuIconButton<String>(
+              onSelected: (v) {
+                if (v == 'info') _showInfo();
+                if (v == 'external') _openArchiveElsewhere();
+              },
+              itemBuilder: (context) => [
+                menuItem(
+                  value: 'info',
+                  icon: LucideIcons.info,
+                  label: 'Archive info',
+                  enabled: ready,
                 ),
-            ],
-          ),
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(Icons.unarchive_outlined, color: iconColor),
-            tooltip: 'Extract all',
-            onPressed: ready && _job == null ? () => _extract() : null,
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            icon: Icon(Icons.more_vert, color: iconColor),
-            onSelected: (v) {
-              if (v == 'info') _showInfo();
-              if (v == 'external') _openArchiveElsewhere();
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'info',
-                enabled: ready,
-                child: const Text('Archive info'),
-              ),
-              const PopupMenuItem(
-                value: 'external',
-                child: Text('Open with another app'),
-              ),
-            ],
-          ),
-        ]),
+                menuItem(
+                  value: 'external',
+                  icon: LucideIcons.externalLink,
+                  label: 'Open with another app',
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
         body: Stack(
           children: [
             Positioned.fill(child: _buildBody(context)),
@@ -774,10 +787,12 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
                 left: 16,
                 right: 16,
                 bottom: 16 + MediaQuery.paddingOf(context).bottom,
-                child: ExtractProgressCard(
-                  title: _jobTitle,
-                  progress: _progress,
-                  onCancel: () => _job?.cancel(),
+                child: Center(
+                  child: ExtractProgressCard(
+                    title: _jobTitle,
+                    progress: _progress,
+                    onCancel: () => _job?.cancel(),
+                  ),
                 ),
               ),
           ],
@@ -787,73 +802,88 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
   }
 
   Widget _selectionBar(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
     return DockedGlossyTopBar(
       title: '${_selected.length} selected',
-      leading: IconButton(
-        icon: Icon(Icons.close, color: iconColor),
+      leading: AppIconButton(
+        icon: const Icon(LucideIcons.x),
         tooltip: 'Clear selection',
         onPressed: () => setState(_selected.clear),
       ),
-      trailing: ExplorerTopBar.actions(context, [
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: Icon(Icons.select_all, color: iconColor),
-          tooltip: 'Select all',
-          onPressed: _selectAll,
-        ),
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: Icon(Icons.unarchive_outlined, color: iconColor),
-          tooltip: 'Extract selected',
-          onPressed: _job == null
-              ? () => _extract(paths: _selected.toList())
-              : null,
-        ),
-      ]),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppIconButton(
+            icon: const Icon(LucideIcons.listChecks),
+            tooltip: 'Select all',
+            onPressed: _selectAll,
+          ),
+          AppIconButton(
+            icon: const Icon(LucideIcons.packageOpen),
+            tooltip: 'Extract selected',
+            onPressed: _job == null
+                ? () => _extract(paths: _selected.toList())
+                : null,
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
     );
   }
 
   Widget _searchBar(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
-    return SizedBox(
-      height: 54,
+    final colors = context.colors;
+    void close() => setState(() {
+          _searching = false;
+          _query = '';
+          _searchController.clear();
+        });
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(Icons.arrow_back, color: iconColor),
+          AppIconButton(
+            icon: const Icon(LucideIcons.arrowLeft),
             tooltip: 'Close search',
-            onPressed: () => setState(() {
-              _searching = false;
-              _query = '';
-              _searchController.clear();
-            }),
+            onPressed: close,
           ),
+          const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: _searchController,
               autofocus: true,
-              onChanged: _setQuery,
+              onChanged: (v) {
+                _setQuery(v);
+                // Shows or hides the clear button.
+                setState(() {});
+              },
               textInputAction: TextInputAction.search,
-              style: ClearGlassForeground.title(context).copyWith(
-                fontWeight: FontWeight.w400,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium,
               decoration: InputDecoration(
                 hintText: 'Search in $_archiveName',
-                border: InputBorder.none,
-                isDense: true,
+                prefixIcon: Icon(
+                  LucideIcons.search,
+                  size: 16,
+                  color: colors.mutedForeground,
+                ),
+                prefixIconConstraints:
+                    const BoxConstraints(minWidth: 36, minHeight: 36),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(LucideIcons.x, size: 16),
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _searchController.clear();
+                          _setQuery('');
+                          setState(() {});
+                        },
+                      ),
               ),
             ),
           ),
-          if (_searchController.text.isNotEmpty)
-            IconButton(
-              icon: Icon(Icons.clear, color: iconColor),
-              tooltip: 'Clear',
-              onPressed: () {
-                _searchController.clear();
-                _setQuery('');
-              },
-            ),
+          const SizedBox(width: 8),
         ],
       ),
     );
@@ -867,10 +897,10 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     if (summary == null) {
       return ListView(
         physics: const NeverScrollableScrollPhysics(),
-        padding: EdgeInsets.only(top: topInset + 4),
+        padding: EdgeInsets.only(top: topInset + 8),
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -880,11 +910,8 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
                       : 'Reading archive…',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(value: _listProgress, minHeight: 3),
-                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: _listProgress),
               ],
             ),
           ),
@@ -894,7 +921,8 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     }
     final rows = _currentRows(summary.index);
     final bottomPad = 24 + MediaQuery.paddingOf(context).bottom +
-        (_job != null ? 110 : 0);
+        (_job != null ? 120 : 0);
+    final searching = _searching && _query.isNotEmpty;
     return Scrollbar(
       controller: _scroll,
       interactive: true,
@@ -905,16 +933,13 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
           SliverToBoxAdapter(child: _header(context, summary)),
           if (rows.isEmpty)
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(48),
-                child: Center(
-                  child: Text(
-                    _searching && _query.isNotEmpty
-                        ? 'No matches'
-                        : 'This folder is empty',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ),
+              child: ViewerMessage(
+                icon: searching ? LucideIcons.searchX : LucideIcons.folderOpen,
+                title: searching ? 'No matches' : 'This folder is empty',
+                message: searching
+                    ? 'Nothing in this archive is named like "$_query".'
+                    : null,
+                padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
               ),
             ),
           SliverFixedExtentList(
@@ -958,8 +983,8 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
   }
 
   Widget _header(BuildContext context, ArcSummary s) {
-    final theme = Theme.of(context);
-    final muted = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final crumbs = <(String, String)>[('', _archiveName)];
     if (_folder.isNotEmpty) {
       var acc = '';
@@ -971,7 +996,7 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     final ratio = ratioLabel(s.index.totalSize, s.archiveSize);
     final searching = _searching && _query.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -985,32 +1010,18 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
                   children: [
                     for (var i = 0; i < crumbs.length; i++) ...[
                       if (i > 0)
-                        Icon(Icons.chevron_right, size: 18, color: muted),
-                      TextButton(
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        Icon(
+                          LucideIcons.chevronRight,
+                          size: 14,
+                          color: colors.mutedForeground,
                         ),
-                        onPressed: i == crumbs.length - 1
+                      _Crumb(
+                        label: crumbs[i].$2,
+                        root: i == 0,
+                        current: i == crumbs.length - 1,
+                        onTap: i == crumbs.length - 1
                             ? null
                             : () => _enterFolder(crumbs[i].$1),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (i == 0) ...[
-                              const Icon(Icons.inventory_2_outlined, size: 16),
-                              const SizedBox(width: 6),
-                            ],
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 220),
-                              child: Text(
-                                crumbs[i].$2,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
                     ],
                   ],
@@ -1018,24 +1029,35 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
             child: Wrap(
               spacing: 8,
-              runSpacing: 4,
+              runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(
-                  searching
-                      ? '${_rows.length}${_rows.length >= 5000 ? '+' : ''} '
-                          'matches for "$_query"'
-                      : '${s.formatLabel} · ${s.index.fileCount} files · '
-                          '${formatBytes(s.index.totalSize)}'
-                          '${ratio == null ? '' : ' → ${formatBytes(s.archiveSize)} ($ratio)'}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                ),
-                if (s.index.anyEncrypted && !searching)
-                  _badge(context, Icons.lock_outline,
-                      _password == null ? 'Encrypted' : 'Unlocked'),
+                if (searching)
+                  Text(
+                    '${_rows.length}${_rows.length >= 5000 ? '+' : ''} '
+                    'matches for "$_query"',
+                    style: text.bodySmall,
+                  )
+                else ...[
+                  StatusBadge(s.formatLabel, outline: true),
+                  Text(
+                    '${s.index.fileCount} files · '
+                    '${formatBytes(s.index.totalSize)}'
+                    '${ratio == null ? '' : ' → ${formatBytes(s.archiveSize)} ($ratio)'}',
+                    style: text.bodySmall,
+                  ),
+                  if (s.index.anyEncrypted)
+                    StatusBadge(
+                      _password == null ? 'Encrypted' : 'Unlocked',
+                      icon: _password == null
+                          ? LucideIcons.lock
+                          : LucideIcons.lockOpen,
+                      tone: _password == null ? Tone.warning : Tone.success,
+                    ),
+                ],
               ],
             ),
           ),
@@ -1044,76 +1066,80 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     );
   }
 
-  Widget _badge(BuildContext context, IconData icon, String label) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: scheme.primary),
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(fontSize: 12, color: scheme.primary)),
-        ],
-      ),
-    );
-  }
-
   Widget _errorView(BuildContext context, ArcException err, double topInset) {
-    final theme = Theme.of(context);
     final needsPassword = err.kind == ArcErrorKind.needPassword ||
         err.kind == ArcErrorKind.wrongPassword;
-    return Center(
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(32, topInset + 24, 32, 32),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                needsPassword ? Icons.lock_outline : Icons.inventory_2_outlined,
-                size: 56,
-                color: theme.colorScheme.outline,
-              ),
-              const SizedBox(height: 16),
-              Text(errorTitle(err.kind), style: theme.textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(
-                err.message,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 24),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  if (needsPassword)
-                    FilledButton.icon(
-                      onPressed: () => _onOpenError(err),
-                      icon: const Icon(Icons.key),
-                      label: const Text('Enter password'),
-                    )
-                  else
-                    FilledButton.tonal(
-                      onPressed: _open,
-                      child: const Text('Try again'),
-                    ),
-                  OutlinedButton.icon(
-                    onPressed: _openArchiveElsewhere,
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open with another app'),
-                  ),
-                ],
-              ),
-            ],
+    return ViewerMessage(
+      icon: needsPassword ? LucideIcons.lock : LucideIcons.fileArchive,
+      title: errorTitle(err.kind),
+      message: err.message,
+      padding: EdgeInsets.fromLTRB(32, topInset + 24, 32, 32),
+      actions: [
+        if (needsPassword)
+          FilledButton.icon(
+            onPressed: () => _onOpenError(err),
+            icon: const Icon(LucideIcons.keyRound, size: 16),
+            label: const Text('Enter password'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: _open,
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Try again'),
           ),
+        OutlinedButton.icon(
+          onPressed: _openArchiveElsewhere,
+          icon: const Icon(LucideIcons.externalLink, size: 16),
+          label: const Text('Open with another app'),
+        ),
+      ],
+    );
+  }
+}
+
+/// One breadcrumb: muted link, or the current folder in full colour.
+class _Crumb extends StatelessWidget {
+  const _Crumb({
+    required this.label,
+    required this.root,
+    required this.current,
+    this.onTap,
+  });
+
+  final String label;
+  final bool root;
+  final bool current;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final fg = current ? colors.foreground : colors.mutedForeground;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (root) ...[
+              Icon(LucideIcons.fileArchive, size: 14, color: fg),
+              const SizedBox(width: 6),
+            ],
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: fg,
+                      fontWeight: current ? FontWeight.w500 : FontWeight.w400,
+                    ),
+              ),
+            ),
+          ],
         ),
       ),
     );

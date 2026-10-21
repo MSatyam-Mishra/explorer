@@ -1144,7 +1144,7 @@ function niceGrid(maxDim) {
 
 function gridColors() {
   const light = state.background === 'light';
-  return light ? [0x8a9099, 0xc3c8d0] : [0x9aa0aa, 0x4a4f58];
+  return light ? [0x8e8e98, 0xc9c9d0] : [0x8e8e98, 0x3f3f46];
 }
 
 function updateHelpers() {
@@ -1413,15 +1413,15 @@ function paintBackground(ctx, w, h) {
   let gradient;
   if (bg === 'gradient') {
     gradient = ctx.createLinearGradient(w * 0.45, 0, w * 0.55, h);
-    gradient.addColorStop(0, '#3a4a6b');
-    gradient.addColorStop(0.45, '#2a2f45');
-    gradient.addColorStop(1, '#15161d');
+    gradient.addColorStop(0, '#3b4a6b');
+    gradient.addColorStop(0.45, '#262b3d');
+    gradient.addColorStop(1, '#0f1117');
   } else {
     const r = Math.hypot(w, h) * 0.6;
     gradient = ctx.createRadialGradient(w / 2, h * 0.4, 0, w / 2, h * 0.4, r);
     const stops = bg === 'light'
-      ? ['#ffffff', '#eceff4', '#d6dbe3']
-      : ['#33363f', '#1c1e24', '#111216'];
+      ? ['#ffffff', '#f4f4f5', '#e4e4e7']
+      : ['#2f2f35', '#18181b', '#09090b'];
     gradient.addColorStop(0, stops[0]);
     gradient.addColorStop(0.55, stops[1]);
     gradient.addColorStop(1, stops[2]);

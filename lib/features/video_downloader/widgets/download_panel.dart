@@ -1,6 +1,7 @@
 import 'package:explorer/core/services/video_downloader/downloader_backend.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -216,81 +217,87 @@ class DownloadPanelState extends State<DownloadPanel> {
   }
 
   Widget _urlCard(BuildContext context) {
+    final colors = context.colors;
     final urls = _urls;
     final busy = _fetching || _c.engineState == EngineState.preparing;
-    return Card(
+    return SurfaceCard(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _url,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.go,
-              minLines: 1,
-              maxLines: 4,
-              autocorrect: false,
-              enableSuggestions: false,
-              onSubmitted: (_) => urls.length > 1 ? null : fetch(),
-              decoration: InputDecoration(
-                hintText: 'Paste a video, song or playlist link',
-                prefixIcon: const Icon(Icons.link),
-                border: const OutlineInputBorder(),
-                suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_url.text.isNotEmpty)
-                      IconButton(
-                        tooltip: 'Clear',
-                        icon: const Icon(Icons.close),
-                        onPressed: _clear,
-                      ),
-                    IconButton(
-                      tooltip: 'Paste',
-                      icon: const Icon(Icons.content_paste),
-                      onPressed: _paste,
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _url,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.go,
+            minLines: 1,
+            maxLines: 4,
+            autocorrect: false,
+            enableSuggestions: false,
+            onSubmitted: (_) => urls.length > 1 ? null : fetch(),
+            decoration: InputDecoration(
+              hintText: 'Paste a video, song or playlist link',
+              prefixIcon: Icon(
+                LucideIcons.link,
+                size: 16,
+                color: colors.mutedForeground,
+              ),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_url.text.isNotEmpty)
+                    ToolButton(
+                      tooltip: 'Clear',
+                      icon: LucideIcons.x,
+                      size: 32,
+                      iconSize: 16,
+                      onPressed: _clear,
                     ),
-                  ],
-                ),
+                  ToolButton(
+                    tooltip: 'Paste',
+                    icon: LucideIcons.clipboardPaste,
+                    size: 32,
+                    iconSize: 16,
+                    onPressed: _paste,
+                  ),
+                  const SizedBox(width: 4),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            if (urls.length > 1)
-              Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton(
-                    onPressed: busy ? null : () => fetch(urls.first),
-                    child: const Text('Open first link'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: busy || _queuing ? null : () => _downloadAll(urls),
-                    icon: const Icon(Icons.download),
-                    label: Text('Download all ${urls.length}'),
-                  ),
-                ],
-              )
-            else
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: busy || urls.isEmpty ? null : () => fetch(),
-                  icon: const Icon(Icons.search),
-                  label: const Text('Fetch'),
+          ),
+          const SizedBox(height: 12),
+          if (urls.length > 1)
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: busy ? null : () => fetch(urls.first),
+                  child: const Text('Open first link'),
                 ),
+                FilledButton.icon(
+                  onPressed: busy || _queuing ? null : () => _downloadAll(urls),
+                  icon: const Icon(LucideIcons.download, size: 16),
+                  label: Text('Download all ${urls.length}'),
+                ),
+              ],
+            )
+          else
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: busy || urls.isEmpty ? null : () => fetch(),
+                icon: const Icon(LucideIcons.search, size: 16),
+                label: const Text('Fetch'),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 
   List<Widget> _statusCards(BuildContext context) {
-    final theme = Theme.of(context);
     final cards = <Widget>[];
     if (_c.engineState == EngineState.preparing) {
       cards.add(_StatusCard(
@@ -316,47 +323,39 @@ class DownloadPanelState extends State<DownloadPanel> {
       ));
     }
     if (_error != null) {
-      cards.add(Card(
+      cards.add(ViewerNotice(
+        icon: LucideIcons.circleAlert,
+        tone: Tone.destructive,
         margin: const EdgeInsets.only(bottom: 12),
-        color: theme.colorScheme.errorContainer,
-        child: ListTile(
-          leading: Icon(Icons.error_outline, color: theme.colorScheme.onErrorContainer),
-          title: Text(
-            _error!,
-            style: TextStyle(color: theme.colorScheme.onErrorContainer),
-          ),
-          subtitle: _c.ytDlpVersion == null
-              ? null
-              : Text(
-                  'If a site stopped working, updating yt-dlp often helps '
-                  '(settings).',
-                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
-                ),
-        ),
+        title: _error!,
+        message: _c.ytDlpVersion == null
+            ? 'Check the link and try again.'
+            : 'If a site stopped working, updating yt-dlp often helps '
+                '(settings).',
       ));
     }
     return cards;
   }
 
   Widget _hintCard(BuildContext context) {
-    final theme = Theme.of(context);
+    final text = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Download videos and audio from YouTube, Vimeo, SoundCloud, the '
             'Internet Archive and well over a thousand other sites, with yt-dlp.',
-            style: theme.textTheme.bodyMedium,
+            style: text.bodyMedium,
           ),
           const SizedBox(height: 8),
           Text(
             'Paste one link to choose the quality, or several links to download '
             'them all with your default settings.',
-            style: theme.textTheme.bodySmall,
+            style: text.bodySmall,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           _saveTo(context),
         ],
       ),
@@ -364,26 +363,34 @@ class DownloadPanelState extends State<DownloadPanel> {
   }
 
   Widget _saveTo(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Icon(Icons.folder_outlined, size: 18, color: theme.colorScheme.onSurfaceVariant),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            _c.outputDir.isEmpty ? 'Default download folder' : _c.outputDir,
-            style: theme.textTheme.bodySmall,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: colors.muted.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.folderDown, size: 16, color: colors.mutedForeground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _c.outputDir.isEmpty ? 'Default download folder' : _c.outputDir,
+              style: Theme.of(context).textTheme.bodySmall,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
-        TextButton(onPressed: widget.onOpenSettings, child: const Text('Change')),
-      ],
+          TextButton(onPressed: widget.onOpenSettings, child: const Text('Change')),
+        ],
+      ),
     );
   }
 
   Widget _optionsCard(BuildContext context, VideoInfo info) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final hasFfmpeg = _c.hasFfmpeg;
     final heights = info.videoHeights;
     final maxHeight = heights.isEmpty ? null : heights.first;
@@ -397,24 +404,24 @@ class DownloadPanelState extends State<DownloadPanel> {
     final estimate = _estimate(info);
     final canDownload = !_queuing && (!info.isPlaylist || selectedCount > 0);
 
-    return Card(
+    return SurfaceCard(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SegmentedButton<DownloadKind>(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<DownloadKind>(
               showSelectedIcon: false,
               segments: const [
                 ButtonSegment(
                   value: DownloadKind.video,
-                  icon: Icon(Icons.movie_outlined),
+                  icon: Icon(LucideIcons.film, size: 16),
                   label: Text('Video'),
                 ),
                 ButtonSegment(
                   value: DownloadKind.audio,
-                  icon: Icon(Icons.audiotrack_outlined),
+                  icon: Icon(LucideIcons.music, size: 16),
                   label: Text('Audio only'),
                 ),
               ],
@@ -427,126 +434,124 @@ class DownloadPanelState extends State<DownloadPanel> {
                 );
               }),
             ),
-            const SizedBox(height: 12),
-            if (_options.kind == DownloadKind.format && _options.format != null)
-              InputChip(
-                avatar: const Icon(Icons.tune, size: 18),
-                label: Text('Format ${_options.format!.id} · ${_options.format!.shortLabel}'),
-                onDeleted: () => setState(() {
-                  _options = DownloadOptions(
-                    kind: kind,
-                    quality: _options.quality,
-                    audioFormat: _options.audioFormat,
-                  );
-                }),
-              )
-            else if (kind == DownloadKind.video)
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final q in presets)
-                    ChoiceChip(
-                      label: Text(q.label),
-                      selected: _options.quality == q,
-                      onSelected: (_) => setState(() => _options = _options.copyWith(quality: q)),
-                    ),
-                ],
-              )
-            else
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final f in AudioFormat.values)
-                    ChoiceChip(
-                      label: Text(f.label),
-                      selected: _options.audioFormat == f,
-                      onSelected: f == AudioFormat.mp3 && !hasFfmpeg
-                          ? null
-                          : (_) => setState(() => _options = _options.copyWith(audioFormat: f)),
-                    ),
-                ],
-              ),
-            if (!info.isPlaylist && info.pickableFormats.isNotEmpty)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () async {
-                    final f = await showFormatPicker(
-                      context,
-                      info: info,
-                      hasFfmpeg: hasFfmpeg,
-                      selected: _options.format,
-                    );
-                    if (f != null && mounted) {
-                      setState(() => _options = DownloadOptions(
-                            kind: DownloadKind.format,
-                            format: f,
-                            quality: _options.quality,
-                            audioFormat: _options.audioFormat,
-                          ));
-                    }
-                  },
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Choose exact format…'),
-                ),
-              ),
-            if (!hasFfmpeg)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, size: 18, color: theme.colorScheme.tertiary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'FFmpeg was not found, so only formats with video and '
-                        'audio in one file can be downloaded (often lower '
-                        'quality), and audio is saved as is. Install FFmpeg to '
-                        'get the best quality and MP3.',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (info.isLive)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'This is a live stream: it records until the stream ends or you cancel.',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
-            const SizedBox(height: 12),
-            Row(
+          ),
+          SectionLabel(
+            kind == DownloadKind.video ? 'Quality' : 'Format',
+            padding: const EdgeInsets.fromLTRB(0, 16, 0, 8),
+          ),
+          if (_options.kind == DownloadKind.format && _options.format != null)
+            InputChip(
+              avatar: const Icon(LucideIcons.slidersHorizontal, size: 16),
+              label: Text('Format ${_options.format!.id} · ${_options.format!.shortLabel}'),
+              deleteIcon: const Icon(LucideIcons.x, size: 14),
+              onDeleted: () => setState(() {
+                _options = DownloadOptions(
+                  kind: kind,
+                  quality: _options.quality,
+                  audioFormat: _options.audioFormat,
+                );
+              }),
+            )
+          else if (kind == DownloadKind.video)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Expanded(
-                  child: Text(
-                    estimate == null ? '' : 'About ${DownloaderText.bytes(estimate)}',
-                    style: theme.textTheme.bodySmall,
+                for (final q in presets)
+                  ChoiceChip(
+                    label: Text(q.label),
+                    selected: _options.quality == q,
+                    onSelected: (_) => setState(() => _options = _options.copyWith(quality: q)),
                   ),
-                ),
-                FilledButton.icon(
-                  onPressed: canDownload ? _download : null,
-                  icon: _queuing
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download),
-                  label: Text(info.isPlaylist
-                      ? 'Download $selectedCount ${selectedCount == 1 ? 'item' : 'items'}'
-                      : 'Download'),
-                ),
+              ],
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final f in AudioFormat.values)
+                  ChoiceChip(
+                    label: Text(f.label),
+                    selected: _options.audioFormat == f,
+                    onSelected: f == AudioFormat.mp3 && !hasFfmpeg
+                        ? null
+                        : (_) => setState(() => _options = _options.copyWith(audioFormat: f)),
+                  ),
               ],
             ),
-            const SizedBox(height: 4),
-            _saveTo(context),
-          ],
-        ),
+          if (!info.isPlaylist && info.pickableFormats.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextButton.icon(
+                onPressed: () async {
+                  final f = await showFormatPicker(
+                    context,
+                    info: info,
+                    hasFfmpeg: hasFfmpeg,
+                    selected: _options.format,
+                  );
+                  if (f != null && mounted) {
+                    setState(() => _options = DownloadOptions(
+                          kind: DownloadKind.format,
+                          format: f,
+                          quality: _options.quality,
+                          audioFormat: _options.audioFormat,
+                        ));
+                  }
+                },
+                icon: const Icon(LucideIcons.slidersHorizontal, size: 16),
+                label: const Text('Choose exact format…'),
+              ),
+            ),
+          if (!hasFfmpeg)
+            const ViewerNotice(
+              icon: LucideIcons.info,
+              tone: Tone.warning,
+              margin: EdgeInsets.only(top: 8),
+              message: 'FFmpeg was not found, so only formats with video and '
+                  'audio in one file can be downloaded (often lower '
+                  'quality), and audio is saved as is. Install FFmpeg to '
+                  'get the best quality and MP3.',
+            ),
+          if (info.isLive)
+            const ViewerNotice(
+              icon: LucideIcons.radio,
+              margin: EdgeInsets.only(top: 8),
+              message:
+                  'This is a live stream: it records until the stream ends or you cancel.',
+            ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  estimate == null ? '' : 'About ${DownloaderText.bytes(estimate)}',
+                  style: text.bodySmall?.copyWith(color: colors.mutedForeground),
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: canDownload ? _download : null,
+                icon: _queuing
+                    ? SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colors.primaryForeground,
+                        ),
+                      )
+                    : const Icon(LucideIcons.download, size: 16),
+                label: Text(info.isPlaylist
+                    ? 'Download $selectedCount ${selectedCount == 1 ? 'item' : 'items'}'
+                    : 'Download'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _saveTo(context),
+        ],
       ),
     );
   }
@@ -585,20 +590,19 @@ class DownloadPanelState extends State<DownloadPanel> {
   }
 
   Widget _playlistHeader(BuildContext context, VideoInfo info) {
-    final theme = Theme.of(context);
     final selectable = [
       for (var i = 0; i < info.entries.length; i++)
         if (!info.entries[i].isNested) i,
     ];
     final all = _selected.length == selectable.length;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 0, 4),
+      padding: const EdgeInsets.fromLTRB(4, 4, 0, 4),
       child: Row(
         children: [
           Expanded(
             child: Text(
               '${_selected.length} of ${selectable.length} selected',
-              style: theme.textTheme.titleSmall,
+              style: Theme.of(context).textTheme.titleSmall,
             ),
           ),
           TextButton(
@@ -613,39 +617,49 @@ class DownloadPanelState extends State<DownloadPanel> {
   }
 
   Widget _entryTile(BuildContext context, PlaylistEntry entry, int i) {
-    final theme = Theme.of(context);
     final subtitle = [
       if (entry.duration != null) DownloaderText.duration(entry.duration),
       ?entry.uploader,
     ].join(' · ');
     final thumb = MediaThumbnail(url: entry.thumbnail, width: 72, height: 42, radius: 6);
     if (entry.isNested) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      return ListRow(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         leading: thumb,
-        title: Text(entry.title ?? entry.url, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Text('Playlist', style: theme.textTheme.bodySmall),
-        trailing: TextButton(onPressed: () => fetch(entry.url), child: const Text('Open')),
+        title: entry.title ?? entry.url,
+        titleMaxLines: 2,
+        subtitleWidget: const StatusBadge(
+          'Playlist',
+          icon: LucideIcons.listVideo,
+          outline: true,
+        ),
+        trailing: OutlinedButton(
+          onPressed: () => fetch(entry.url),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          child: const Text('Open'),
+        ),
       );
     }
     final checked = _selected.contains(i);
-    return CheckboxListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-      value: checked,
-      onChanged: (v) => setState(() {
-        if (v ?? false) {
-          _selected.add(i);
-        } else {
-          _selected.remove(i);
-        }
-      }),
-      secondary: thumb,
-      title: Text(
-        '${entry.index}. ${entry.title ?? entry.url}',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: subtitle.isEmpty ? null : Text(subtitle, maxLines: 1),
+    void toggle(bool? v) => setState(() {
+          if (v ?? false) {
+            _selected.add(i);
+          } else {
+            _selected.remove(i);
+          }
+        });
+    return ListRow(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      selected: checked,
+      leading: thumb,
+      title: '${entry.index}. ${entry.title ?? entry.url}',
+      titleMaxLines: 2,
+      subtitle: subtitle.isEmpty ? null : subtitle,
+      trailing: Checkbox(value: checked, onChanged: toggle),
+      onTap: () => toggle(!checked),
     );
   }
 }
@@ -667,44 +681,49 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final fg = error ? theme.colorScheme.onErrorContainer : null;
-    return Card(
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    if (error) {
+      return ViewerNotice(
+        icon: LucideIcons.circleAlert,
+        tone: Tone.destructive,
+        margin: const EdgeInsets.only(bottom: 12),
+        title: title,
+        message: subtitle ?? '',
+        actions: [?action],
+      );
+    }
+    return SurfaceCard(
       margin: const EdgeInsets.only(bottom: 12),
-      color: error ? theme.colorScheme.errorContainer : null,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                if (error)
-                  Icon(Icons.error_outline, color: fg)
-                else
-                  const SizedBox.square(
-                    dimension: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(title, style: theme.textTheme.titleSmall?.copyWith(color: fg)),
-                ),
-                ?action,
-              ],
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Text(title, style: text.titleSmall)),
+              ?action,
+            ],
+          ),
+          if (subtitle != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(32, 4, 8, 0),
+              child: Text(subtitle!, style: text.bodySmall),
             ),
-            if (subtitle != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(34, 6, 8, 0),
-                child: Text(subtitle!, style: theme.textTheme.bodySmall?.copyWith(color: fg)),
+          if (progress != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(32, 10, 8, 0),
+              child: LinearProgressIndicator(
+                value: progress,
+                backgroundColor: colors.muted,
               ),
-            if (!error && progress != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(34, 10, 8, 0),
-                child: LinearProgressIndicator(value: progress),
-              ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -717,7 +736,7 @@ class _PreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final text = Theme.of(context).textTheme;
     final meta = [
       ?info.uploader,
       if (info.isPlaylist)
@@ -728,34 +747,33 @@ class _PreviewCard extends StatelessWidget {
     ].where((s) => s.isNotEmpty).join(' · ');
 
     final details = Padding(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           if (info.isPlaylist)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text('PLAYLIST',
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.primary)),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: StatusBadge('Playlist', icon: LucideIcons.listVideo),
             ),
           Text(
             info.title ?? info.url,
-            style: theme.textTheme.titleMedium,
+            style: text.titleMedium,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
           ),
           if (meta.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(meta, style: theme.textTheme.bodySmall, maxLines: 2, overflow: TextOverflow.ellipsis),
+            Text(meta, style: text.bodySmall, maxLines: 2, overflow: TextOverflow.ellipsis),
           ],
         ],
       ),
     );
 
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
+    return SurfaceCard(
+      padding: EdgeInsets.zero,
+      clip: true,
       child: LayoutBuilder(builder: (context, c) {
         if (c.maxWidth >= 520) {
           return Row(

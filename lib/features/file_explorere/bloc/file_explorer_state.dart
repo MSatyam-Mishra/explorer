@@ -5,7 +5,12 @@ abstract class FileExplorerState {}
 
 class FileExplorerInitial extends FileExplorerState {}
 
-class FileExplorerLoading extends FileExplorerState {}
+class FileExplorerLoading extends FileExplorerState {
+  /// The folder being opened, when known.
+  final String? path;
+
+  FileExplorerLoading({this.path});
+}
 
 class FileExplorerLoaded extends FileExplorerState {
   final List<FileSystemEntity> entities;
@@ -61,5 +66,8 @@ class FileExplorerLoaded extends FileExplorerState {
 class FileExplorerError extends FileExplorerState {
   final String message;
 
-  FileExplorerError(this.message);
+  /// The folder that failed to open, when known.
+  final String? path;
+
+  FileExplorerError(this.message, {this.path});
 }

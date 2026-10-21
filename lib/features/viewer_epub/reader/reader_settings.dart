@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum ReaderTheme {
+  /// Follows the app: [light] in light mode, [dark] in dark mode.
+  system('Auto', Color(0xFFFFFFFF), Color(0xFF1F1F1F), Color(0xFF1A5FB4)),
   light('Light', Color(0xFFFFFFFF), Color(0xFF1F1F1F), Color(0xFF1A5FB4)),
   sepia('Sepia', Color(0xFFF4ECD8), Color(0xFF5B4636), Color(0xFF8A4B0F)),
   dark('Dark', Color(0xFF1E1F22), Color(0xFFD7D7D7), Color(0xFF8AB4F8)),
@@ -17,6 +19,11 @@ enum ReaderTheme {
   final Color link;
 
   bool get isDark => this == dark || this == black;
+
+  /// The theme to draw with in an app of [brightness].
+  ReaderTheme resolve(Brightness brightness) => this == system
+      ? (brightness == Brightness.dark ? dark : light)
+      : this;
 }
 
 enum ReaderFont {
@@ -60,7 +67,7 @@ T _enumByName<T extends Enum>(List<T> values, Object? name, T fallback) {
 @immutable
 class ReaderSettings {
   const ReaderSettings({
-    this.theme = ReaderTheme.light,
+    this.theme = ReaderTheme.system,
     this.fontScale = 1.0,
     this.font = ReaderFont.publisher,
     this.lineHeight,
@@ -126,7 +133,7 @@ class ReaderSettings {
   factory ReaderSettings.fromJson(Map<String, dynamic> json) {
     double? num_(Object? v) => v is num ? v.toDouble() : null;
     return ReaderSettings(
-      theme: _enumByName(ReaderTheme.values, json['theme'], ReaderTheme.light),
+      theme: _enumByName(ReaderTheme.values, json['theme'], ReaderTheme.system),
       fontScale: (num_(json['fontScale']) ?? 1.0).clamp(0.6, 2.5),
       font: _enumByName(ReaderFont.values, json['font'], ReaderFont.publisher),
       lineHeight: num_(json['lineHeight']),
@@ -137,7 +144,15 @@ class ReaderSettings {
     );
   }
 
-  /// The settings object understood by the reader JS.
+  /// These settings with an [ReaderTheme.system] theme resolved for an app
+  /// of [brightness].
+  ReaderSettings resolved(Brightness brightness) {
+    final t = theme.resolve(brightness);
+    return t == theme ? this : copyWith(theme: t);
+  }
+
+  /// The settings object understood by the reader JS (resolve [theme]
+  /// first; see [resolved]).
   Map<String, dynamic> toJs() => {
         'theme': theme.name,
         'bg': _hex(theme.background),

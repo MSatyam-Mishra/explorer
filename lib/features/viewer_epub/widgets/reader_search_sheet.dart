@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../book/book_models.dart';
@@ -111,28 +112,41 @@ class _ReaderSearchSheetState extends State<ReaderSearchSheet> {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     return Padding(
       padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
       child: SizedBox(
         height: media.size.height * 0.82,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Text(
+                'Search in book',
+                style: text.titleLarge?.copyWith(fontSize: 18),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: TextField(
                 controller: _text,
                 autofocus: widget.controller.results.isEmpty,
                 textInputAction: TextInputAction.search,
                 onSubmitted: (_) => _submit(),
                 decoration: InputDecoration(
-                  hintText: 'Search in book',
-                  prefixIcon: const Icon(Icons.search),
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    tooltip: 'Search',
-                    icon: const Icon(Icons.arrow_forward),
-                    onPressed: _submit,
+                  hintText: 'Word or phrase',
+                  prefixIcon: const Icon(LucideIcons.search, size: 16),
+                  suffixIcon: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: ViewerAction(
+                      icon: LucideIcons.cornerDownLeft,
+                      tooltip: 'Search',
+                      size: 36,
+                      iconSize: 16,
+                      onPressed: _submit,
+                    ),
                   ),
                 ),
               ),
@@ -143,41 +157,49 @@ class _ReaderSearchSheetState extends State<ReaderSearchSheet> {
                 builder: (context, _) {
                   final c = widget.controller;
                   if (c.searching) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Center(child: ViewerSpinner(size: 20));
                   }
                   if (c.error != null) {
-                    return Center(child: Text(c.error!));
+                    return ViewerMessage(
+                      icon: LucideIcons.circleAlert,
+                      destructive: true,
+                      title: "Couldn't search this book",
+                      message: c.error,
+                    );
                   }
                   if (c.query.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'Type a word or phrase and press search.',
-                        style: theme.textTheme.bodyMedium,
-                      ),
+                    return const ViewerMessage(
+                      icon: LucideIcons.textSearch,
+                      title: 'Search the whole book',
+                      message: 'Type a word or phrase and press search.',
                     );
                   }
                   if (c.results.isEmpty) {
-                    return Center(child: Text('No matches for "${c.query}".'));
+                    return ViewerMessage(
+                      icon: LucideIcons.searchX,
+                      title: 'No matches',
+                      message: 'Nothing in this book matches "${c.query}".',
+                    );
                   }
                   return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Align(
-                          alignment: AlignmentDirectional.centerStart,
-                          child: Text(
-                            c.truncated
-                                ? 'First ${c.results.length} matches'
-                                : '${c.results.length} match${c.results.length == 1 ? '' : 'es'}',
-                            style: theme.textTheme.labelMedium,
-                          ),
-                        ),
+                      ViewerSectionLabel(
+                        c.truncated
+                            ? 'First ${c.results.length} matches'
+                            : '${c.results.length} match${c.results.length == 1 ? '' : 'es'}',
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
                       ),
                       Expanded(
                         child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
                           itemCount: c.results.length,
-                          separatorBuilder: (_, __) =>
-                              const Divider(height: 1, indent: 16),
+                          separatorBuilder: (_, _) => Divider(
+                            height: 1,
+                            indent: 12,
+                            endIndent: 12,
+                            color: colors.border,
+                          ),
                           itemBuilder: (context, i) =>
                               _hitTile(context, c.results[i]),
                         ),
@@ -194,37 +216,46 @@ class _ReaderSearchSheetState extends State<ReaderSearchSheet> {
   }
 
   Widget _hitTile(BuildContext context, SearchHit hit) {
-    final theme = Theme.of(context);
-    final base = theme.textTheme.bodyMedium;
-    return ListTile(
-      title: Text(
-        widget.titleForSpine(hit.spineIndex),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: theme.colorScheme.primary,
-        ),
-      ),
-      subtitle: Text.rich(
-        TextSpan(
-          style: base,
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final base = text.bodyMedium?.copyWith(color: colors.mutedForeground);
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => widget.onSelect(hit),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextSpan(text: hit.before),
-            TextSpan(
-              text: hit.match,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                backgroundColor:
-                    theme.colorScheme.tertiaryContainer.withValues(alpha: 0.8),
-              ),
+            Text(
+              widget.titleForSpine(hit.spineIndex),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: text.labelMedium,
             ),
-            TextSpan(text: hit.after),
+            const SizedBox(height: 2),
+            Text.rich(
+              TextSpan(
+                style: base,
+                children: [
+                  TextSpan(text: hit.before),
+                  TextSpan(
+                    text: hit.match,
+                    style: TextStyle(
+                      color: colors.foreground,
+                      fontWeight: FontWeight.w600,
+                      backgroundColor: colors.primary.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  TextSpan(text: hit.after),
+                ],
+              ),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
-        maxLines: 3,
-        overflow: TextOverflow.ellipsis,
       ),
-      onTap: () => widget.onSelect(hit),
     );
   }
 }

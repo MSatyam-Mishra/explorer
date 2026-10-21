@@ -5,7 +5,7 @@ import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -119,11 +119,13 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
     return ExplorerScaffold(
       title: 'Video downloader',
       trailing: _controller.isSupported
-          ? ExplorerTopBar.iconButton(
-              context: context,
-              icon: Icon(Icons.settings_outlined, color: ClearGlassForeground.icon(context)),
-              tooltip: 'Downloader settings',
-              onPressed: _openSettings,
+          ? Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: AppIconButton(
+                icon: const Icon(LucideIcons.settings),
+                tooltip: 'Downloader settings',
+                onPressed: _openSettings,
+              ),
             )
           : null,
       body: LayoutBuilder(builder: (context, constraints) {
@@ -133,7 +135,7 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
           return Padding(
             padding: EdgeInsets.only(top: top),
             child: EmptyState(
-              icon: Icons.block,
+              icon: LucideIcons.ban,
               title: 'Not available on this device',
               message: _controller.unsupportedReason,
             ),
@@ -147,9 +149,9 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
           onQueued: (n) => _onQueued(n, wide),
           onOpenSettings: _openSettings,
           ensureRights: _ensureRights,
-          padding: EdgeInsets.fromLTRB(12, wide ? 12 : 4, 12, bottom),
+          padding: EdgeInsets.fromLTRB(16, wide ? 16 : 4, 16, bottom),
         );
-        final listPadding = EdgeInsets.fromLTRB(12, 4, 12, 24 + bottom);
+        final listPadding = EdgeInsets.fromLTRB(16, 4, 16, 24 + bottom);
 
         if (wide) {
           return Padding(
@@ -164,7 +166,7 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
                   child: Column(
                     children: [
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                         child: _tabs(
                           [_Tab.queue, _Tab.history],
                           _sideTab,
@@ -195,7 +197,7 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: _tabs(_Tab.values, _tab, (t) => setState(() => _tab = t)),
                 ),
                 Expanded(
@@ -216,40 +218,115 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
     );
   }
 
+  /// shadcn Tabs: a muted track with the selected tab raised.
   Widget _tabs(List<_Tab> tabs, _Tab selected, ValueChanged<_Tab> onChanged) {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
+        final colors = context.colors;
         final active = _controller.activeCount;
-        // Labels alone on narrow phones, so three segments fit.
+        // Labels alone on narrow phones, so three tabs fit.
         final icons = MediaQuery.sizeOf(context).width >= 480;
-        return SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<_Tab>(
-            showSelectedIcon: false,
-            segments: [
+        return Container(
+          height: 40,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: colors.muted,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
               for (final t in tabs)
-                ButtonSegment(
-                  value: t,
-                  label: Text(switch (t) {
-                    _Tab.download => 'New',
-                    _Tab.queue => active == 0 ? 'Downloads' : 'Downloads ($active)',
-                    _Tab.history => 'History',
-                  }),
-                  icon: icons
-                      ? Icon(switch (t) {
-                          _Tab.download => Icons.add_link,
-                          _Tab.queue => Icons.downloading,
-                          _Tab.history => Icons.history,
-                        })
-                      : null,
+                Expanded(
+                  child: _TabButton(
+                    selected: t == selected,
+                    icon: icons
+                        ? switch (t) {
+                            _Tab.download => LucideIcons.link,
+                            _Tab.queue => LucideIcons.download,
+                            _Tab.history => LucideIcons.history,
+                          }
+                        : null,
+                    label: switch (t) {
+                      _Tab.download => 'New',
+                      _Tab.queue => active == 0 ? 'Downloads' : 'Downloads ($active)',
+                      _Tab.history => 'History',
+                    },
+                    onTap: () => onChanged(t),
+                  ),
                 ),
             ],
-            selected: {selected},
-            onSelectionChanged: (s) => onChanged(s.first),
           ),
         );
       },
+    );
+  }
+}
+
+class _TabButton extends StatelessWidget {
+  const _TabButton({
+    required this.selected,
+    required this.label,
+    required this.onTap,
+    this.icon,
+  });
+
+  final bool selected;
+  final String label;
+  final IconData? icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final fg = selected ? colors.foreground : colors.mutedForeground;
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: selected ? colors.background : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: context.isDarkMode ? 0.3 : 0.08,
+                    ),
+                    blurRadius: 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(7),
+          onTap: onTap,
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 15, color: fg),
+                  const SizedBox(width: 6),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: fg,
+                          fontSize: 13,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:explorer/core/services/bookmark_service.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -41,8 +42,10 @@ class ReaderSidePanel extends StatefulWidget {
 }
 
 class _ReaderSidePanelState extends State<ReaderSidePanel> {
-  static const _rowHeight = 48.0;
+  /// Approximate height of a one-line row, for the initial scroll offset.
+  static const _rowHeight = 42.0;
   final Set<int> _collapsed = {};
+  int _tab = 0;
   late ScrollController _scroll;
 
   @override
@@ -102,9 +105,8 @@ class _ReaderSidePanelState extends State<ReaderSidePanel> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DefaultTabController(
-      length: 2,
+    return Material(
+      type: MaterialType.transparency,
       child: Column(
         children: [
           _Header(
@@ -112,18 +114,23 @@ class _ReaderSidePanelState extends State<ReaderSidePanel> {
             cover: widget.cover,
             onClose: widget.onClose,
           ),
-          TabBar(
-            tabs: [
-              const Tab(text: 'Contents'),
-              Tab(text: 'Bookmarks (${widget.bookmarks.length})'),
-            ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: ViewerTabs(
+              tabs: [
+                'Contents',
+                widget.bookmarks.isEmpty
+                    ? 'Bookmarks'
+                    : 'Bookmarks (${widget.bookmarks.length})',
+              ],
+              index: _tab,
+              onChanged: (i) => setState(() => _tab = i),
+            ),
           ),
           Expanded(
-            child: TabBarView(
-              children: [
-                _buildToc(theme),
-                _buildBookmarks(theme),
-              ],
+            child: IndexedStack(
+              index: _tab,
+              children: [_buildToc(context), _buildBookmarks(context)],
             ),
           ),
         ],
@@ -131,119 +138,83 @@ class _ReaderSidePanelState extends State<ReaderSidePanel> {
     );
   }
 
-  Widget _buildToc(ThemeData theme) {
+  Widget _buildToc(BuildContext context) {
     final visible = _visible();
     if (visible.isEmpty) {
-      return const Center(child: Text('This book has no table of contents.'));
+      return const ViewerMessage(
+        icon: LucideIcons.listTree,
+        title: 'No table of contents',
+        message: "This book doesn't list its chapters.",
+      );
     }
     final currentOrder = widget.current?.order;
     return Scrollbar(
       controller: _scroll,
       child: ListView.builder(
         controller: _scroll,
+        padding: const EdgeInsets.only(bottom: 16),
         itemCount: visible.length,
         itemBuilder: (context, i) {
           final f = visible[i];
-          final selected = f.order == currentOrder;
-          final hasChildren = f.entry.children.isNotEmpty;
-          final enabled = _hasTarget(f.entry);
-          return Material(
-            color: selected
-                ? theme.colorScheme.primary.withValues(alpha: 0.12)
-                : Colors.transparent,
-            child: InkWell(
-              onTap: enabled ? () => widget.onTocTap(f.entry) : null,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: _rowHeight),
-                child: Padding(
-                  padding: EdgeInsetsDirectional.only(
-                    start: 12.0 + f.depth * 16.0,
-                    end: 4,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          f.entry.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: selected || f.depth == 0
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                            color: selected
-                                ? theme.colorScheme.primary
-                                : enabled
-                                    ? null
-                                    : theme.disabledColor,
-                          ),
-                        ),
-                      ),
-                      if (hasChildren)
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          tooltip: _collapsed.contains(f.order)
-                              ? 'Expand'
-                              : 'Collapse',
-                          icon: Icon(
-                            _collapsed.contains(f.order)
-                                ? Icons.expand_more
-                                : Icons.expand_less,
-                          ),
-                          onPressed: () => setState(() {
-                            if (!_collapsed.remove(f.order)) {
-                              _collapsed.add(f.order);
-                            }
-                          }),
-                        )
-                      else
-                        const SizedBox(width: 8),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          final collapsed = _collapsed.contains(f.order);
+          return ViewerListTile(
+            title: f.entry.title,
+            indent: f.depth * 16.0,
+            emphasis: f.depth == 0,
+            selected: f.order == currentOrder,
+            enabled: _hasTarget(f.entry),
+            onTap: () => widget.onTocTap(f.entry),
+            trailing: f.entry.children.isNotEmpty
+                ? ViewerAction(
+                    size: 32,
+                    iconSize: 16,
+                    color: context.colors.mutedForeground,
+                    tooltip: collapsed ? 'Expand' : 'Collapse',
+                    icon: collapsed
+                        ? LucideIcons.chevronRight
+                        : LucideIcons.chevronDown,
+                    onPressed: () => setState(() {
+                      if (!_collapsed.remove(f.order)) {
+                        _collapsed.add(f.order);
+                      }
+                    }),
+                  )
+                : null,
           );
         },
       ),
     );
   }
 
-  Widget _buildBookmarks(ThemeData theme) {
+  Widget _buildBookmarks(BuildContext context) {
     if (widget.bookmarks.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'No bookmarks yet.\nUse the bookmark button in the top bar to '
-            'save your place.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium,
-          ),
-        ),
+      return const ViewerMessage(
+        icon: LucideIcons.bookmark,
+        title: 'No bookmarks yet',
+        message: 'Use the bookmark button in the top bar to save your place.',
       );
     }
     final dateFormat = DateFormat.yMMMd();
     final sorted = [...widget.bookmarks]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 16),
       itemCount: sorted.length,
       itemBuilder: (context, i) {
         final b = sorted[i];
-        return ListTile(
-          leading: const Icon(Icons.bookmark),
-          title: Text(
-            widget.bookmarkLabel(b),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Text(dateFormat.format(b.createdAt)),
-          trailing: IconButton(
+        return ViewerListTile(
+          leading: const Icon(LucideIcons.bookmark),
+          title: widget.bookmarkLabel(b),
+          subtitle: dateFormat.format(b.createdAt),
+          onTap: () => widget.onBookmarkTap(b),
+          trailing: ViewerAction(
+            size: 32,
+            iconSize: 16,
+            color: context.colors.mutedForeground,
             tooltip: 'Remove bookmark',
-            icon: const Icon(Icons.delete_outline),
+            icon: LucideIcons.trash2,
             onPressed: () => widget.onBookmarkDelete(b),
           ),
-          onTap: () => widget.onBookmarkTap(b),
         );
       },
     );
@@ -259,29 +230,41 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final meta = info.metadata;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: SizedBox(
-              width: 56,
-              height: 80,
-              child: cover != null
-                  ? Image.memory(
-                      cover!,
-                      fit: BoxFit.cover,
-                      cacheWidth: 168,
-                      errorBuilder: (_, __, ___) => _placeholder(theme),
-                    )
-                  : _placeholder(theme),
+          Container(
+            width: 52,
+            height: 76,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: context.isDarkMode ? 0.4 : 0.08,
+                  ),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
+            clipBehavior: Clip.antiAlias,
+            child: cover != null
+                ? Image.memory(
+                    cover!,
+                    fit: BoxFit.cover,
+                    cacheWidth: 168,
+                    errorBuilder: (_, _, _) => _placeholder(context),
+                  )
+                : _placeholder(context),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,35 +273,39 @@ class _Header extends StatelessWidget {
                   meta.title,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: text.titleSmall,
                 ),
                 if (meta.authorLine.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     meta.authorLine,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    style: text.bodyMedium?.copyWith(
+                      color: colors.mutedForeground,
                     ),
                   ),
                 ],
-                const SizedBox(height: 4),
-                Text(
-                  '${info.format.name.toUpperCase()} · '
-                  '${info.spine.length} section${info.spine.length == 1 ? '' : 's'}',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: colors.border),
+                  ),
+                  child: Text(
+                    '${info.format.name.toUpperCase()} · '
+                    '${info.spine.length} section${info.spine.length == 1 ? '' : 's'}',
+                    style: text.labelMedium,
                   ),
                 ),
               ],
             ),
           ),
           if (onClose != null)
-            IconButton(
+            ViewerAction(
+              icon: LucideIcons.panelLeftClose,
               tooltip: 'Hide contents',
-              icon: const Icon(Icons.close),
               onPressed: onClose,
             ),
         ],
@@ -326,11 +313,12 @@ class _Header extends StatelessWidget {
     );
   }
 
-  Widget _placeholder(ThemeData theme) => ColoredBox(
-        color: theme.colorScheme.surfaceContainerHighest,
+  Widget _placeholder(BuildContext context) => ColoredBox(
+        color: context.colors.muted,
         child: Icon(
-          Icons.menu_book,
-          color: theme.colorScheme.onSurfaceVariant,
+          LucideIcons.bookOpen,
+          size: 20,
+          color: context.colors.mutedForeground,
         ),
       );
 }

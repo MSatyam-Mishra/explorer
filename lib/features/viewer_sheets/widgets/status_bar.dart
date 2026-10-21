@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../controller/spreadsheet_controller.dart';
@@ -21,7 +22,9 @@ class SheetStatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final style = theme.textTheme.bodySmall?.copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
@@ -53,29 +56,32 @@ class SheetStatusBar extends StatelessWidget {
                   ),
                 ),
               ),
-              IconButton(
+              ViewerAction(
                 tooltip: 'Zoom out',
-                visualDensity: VisualDensity.compact,
-                iconSize: 18,
-                icon: const Icon(Icons.remove_rounded),
+                icon: LucideIcons.minus,
+                size: 28,
+                iconSize: 14,
                 onPressed: controller.zoom > 0.41 ? () => controller.setZoom(controller.zoom - 0.1) : null,
               ),
-              InkWell(
-                onTap: () => controller.setZoom(1),
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  child: Text('${(controller.zoom * 100).round()}%', style: style),
+              Tooltip(
+                message: 'Reset zoom',
+                child: InkWell(
+                  onTap: () => controller.setZoom(1),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: Text('${(controller.zoom * 100).round()}%', style: style),
+                  ),
                 ),
               ),
-              IconButton(
+              ViewerAction(
                 tooltip: 'Zoom in',
-                visualDensity: VisualDensity.compact,
-                iconSize: 18,
-                icon: const Icon(Icons.add_rounded),
+                icon: LucideIcons.plus,
+                size: 28,
+                iconSize: 14,
                 onPressed: controller.zoom < 2.99 ? () => controller.setZoom(controller.zoom + 0.1) : null,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 6),
             ],
           ),
         );

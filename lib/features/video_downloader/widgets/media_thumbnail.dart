@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 
 /// A video thumbnail from the web, with a placeholder while it loads or
@@ -9,7 +10,7 @@ class MediaThumbnail extends StatelessWidget {
     this.width,
     this.height,
     this.radius = 8,
-    this.icon = Icons.movie_outlined,
+    this.icon = LucideIcons.film,
   });
 
   final String? url;
@@ -20,13 +21,17 @@ class MediaThumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final placeholder = Container(
       width: width,
       height: height,
-      color: scheme.surfaceContainerHighest,
+      color: colors.muted,
       alignment: Alignment.center,
-      child: Icon(icon, color: scheme.onSurfaceVariant, size: (height ?? 48) * 0.4),
+      child: Icon(
+        icon,
+        color: colors.mutedForeground,
+        size: ((height ?? 48) * 0.4).clamp(16, 40),
+      ),
     );
     final u = url;
     Widget child = placeholder;

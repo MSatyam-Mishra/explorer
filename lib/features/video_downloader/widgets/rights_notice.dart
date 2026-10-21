@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 
 const rightsNoticeText =
@@ -13,11 +14,19 @@ Future<bool> showRightsNotice(BuildContext context) async {
     context: context,
     barrierDismissible: false,
     builder: (context) => AlertDialog(
-      icon: const Icon(Icons.gavel_outlined),
-      title: const Text('Before you download'),
-      content: const SingleChildScrollView(child: Text(rightsNoticeText)),
+      title: const Row(
+        children: [
+          Icon(LucideIcons.scale, size: 18),
+          SizedBox(width: 10),
+          Expanded(child: Text('Before you download')),
+        ],
+      ),
+      content: const SizedBox(
+        width: 440,
+        child: SingleChildScrollView(child: Text(rightsNoticeText)),
+      ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Not now'),
         ),

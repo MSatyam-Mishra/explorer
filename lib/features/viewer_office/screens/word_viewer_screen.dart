@@ -3,8 +3,8 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -605,55 +605,11 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
       if (stats.images > 0) ('Pictures', '${stats.images}'),
       ('Page size', '${cm(pg.width)} × ${cm(pg.height)} cm'),
     ];
-    ExplorerLiquidGlassBottomSheet.show<void>(
+    showViewerInfoSheet(
       context,
-      maxHeightFraction: 0.6,
-      child: Builder(
-        builder: (context) {
-          final fg = ClearGlassForeground.primaryText(context);
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Document info',
-                style: ClearGlassForeground.title(
-                  context,
-                ).copyWith(fontSize: 18),
-              ),
-              const SizedBox(height: 12),
-              for (final r in rows)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 160,
-                        child: Text(
-                          r.$1,
-                          style: TextStyle(
-                            color: fg.withValues(alpha: 0.7),
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          r.$2,
-                          style: TextStyle(
-                            color: fg,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
+      title: 'Document info',
+      description: p.basename(_file.path),
+      rows: rows,
     );
   }
 
@@ -670,8 +626,9 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     final headings = _headings();
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
       isScrollControlled: true,
+      useSafeArea: true,
+      constraints: const BoxConstraints(maxWidth: 640),
       builder: (sheet) => DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.6,
@@ -740,136 +697,125 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
   }
 
   Widget _viewActions(BuildContext context, bool compact) {
-    final color = ClearGlassForeground.icon(context);
     final model = _model;
     // Not while only the first pages of a long document are in.
     final ready = model != null && _error == null && !_partial;
     final split = AdaptiveSplitView.isSplit(context);
-    return ExplorerTopBar.actions(context, [
-      if (ready)
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: Icon(
-            _searchOpen ? Icons.search_off : Icons.search,
-            color: color,
-          ),
+    if (!ready) return const SizedBox(width: 8);
+    return ViewerActions(
+      children: [
+        ViewerAction(
+          icon: LucideIcons.search,
           tooltip: 'Find',
+          selected: _searchOpen,
           onPressed: _toggleSearch,
         ),
-      if (ready)
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: Icon(Icons.edit_outlined, color: color),
+        ViewerAction(
+          icon: LucideIcons.penLine,
           tooltip: 'Edit',
           onPressed: _startEditing,
         ),
-      if (ready)
-        PopupMenuButton<String>(
+        ViewerMenuButton<String>(
           key: _moreKey,
-          tooltip: 'More',
-          icon: Icon(Icons.more_vert, color: color),
           onSelected: _onMenu,
           itemBuilder: (context) => [
-            const PopupMenuItem(
+            viewerMenuItem(
               value: 'info',
-              child: ListTile(
-                leading: Icon(Icons.info_outline),
-                title: Text('Document info'),
-              ),
+              icon: LucideIcons.info,
+              label: 'Document info',
             ),
             if (!split && _headings().isNotEmpty)
-              const PopupMenuItem(
+              viewerMenuItem(
                 value: 'outline',
-                child: ListTile(
-                  leading: Icon(Icons.toc),
-                  title: Text('Outline'),
-                ),
+                icon: LucideIcons.listTree,
+                label: 'Outline',
               ),
-            CheckedPopupMenuItem(
+            viewerMenuDivider(),
+            viewerMenuItem(
               value: 'layout',
+              icon: LucideIcons.fileText,
+              label: 'Print layout',
               checked: _printLayout ?? true,
-              child: const Text('Print layout'),
             ),
-            CheckedPopupMenuItem(
+            viewerMenuItem(
               value: 'dark',
+              icon: LucideIcons.moon,
+              label: 'Dark page',
               checked: _darkPage,
-              child: const Text('Dark page'),
             ),
-            const PopupMenuItem(
+            viewerMenuDivider(),
+            viewerMenuItem(
               value: 'copy',
-              child: ListTile(
-                leading: Icon(Icons.copy_all_outlined),
-                title: Text('Copy text'),
-              ),
+              icon: LucideIcons.copy,
+              label: 'Copy text',
             ),
-            const PopupMenuItem(
+            viewerMenuItem(
               value: 'share',
-              child: ListTile(
-                leading: Icon(Icons.share_outlined),
-                title: Text('Share'),
-              ),
+              icon: LucideIcons.share2,
+              label: 'Share',
             ),
             if (model.format != 'docx')
-              const PopupMenuItem(
+              viewerMenuItem(
                 value: 'convert',
-                child: ListTile(
-                  leading: Icon(Icons.save_as_outlined),
-                  title: Text('Save as .docx'),
-                ),
+                icon: LucideIcons.fileOutput,
+                label: 'Save as .docx',
               ),
-            const PopupMenuItem(
+            viewerMenuItem(
               value: 'open',
-              child: ListTile(
-                leading: Icon(Icons.open_in_new),
-                title: Text('Open with…'),
-              ),
+              icon: LucideIcons.externalLink,
+              label: 'Open with…',
             ),
           ],
         ),
-    ]);
+      ],
+    );
   }
 
   Widget _editActions(BuildContext context) {
-    final color = ClearGlassForeground.icon(context);
     final options = <(_SaveKind, String)>[
       if (_saveFormat != null && _overwriteAllowed)
         (_SaveKind.overwrite, 'Save'),
       if (_saveFormat != null) (_SaveKind.copy, 'Save as copy'),
       if (_saveFormat != 'docx') (_SaveKind.asDocx, 'Save as .docx'),
     ];
-    final saveIcon = _saving
-        ? SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: color),
+    return ViewerActions(
+      children: [
+        if (options.length == 1)
+          ViewerAction(
+            icon: LucideIcons.save,
+            tooltip: options.first.$2,
+            badge: _dirty,
+            busy: _saving,
+            onPressed: () => _save(options.first.$1),
           )
-        : Icon(Icons.save_outlined, color: color);
-    return ExplorerTopBar.actions(context, [
-      if (options.length == 1)
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: saveIcon,
-          tooltip: options.first.$2,
-          onPressed: _saving ? null : () => _save(options.first.$1),
-        )
-      else
-        PopupMenuButton<_SaveKind>(
-          tooltip: 'Save',
-          enabled: !_saving,
-          icon: saveIcon,
-          onSelected: _save,
-          itemBuilder: (context) => [
-            for (final o in options)
-              PopupMenuItem(value: o.$1, child: Text(o.$2)),
-          ],
+        else
+          ViewerMenuButton<_SaveKind>(
+            tooltip: 'Save',
+            icon: LucideIcons.save,
+            badge: _dirty,
+            busy: _saving,
+            onSelected: _save,
+            itemBuilder: (context) => [
+              for (final o in options)
+                viewerMenuItem(
+                  value: o.$1,
+                  icon: switch (o.$1) {
+                    _SaveKind.overwrite => LucideIcons.save,
+                    _SaveKind.copy => LucideIcons.copy,
+                    _SaveKind.asDocx => LucideIcons.fileOutput,
+                  },
+                  label: o.$2,
+                ),
+            ],
+          ),
+        ViewerAction(
+          icon: LucideIcons.check,
+          tooltip: 'Done',
+          selected: true,
+          onPressed: _saving ? null : _finishEditing,
         ),
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(Icons.check, color: color),
-        tooltip: 'Done',
-        onPressed: _saving ? null : _finishEditing,
-      ),
-    ]);
+      ],
+    );
   }
 
   Widget _body(BuildContext context) {
@@ -881,9 +827,18 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     if (_error != null) {
       return Padding(
         padding: EdgeInsets.only(top: top),
-        child: _ErrorView(
-          message: _error!,
-          onOpenWith: () => OpenFilex.open(_file.path),
+        child: ViewerMessage(
+          icon: LucideIcons.fileX,
+          destructive: true,
+          title: "Couldn't open this document",
+          message: _error,
+          actions: [
+            OutlinedButton.icon(
+              onPressed: () => OpenFilex.open(_file.path),
+              icon: const Icon(LucideIcons.externalLink, size: 16),
+              label: const Text('Open with another app'),
+            ),
+          ],
         ),
       );
     }
@@ -929,19 +884,24 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
         Positioned.fill(child: view),
         if (_searchOpen)
           Positioned(
-            top: top,
-            left: 8,
-            right: 8,
-            child: _SearchBar(
-              controller: _searchCtrl,
-              focusNode: _searchFocus,
-              onChanged: _onSearchChanged,
-              onSubmitted: (_) => _step(1),
-              count: _matches.length,
-              index: _matchIndex,
-              onPrev: () => _step(-1),
-              onNext: () => _step(1),
-              onClose: _toggleSearch,
+            top: top + 8,
+            left: 12,
+            right: 12,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: _SearchBar(
+                  controller: _searchCtrl,
+                  focusNode: _searchFocus,
+                  onChanged: _onSearchChanged,
+                  onSubmitted: (_) => _step(1),
+                  count: _matches.length,
+                  index: _matchIndex,
+                  onPrev: () => _step(-1),
+                  onNext: () => _step(1),
+                  onClose: _toggleSearch,
+                ),
+              ),
             ),
           ),
       ],
@@ -952,11 +912,14 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
     return AdaptiveSplitView(
       secondaryWidth: 280,
       primary: content,
-      secondary: Padding(
-        padding: EdgeInsets.only(top: top),
-        child: _OutlineList(
-          headings: headings,
-          onTap: (i, para) => _viewController.reveal(i, paragraph: para),
+      secondary: ColoredBox(
+        color: context.colors.background,
+        child: Padding(
+          padding: EdgeInsets.only(top: top),
+          child: _OutlineList(
+            headings: headings,
+            onTap: (i, para) => _viewController.reveal(i, paragraph: para),
+          ),
         ),
       ),
     );
@@ -988,113 +951,67 @@ class _PageSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shadow = Theme.of(context).brightness == Brightness.dark
-        ? const Color(0x66000000)
-        : const Color(0x33000000);
     final paper = darkPage ? const Color(0xFF1F1F22) : Colors.white;
     final ink = darkPage ? const Color(0x1FFFFFFF) : const Color(0x12000000);
-    return LayoutBuilder(
-      builder: (context, c) {
-        final readable = math.min(c.maxWidth - 24, 900.0);
-        final scale = math.max(0.05, readable / page.width);
-        final w = page.width * scale;
-        final h = page.height * scale;
-        final lineGap = 11 * 1.9 * scale;
-        final bottom = h - page.marginBottom * scale;
-        final bars = <Widget>[];
-        var y = page.marginTop * scale;
-        for (var i = 0; y + lineGap < bottom; i++) {
-          final f = _pattern[i % _pattern.length];
-          if (f > 0) {
-            bars.add(
-              Positioned(
-                left: page.marginLeft * scale,
-                top: y,
-                width: page.contentWidth * scale * f,
-                height: lineGap * 0.45,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: ink,
-                    borderRadius: BorderRadius.circular(2),
+    return ColoredBox(
+      color: ViewerSurface.canvas(context),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final readable = math.min(c.maxWidth - 24, 900.0);
+          final scale = math.max(0.05, readable / page.width);
+          final w = page.width * scale;
+          final h = page.height * scale;
+          final lineGap = 11 * 1.9 * scale;
+          final bottom = h - page.marginBottom * scale;
+          final bars = <Widget>[];
+          var y = page.marginTop * scale;
+          for (var i = 0; y + lineGap < bottom; i++) {
+            final f = _pattern[i % _pattern.length];
+            if (f > 0) {
+              bars.add(
+                Positioned(
+                  left: page.marginLeft * scale,
+                  top: y,
+                  width: page.contentWidth * scale * f,
+                  height: lineGap * 0.45,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: ink,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
-            );
+              );
+            }
+            y += lineGap;
           }
-          y += lineGap;
-        }
-        return Stack(
-          children: [
-            Positioned(
-              top: topPadding + 16,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  width: w,
-                  height: h,
-                  decoration: BoxDecoration(
-                    color: paper,
-                    boxShadow: [
-                      BoxShadow(
-                        color: shadow,
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
+          return Stack(
+            children: [
+              Positioned(
+                top: topPadding + 16,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    width: w,
+                    height: h,
+                    decoration: ViewerSurface.page(context, paper: paper),
+                    child: Stack(children: bars),
                   ),
-                  child: Stack(children: bars),
                 ),
               ),
-            ),
-            Positioned(
-              top: topPadding,
-              left: 0,
-              right: 0,
-              child: LinearProgressIndicator(
-                minHeight: 2,
-                value: progress > 0 ? progress : null,
+              Positioned(
+                top: topPadding,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  value: progress > 0 ? progress : null,
+                ),
               ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onOpenWith});
-  final String message;
-  final VoidCallback onOpenWith;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.description_outlined,
-              size: 56,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: onOpenWith,
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Open with another app'),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1125,59 +1042,52 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      elevation: 3,
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(28),
-      child: SizedBox(
-        height: 52,
+    return AppPanel(
+      translucent: true,
+      padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
+      child: Material(
+        type: MaterialType.transparency,
         child: Row(
           children: [
-            const SizedBox(width: 12),
-            Icon(Icons.search, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 8),
             Expanded(
-              child: TextField(
+              child: ViewerSearchField(
                 controller: controller,
                 focusNode: focusNode,
                 onChanged: onChanged,
                 onSubmitted: onSubmitted,
-                textInputAction: TextInputAction.search,
-                decoration: const InputDecoration(
-                  hintText: 'Find in document',
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
               ),
             ),
             if (controller.text.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Text(
-                  count == 0 ? '0/0' : '${index + 1}/$count',
-                  style: Theme.of(context).textTheme.labelMedium,
+                  count == 0 ? 'No matches' : '${index + 1}/$count',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
-            IconButton(
-              tooltip: 'Previous',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.keyboard_arrow_up),
+            ViewerAction(
+              tooltip: 'Previous match',
+              icon: LucideIcons.chevronUp,
+              size: 36,
+              iconSize: 18,
               onPressed: count == 0 ? null : onPrev,
             ),
-            IconButton(
-              tooltip: 'Next',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.keyboard_arrow_down),
+            ViewerAction(
+              tooltip: 'Next match',
+              icon: LucideIcons.chevronDown,
+              size: 36,
+              iconSize: 18,
               onPressed: count == 0 ? null : onNext,
             ),
-            IconButton(
-              tooltip: 'Close',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.close),
+            ViewerAction(
+              tooltip: 'Close search',
+              icon: LucideIcons.x,
+              size: 36,
+              iconSize: 18,
               onPressed: onClose,
             ),
-            const SizedBox(width: 4),
           ],
         ),
       ),
@@ -1197,43 +1107,33 @@ class _OutlineList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(type: MaterialType.transparency, child: _list(theme));
-  }
-
-  Widget _list(ThemeData theme) {
-    return ListView.builder(
-      controller: controller,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: headings.length + 1,
-      itemBuilder: (context, i) {
-        if (i == 0) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Text('Outline', style: theme.textTheme.titleSmall),
+    return Material(
+      type: MaterialType.transparency,
+      child: ListView.builder(
+        controller: controller,
+        padding: const EdgeInsets.only(bottom: 16),
+        itemCount: headings.length + 1,
+        itemBuilder: (context, i) {
+          if (i == 0) {
+            return ViewerSectionLabel(
+              'Outline',
+              padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+              trailing: Text(
+                '${headings.length}',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            );
+          }
+          final (index, para) = headings[i - 1];
+          final level = para.headingLevel ?? 1;
+          return ViewerListTile(
+            title: para.plainText.replaceAll('￼', '').trim(),
+            indent: (level - 1) * 14.0,
+            emphasis: level == 1,
+            onTap: () => onTap(index, para),
           );
-        }
-        final (index, para) = headings[i - 1];
-        final level = para.headingLevel ?? 1;
-        return ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.only(
-            left: 16.0 + (level - 1) * 14,
-            right: 12,
-          ),
-          title: Text(
-            para.plainText.replaceAll('\uFFFC', '').trim(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: level == 1
-                ? theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  )
-                : theme.textTheme.bodyMedium,
-          ),
-          onTap: () => onTap(index, para),
-        );
-      },
+        },
+      ),
     );
   }
 }

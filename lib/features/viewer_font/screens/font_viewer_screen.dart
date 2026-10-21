@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
@@ -73,110 +74,174 @@ class _FontViewerScreenState extends State<FontViewerScreen> {
       if (!mounted) return;
       setState(() => _family = family);
     } catch (e) {
-      if (mounted) setState(() => _error = 'This font could not be loaded.\n$e');
+      if (mounted) setState(() => _error = '$e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final title = _info['Full name'] ?? p.basename(widget.file.path);
+    final top = DockedGlossyTopBar.contentTopInset(context);
     return ExplorerScaffold(
       title: title,
       body: _error != null
-          ? Center(child: Text(_error!, textAlign: TextAlign.center))
+          ? ViewerMessage(
+              icon: LucideIcons.fileX2,
+              title: "This font couldn't be loaded",
+              message: 'The file may be damaged or not a TrueType/OpenType '
+                  'font.',
+              details: _error,
+              padding: EdgeInsets.fromLTRB(24, top + 24, 24, 24),
+            )
           : _family == null
-              ? const Center(child: CircularProgressIndicator())
+              ? Padding(
+                  padding: EdgeInsets.only(top: top),
+                  child: const ViewerLoading(label: 'Loading font…'),
+                )
               : _buildBody(context),
     );
   }
 
   Widget _buildBody(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = TextStyle(fontFamily: _family, color: theme.colorScheme.onSurface);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final style = TextStyle(fontFamily: _family, color: colors.foreground);
     const glyphs =
         'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
         '!?@#\$%&*()[]{}<>/\\|+-=_.,:;\'"~^`€£¥©®™°±×÷¿¡ÀÉÎÕÜßæøñçΩπ';
+    final details = {
+      for (final e in _info.entries)
+        if (e.key != 'Full name') e.key: e.value,
+    };
 
     return ReadableWidth(
       maxWidth: 1000,
       child: ListView(
         padding: EdgeInsets.fromLTRB(
-          20,
-          DockedGlossyTopBar.contentTopInset(context) + 8,
-          20,
+          16,
+          DockedGlossyTopBar.contentTopInset(context) + 16,
+          16,
           32 + MediaQuery.paddingOf(context).bottom,
         ),
         children: [
-          if (_info.isNotEmpty)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
+          // Specimen: the font's own name, set in the font.
+          SurfaceCard(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final e in _info.entries)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Text.rich(TextSpan(children: [
-                          TextSpan(
-                            text: '${e.key}: ',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          TextSpan(text: e.value),
-                        ])),
+                    Expanded(
+                      child: Text(
+                        _info['Full name'] ?? p.basenameWithoutExtension(
+                          widget.file.path,
+                        ),
+                        style: style.copyWith(fontSize: 34, height: 1.15),
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    StatusBadge(
+                      p.extension(widget.file.path).replaceFirst('.', '')
+                          .toUpperCase(),
+                      outline: true,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Aa Bb Cc Dd Ee Ff Gg 0123456789',
+                  style: style.copyWith(
+                    fontSize: 18,
+                    color: colors.mutedForeground,
+                  ),
+                ),
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  DetailList(entries: details.entries, labelWidth: 110),
+                ] else
+                  const SizedBox(height: 12),
+              ],
+            ),
+          ),
+          const SectionLabel('Preview'),
+          TextField(
+            controller: _sample,
+            decoration: const InputDecoration(
+              hintText: 'Type to preview',
+              prefixIcon: Icon(LucideIcons.type, size: 16),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 8),
+          for (final size in const [12.0, 16.0, 24.0, 36.0, 48.0, 72.0])
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: colors.border)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 44,
+                      child: Text(
+                        '${size.toInt()}',
+                        style: text.labelMedium?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        _sample.text,
+                        style: style.copyWith(fontSize: size, height: 1.2),
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _sample,
-            decoration: const InputDecoration(
-              labelText: 'Sample text',
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (_) => setState(() {}),
+          SectionLabel(
+            'Glyphs',
+            trailing: CountPill('${glyphs.runes.length}'),
           ),
-          const SizedBox(height: 16),
-          for (final size in const [12.0, 16.0, 24.0, 36.0, 48.0, 72.0])
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // Square cells that fill the row.
+              const gap = 6.0;
+              final columns = (constraints.maxWidth / 64).floor().clamp(4, 14);
+              final cell =
+                  (constraints.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
                 children: [
-                  Text('${size.toInt()} pt', style: theme.textTheme.labelSmall),
-                  Text(_sample.text, style: style.copyWith(fontSize: size)),
+                  for (final ch in glyphs.runes.map(String.fromCharCode))
+                    Container(
+                      width: cell,
+                      height: cell,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: colors.card,
+                        border: Border.all(color: colors.border),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(ch, style: style.copyWith(fontSize: 24)),
+                    ),
                 ],
-              ),
-            ),
-          const Divider(height: 32),
-          Text('Glyphs', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final ch in glyphs.runes.map(String.fromCharCode))
-                Container(
-                  width: 52,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: theme.colorScheme.outlineVariant),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(ch, style: style.copyWith(fontSize: 26)),
-                ),
-            ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 }
-
-/// Reads human-readable entries from an OpenType `name` table.
+// Reads human-readable entries from an OpenType `name` table.
 Map<String, String> readFontNames(Uint8List bytes) {
   const labels = {
     4: 'Full name',

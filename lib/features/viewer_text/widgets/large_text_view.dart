@@ -5,6 +5,8 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
+import 'package:explorer/features/viewer_text/code_editor_controller.dart';
 import 'package:explorer/features/viewer_text/large_text_index.dart';
 import 'package:explorer/features/viewer_text/text_document.dart';
 import 'package:flutter/material.dart';
@@ -434,27 +436,28 @@ class LargeTextViewState extends State<LargeTextView> {
   Widget build(BuildContext context) {
     final error = _error;
     if (error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text('Could not read this file.\n$error', textAlign: TextAlign.center),
-        ),
+      return ViewerMessage(
+        icon: LucideIcons.fileX2,
+        title: "Couldn't read this file",
+        details: error,
       );
     }
     final index = _index;
-    if (index == null) return const Center(child: CircularProgressIndicator());
+    if (index == null) return const ViewerLoading();
 
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final charWidth = _charWidth();
     // Reserve gutter digits for the estimated final line count so the width
     // doesn't jump when indexing finishes.
     final estimatedLines = index.complete || index.endOffset <= 0
         ? index.lineCount
         : (index.lineCount * _fileLength / index.endOffset).ceil();
-    final gutterWidth = 16 + '$estimatedLines'.length * charWidth;
+    final gutterWidth = 20 + '$estimatedLines'.length * charWidth;
     final maxRowChars = index.maxRowLength ~/ index.unit;
-    final gutterStyle = widget.style.copyWith(color: scheme.outline);
-    final highlight = scheme.tertiaryContainer;
+    final gutterStyle = widget.style.copyWith(
+      color: colors.mutedForeground.withValues(alpha: 0.75),
+    );
+    final highlight = CodeTheme.of(context).currentMatch;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -499,13 +502,16 @@ class LargeTextViewState extends State<LargeTextView> {
           children: [
             Container(
               width: gutterWidth,
-              color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              decoration: BoxDecoration(
+                color: colors.muted.withValues(alpha: 0.35),
+                border: Border(right: BorderSide(color: colors.border)),
+              ),
               child: ScrollConfiguration(
                 behavior: const ScrollBehavior().copyWith(scrollbars: false),
                 child: ListView.builder(
                   controller: _gutter,
                   physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(4, 12, 8, 48),
+                  padding: const EdgeInsets.fromLTRB(4, 12, 10, 48),
                   itemExtent: widget.lineHeight,
                   itemCount: index.rowCount,
                   itemBuilder: (context, r) {

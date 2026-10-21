@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:explorer/core/services/local_content_server.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/features/viewer_text/screens/text_editor_screen.dart';
 import 'package:explorer/features/viewer_text/text_document.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
@@ -148,6 +149,10 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.colors.destructive,
+                  foregroundColor: context.colors.destructiveForeground,
+                ),
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text('Discard'),
               ),
@@ -162,23 +167,24 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_showSource && _dirty)
-              IconButton(
-                icon: const Icon(Icons.save_outlined),
+              AppIconButton(
+                icon: Icon(LucideIcons.save, color: context.colors.primary),
                 tooltip: 'Save',
                 onPressed: _save,
               ),
+            const SizedBox(width: 4),
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: SegmentedButton<bool>(
                 segments: const [
                   ButtonSegment(
                     value: false,
-                    icon: Icon(Icons.web, size: 18),
+                    icon: Icon(LucideIcons.appWindow, size: 16),
                     tooltip: 'Rendered page',
                   ),
                   ButtonSegment(
                     value: true,
-                    icon: Icon(Icons.code, size: 18),
+                    icon: Icon(LucideIcons.code, size: 16),
                     tooltip: 'Source',
                   ),
                 ],
@@ -189,7 +195,7 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
                 }),
                 showSelectedIcon: false,
                 style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: VisualDensity(horizontal: -2, vertical: -2),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
@@ -219,36 +225,23 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
 
   Widget _buildRendered() {
     final base = _base;
-    if (base == null) return const Center(child: CircularProgressIndicator());
+    if (base == null) return const ViewerLoading();
     final url = base.resolve(Uri.encodeComponent(p.basename(widget.file.path)));
-    final scheme = Theme.of(context).colorScheme;
     return Column(
       children: [
         if (_pageHasScripts && !_scriptsEnabled)
-          Material(
-            color: scheme.secondaryContainer.withValues(alpha: 0.6),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-              child: Row(
-                children: [
-                  Icon(Icons.shield_outlined, size: 18, color: scheme.onSecondaryContainer),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Scripts on this page are off. Turn them on only if you '
-                      'trust where the file came from.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSecondaryContainer,
-                          ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() => _scriptsEnabled = true),
-                    child: const Text('Enable scripts'),
-                  ),
-                ],
+          ViewerNotice(
+            icon: LucideIcons.shieldAlert,
+            tone: Tone.warning,
+            margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            message: 'Scripts on this page are off. Turn them on only if you '
+                'trust where the file came from.',
+            actions: [
+              TextButton(
+                onPressed: () => setState(() => _scriptsEnabled = true),
+                child: const Text('Enable scripts'),
               ),
-            ),
+            ],
           ),
         Expanded(
           child: InAppWebView(

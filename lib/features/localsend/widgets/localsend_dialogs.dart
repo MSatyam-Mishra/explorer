@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:explorer/core/services/localsend/localsend.dart';
 import 'package:explorer/features/localsend/widgets/localsend_common.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 
 /// Result of the incoming-transfer dialog.
@@ -30,10 +31,8 @@ Future<LsIncomingAnswer> showLsIncomingDialog(
   final result = await showDialog<LsIncomingAnswer>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => lsThemed(
-      context,
-      _IncomingDialog(request: request, alreadyTrusted: alreadyTrusted),
-    ),
+    builder: (_) =>
+        _IncomingDialog(request: request, alreadyTrusted: alreadyTrusted),
   );
   open = false;
   return result ?? const LsIncomingAnswer(accept: false);
@@ -56,16 +55,32 @@ class _IncomingDialogState extends State<_IncomingDialog> {
   Widget build(BuildContext context) {
     final r = widget.request;
     final sender = r.sender;
-    final theme = Theme.of(context);
+    final text = Theme.of(context).textTheme;
     final count = r.files.length;
     final files = List.of(r.files)
       ..sort((a, b) => a.fileName.compareTo(b.fileName));
     return AlertDialog(
-      icon: Icon(lsDeviceIcon(sender.deviceType), size: 36),
-      titleTextStyle: theme.textTheme.titleLarge,
-      title: Text(
-        '${sender.alias} wants to send you $count ${count == 1 ? 'file' : 'files'}',
-        textAlign: TextAlign.center,
+      title: Row(
+        children: [
+          IconBox(lsDeviceIcon(sender.deviceType)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  sender.alias,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  'wants to send you $count ${count == 1 ? 'file' : 'files'}',
+                  style: text.bodySmall?.copyWith(fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       content: SizedBox(
         width: 420,
@@ -79,49 +94,68 @@ class _IncomingDialogState extends State<_IncomingDialog> {
                 r.senderIp,
                 lsSize(r.totalSize),
               ].join(' · '),
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
+              style: text.bodySmall,
             ),
             const SizedBox(height: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 280),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: files.length,
-                itemBuilder: (context, i) {
-                  final f = files[i];
-                  return ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: LsFileIcon(f.fileName, size: 32),
-                    title: Text(
-                      f.fileName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Text(
-                      lsSize(f.size),
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  );
-                },
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: context.colors.border),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: files.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final f = files[i];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          LsFileIcon(f.fileName, size: 28),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              f.fileName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: text.bodyMedium,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(lsSize(f.size), style: text.bodySmall),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
             if (!widget.alreadyTrusted && sender.fingerprint.isNotEmpty)
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _trust,
-                onChanged: (v) => setState(() => _trust = v ?? false),
-                title: const Text('Always accept from this device'),
-                subtitle: const Text(
-                  'Needs "Auto-accept trusted devices" in settings',
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: _trust,
+                  onChanged: (v) => setState(() => _trust = v ?? false),
+                  title: const Text('Always accept from this device'),
+                  subtitle: const Text(
+                    'Needs "Auto-accept trusted devices" in settings',
+                  ),
                 ),
               ),
           ],
         ),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () =>
               Navigator.pop(context, const LsIncomingAnswer(accept: false)),
           child: const Text('Decline'),
@@ -146,31 +180,27 @@ Future<String?> showLsPinDialog(
 }) => showDialog<String>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => lsThemed(
-    context,
-    _TextPromptDialog(
-      title: 'PIN for $deviceAlias',
-      label: 'PIN',
-      helper: "Set in the receiver's LocalSend settings",
-      error: invalid ? 'Wrong PIN, try again' : null,
-      action: 'Send',
-    ),
+  builder: (_) => _TextPromptDialog(
+    title: 'PIN for $deviceAlias',
+    label: 'PIN',
+    helper: "Set in the receiver's LocalSend settings",
+    error: invalid ? 'Wrong PIN, try again' : null,
+    action: 'Send',
+    icon: LucideIcons.keyRound,
   ),
 );
 
 /// Asks for `ip` or `ip:port`.
 Future<String?> showLsAddressDialog(BuildContext context) => showDialog<String>(
   context: context,
-  builder: (_) => lsThemed(
-    context,
-    const _TextPromptDialog(
-      title: 'Add device by IP',
-      label: 'IP address',
-      hint: '192.168.1.20 or 192.168.1.20:53317',
-      helper: "Shown in the other device's LocalSend settings",
-      action: 'Add',
-      keyboardType: TextInputType.url,
-    ),
+  builder: (_) => const _TextPromptDialog(
+    title: 'Add device by IP',
+    label: 'IP address',
+    hint: '192.168.1.20 or 192.168.1.20:53317',
+    helper: "Shown in the other device's LocalSend settings",
+    action: 'Add',
+    keyboardType: TextInputType.url,
+    icon: LucideIcons.network,
   ),
 );
 
@@ -183,6 +213,7 @@ class _TextPromptDialog extends StatefulWidget {
     this.helper,
     this.error,
     this.keyboardType,
+    this.icon,
   });
 
   final String title;
@@ -192,6 +223,7 @@ class _TextPromptDialog extends StatefulWidget {
   final String? helper;
   final String? error;
   final TextInputType? keyboardType;
+  final IconData? icon;
 
   @override
   State<_TextPromptDialog> createState() => _TextPromptDialogState();
@@ -212,20 +244,26 @@ class _TextPromptDialogState extends State<_TextPromptDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        keyboardType: widget.keyboardType,
-        decoration: InputDecoration(
-          labelText: widget.label,
-          hintText: widget.hint,
-          helperText: widget.helper,
-          errorText: widget.error,
+      content: SizedBox(
+        width: 400,
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          keyboardType: widget.keyboardType,
+          decoration: InputDecoration(
+            labelText: widget.label,
+            hintText: widget.hint,
+            helperText: widget.helper,
+            errorText: widget.error,
+            prefixIcon: widget.icon == null
+                ? null
+                : Icon(widget.icon, size: 16),
+          ),
+          onSubmitted: (_) => _submit(),
         ),
-        onSubmitted: (_) => _submit(),
       ),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),

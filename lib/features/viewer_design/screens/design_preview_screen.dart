@@ -8,7 +8,7 @@ import 'package:explorer/core/formats/design_preview.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/viewer_design/services/design_pdf_renderer.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:filesize/filesize.dart';
@@ -160,13 +160,13 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
   }
 
   static (IconData, String) _describe(_Action action) => switch (action) {
-        _Action.openAsPdf => (Icons.picture_as_pdf_outlined, 'Open as PDF'),
+        _Action.openAsPdf => (LucideIcons.fileText, 'Open as PDF'),
         _Action.openEmbeddedPdf => (
-            Icons.picture_as_pdf_outlined,
+            LucideIcons.fileText,
             'Open preview PDF',
           ),
-        _Action.viewSource => (Icons.code, 'View source'),
-        _Action.openWith => (Icons.open_in_new, 'Open with another app'),
+        _Action.viewSource => (LucideIcons.code, 'View source'),
+        _Action.openWith => (LucideIcons.externalLink, 'Open with another app'),
       };
 
   Future<void> _run(_Action action) async {
@@ -218,18 +218,15 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
       setState(() => _showInfo = !(_showInfo ?? true));
       return;
     }
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) => FractionallySizedBox(
-        heightFactor: 0.7,
-        child: _DetailsPanel(
-          file: widget.file,
-          preview: _preview,
-          stat: _stat,
-          shown: _shownLabel,
-        ),
+    AppSheet.show<void>(
+      context,
+      maxHeightFraction: 0.75,
+      child: _DetailsPanel(
+        file: widget.file,
+        preview: _preview,
+        stat: _stat,
+        shown: _shownLabel,
+        inSheet: true,
       ),
     );
   }
@@ -255,7 +252,6 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = ClearGlassForeground.icon(context);
     final split = AdaptiveSplitView.isSplit(
       context,
       minWidthForSplit: _splitWidth,
@@ -263,6 +259,7 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
     final showPanel = split && (_showInfo ?? true);
     final actions = _actions;
     final primary = actions.where((a) => a != _Action.openWith).toList();
+    final colors = context.colors;
 
     final canvas = _buildCanvas(context, actions);
     final body = showPanel
@@ -283,45 +280,45 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
 
     return ExplorerScaffold(
       title: p.basename(widget.file.path),
-      trailing: ExplorerTopBar.actions(context, [
-        for (final action in primary.take(split ? 2 : 1))
-          ExplorerTopBar.iconButton(
-            context: context,
-            icon: Icon(_describe(action).$1, color: iconColor),
-            tooltip: _describe(action).$2,
-            onPressed: () => _run(action),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final action in primary.take(split ? 2 : 1))
+            AppIconButton(
+              icon: Icon(_describe(action).$1),
+              tooltip: _describe(action).$2,
+              onPressed: () => _run(action),
+            ),
+          Builder(
+            builder: (buttonContext) => AppIconButton(
+              icon: const Icon(LucideIcons.share2),
+              tooltip: 'Share',
+              onPressed: () => _share(buttonContext),
+            ),
           ),
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: Icon(Icons.info_outline, color: iconColor),
-          tooltip: 'Details',
-          onPressed: () => _toggleDetails(split),
-        ),
-        Builder(
-          builder: (buttonContext) => ExplorerTopBar.iconButton(
-            context: buttonContext,
-            icon: Icon(Icons.share_outlined, color: iconColor),
-            tooltip: 'Share',
-            onPressed: () => _share(buttonContext),
+          ToolButton(
+            icon: split ? LucideIcons.panelRight : LucideIcons.info,
+            tooltip: 'Details',
+            size: 40,
+            iconSize: 20,
+            selected: showPanel,
+            color: colors.foreground,
+            onPressed: () => _toggleDetails(split),
           ),
-        ),
-        PopupMenuButton<_Action>(
-          tooltip: 'More',
-          icon: Icon(Icons.more_vert, color: iconColor),
-          onSelected: _run,
-          itemBuilder: (_) => [
-            for (final action in actions)
-              PopupMenuItem(
-                value: action,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(_describe(action).$1),
-                  title: Text(_describe(action).$2),
+          MenuIconButton<_Action>(
+            onSelected: _run,
+            itemBuilder: (_) => [
+              for (final action in actions)
+                menuItem(
+                  value: action,
+                  icon: _describe(action).$1,
+                  label: _describe(action).$2,
                 ),
-              ),
-          ],
-        ),
-      ]),
+            ],
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
       body: Padding(
         padding: EdgeInsets.only(
           top: DockedGlossyTopBar.contentTopInset(context),
@@ -375,8 +372,12 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
         fit: BoxFit.contain,
         gaplessPlayback: true,
         filterQuality: FilterQuality.medium,
-        errorBuilder: (context, error, stack) => const Center(
-          child: Icon(Icons.broken_image_outlined, size: 48),
+        errorBuilder: (context, error, stack) => Center(
+          child: Icon(
+            LucideIcons.imageOff,
+            size: 40,
+            color: context.colors.mutedForeground,
+          ),
         ),
       );
     }
@@ -385,10 +386,10 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
         ? 'Page 1 · rendered'
         : '${preview.imageSource ?? 'Embedded preview'} · '
             '${preview.imageWidth} × ${preview.imageHeight}';
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
 
     return ColoredBox(
-      color: scheme.surfaceContainerLow,
+      color: colors.muted.withValues(alpha: 0.6),
       child: Stack(
         children: [
           Positioned.fill(
@@ -401,16 +402,19 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
                 maxScale: 12,
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 64),
                     child: AspectRatio(
                       aspectRatio: aspect.isFinite && aspect > 0 ? aspect : 1,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
+                          border: Border.all(color: colors.border),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.18),
-                              blurRadius: 16,
-                              offset: const Offset(0, 4),
+                              color: Colors.black.withValues(
+                                alpha: context.isDarkMode ? 0.3 : 0.06,
+                              ),
+                              blurRadius: 12,
+                              offset: const Offset(0, 2),
                             ),
                           ],
                         ),
@@ -431,7 +435,7 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
             bottom: MediaQuery.paddingOf(context).bottom + 12,
             child: IgnorePointer(
               child: Align(
-                alignment: Alignment.bottomLeft,
+                alignment: Alignment.bottomCenter,
                 child: _Chip(label: label, busy: _rendering),
               ),
             ),
@@ -442,7 +446,7 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
   }
 }
 
-/// Small translucent caption over the canvas.
+/// Small caption pill over the canvas.
 class _Chip extends StatelessWidget {
   const _Chip({required this.label, this.busy = false});
 
@@ -451,47 +455,50 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    final colors = context.colors;
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
+        color: colors.background.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.border),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (busy) ...[
-            const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (busy) ...[
+              const SizedBox.square(
+                dimension: 12,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Text(
+                busy ? '$label · rendering page 1…' : label,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: colors.foreground,
+                    ),
               ),
             ),
-            const SizedBox(width: 8),
           ],
-          Flexible(
-            child: Text(
-              busy ? '$label · rendering page 1…' : label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-/// Transparent areas of previews show as a light checkerboard.
+/// Transparent areas of previews show as a light checkerboard (artwork is
+/// usually made for paper, so it stays light in dark mode too).
 class _CheckerboardPainter extends CustomPainter {
   const _CheckerboardPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFFFFFFFF));
-    final dark = Paint()..color = const Color(0xFFE6E6E6);
+    final dark = Paint()..color = const Color(0xFFEBEBEB);
     const cell = 10.0;
     for (var y = 0.0; y < size.height; y += cell) {
       for (var x = ((y / cell).floor().isOdd ? cell : 0.0);
@@ -534,9 +541,9 @@ class _SkeletonState extends State<_Skeleton>
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     return ColoredBox(
-      color: scheme.surfaceContainerLow,
+      color: colors.muted.withValues(alpha: 0.6),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -544,15 +551,16 @@ class _SkeletonState extends State<_Skeleton>
             mainAxisSize: MainAxisSize.min,
             children: [
               FadeTransition(
-                opacity: Tween(begin: 0.35, end: 0.8).animate(_pulse),
+                opacity: Tween(begin: 0.4, end: 1.0).animate(_pulse),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 360),
                   child: AspectRatio(
                     aspectRatio: 4 / 3,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(16),
+                        color: colors.background,
+                        border: Border.all(color: colors.border),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                   ),
@@ -562,7 +570,7 @@ class _SkeletonState extends State<_Skeleton>
               Text(
                 widget.label,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                      color: colors.mutedForeground,
                     ),
               ),
             ],
@@ -590,8 +598,6 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     const keys = [
       'Created with',
       'Saved as',
@@ -604,7 +610,7 @@ class _EmptyState extends StatelessWidget {
     ];
     final summary = [
       for (final k in keys)
-        if (preview.details[k] != null) (k, preview.details[k]!),
+        if (preview.details[k] != null) MapEntry(k, preview.details[k]!),
     ].take(4).toList();
     final message = preview.note ??
         (preview.pdfCompatible
@@ -612,7 +618,7 @@ class _EmptyState extends StatelessWidget {
             : null);
 
     return ColoredBox(
-      color: scheme.surfaceContainerLow,
+      color: context.colors.muted.withValues(alpha: 0.6),
       child: Center(
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
@@ -623,87 +629,44 @@ class _EmptyState extends StatelessWidget {
           ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 460),
-            child: Material(
-              color: scheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(24),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.design_services_outlined,
-                      size: 48,
-                      color: scheme.primary,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No preview to show',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      preview.format,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                    if (message != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        message,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ],
-                    if (summary.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      for (final (k, v) in summary)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 110,
-                                child: Text(
-                                  k,
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(v, style: theme.textTheme.bodySmall),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                    const SizedBox(height: 20),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final action in actions)
-                          action == actions.first
-                              ? FilledButton.icon(
-                                  onPressed: () => onAction(action),
-                                  icon: Icon(describe(action).$1),
-                                  label: Text(describe(action).$2),
-                                )
-                              : OutlinedButton.icon(
-                                  onPressed: () => onAction(action),
-                                  icon: Icon(describe(action).$1),
-                                  label: Text(describe(action).$2),
-                                ),
-                      ],
-                    ),
+            child: AppPanel(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ViewerMessage(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.only(top: 20),
+                    icon: LucideIcons.penTool,
+                    title: 'No preview to show',
+                    message: [preview.format, ?message].join('\n'),
+                  ),
+                  if (summary.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    DetailList(entries: summary, labelWidth: 110),
                   ],
-                ),
+                  const SizedBox(height: 20),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final action in actions)
+                        action == actions.first
+                            ? FilledButton.icon(
+                                onPressed: () => onAction(action),
+                                icon: Icon(describe(action).$1, size: 16),
+                                label: Text(describe(action).$2),
+                              )
+                            : OutlinedButton.icon(
+                                onPressed: () => onAction(action),
+                                icon: Icon(describe(action).$1, size: 16),
+                                label: Text(describe(action).$2),
+                              ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
@@ -722,6 +685,7 @@ class _DetailsPanel extends StatelessWidget {
     required this.stat,
     this.shown,
     this.onClose,
+    this.inSheet = false,
   });
 
   final File file;
@@ -732,9 +696,11 @@ class _DetailsPanel extends StatelessWidget {
   final String? shown;
   final VoidCallback? onClose;
 
+  /// Inside a bottom sheet, which scrolls and pads its content itself.
+  final bool inSheet;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final preview = this.preview;
     final stat = this.stat;
     final entries = <String, String>{
@@ -748,38 +714,36 @@ class _DetailsPanel extends StatelessWidget {
       if (shown != null) 'Shown': shown!,
       if (preview?.note != null) 'Note': preview!.note!,
     };
-    return Material(
-      color: theme.colorScheme.surface,
-      child: ListView(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          8,
-          16,
-          16 + MediaQuery.paddingOf(context).bottom,
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PanelHeader(
+          title: 'Details',
+          subtitle: preview?.format,
+          onClose: onClose,
+          closeTooltip: 'Hide details',
         ),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text('Details', style: theme.textTheme.titleMedium),
-              ),
-              if (onClose != null)
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Hide details',
-                  onPressed: onClose,
-                ),
-            ],
+        const SizedBox(height: 8),
+        if (preview == null) const LinearProgressIndicator(),
+        DetailList(entries: entries.entries),
+      ],
+    );
+    if (inSheet) return content;
+    // Full height: the split view's Row centres shorter children.
+    return SizedBox(
+      height: double.infinity,
+      child: ColoredBox(
+        color: context.colors.background,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            8,
+            8,
+            16 + MediaQuery.paddingOf(context).bottom,
           ),
-          if (preview == null) const LinearProgressIndicator(),
-          for (final e in entries.entries)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: Text(e.key, style: theme.textTheme.labelMedium),
-              subtitle: SelectableText(e.value),
-            ),
-        ],
+          child: content,
+        ),
       ),
     );
   }

@@ -1,4 +1,4 @@
-import 'package:bootstrap_icons/bootstrap_icons.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 import 'package:explorer/features/sidebar/model/category_model.dart';
 import 'package:explorer/features/sidebar/widgets/category_card.dart';
 import 'package:flutter/material.dart';
@@ -11,14 +11,14 @@ class CategoryGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     // This is our placeholder data for now.
     final List<Category> categories = [
-      Category(icon: BootstrapIcons.image_fill, name: 'Photos', fileCount: 926, color: Colors.purple.shade300),
-      Category(icon: BootstrapIcons.play_circle_fill, name: 'Video', fileCount: 54, color: Colors.red.shade300),
-      Category(icon: BootstrapIcons.music_note_beamed, name: 'Audio', fileCount: 15, color: Colors.orange.shade300),
-      Category(icon: BootstrapIcons.file_earmark_text_fill, name: 'Documents', fileCount: 29, color: Colors.blue.shade300),
-      Category(icon: BootstrapIcons.safe_fill, name: 'Vault', fileCount: 5, color: Colors.teal.shade300),
-      Category(icon: BootstrapIcons.archive_fill, name: 'Archives', fileCount: 1, color: Colors.brown.shade300),
-      Category(icon: BootstrapIcons.download, name: 'Downloads', fileCount: 20, color: Colors.green.shade300),
-      Category(icon: BootstrapIcons.cloud_fill, name: 'Cloud Drive', fileCount: 0, color: Colors.indigo.shade300),
+      Category(icon: LucideIcons.image, name: 'Photos', fileCount: 926, color: Colors.purple.shade300),
+      Category(icon: LucideIcons.clapperboard, name: 'Video', fileCount: 54, color: Colors.red.shade300),
+      Category(icon: LucideIcons.music, name: 'Audio', fileCount: 15, color: Colors.orange.shade300),
+      Category(icon: LucideIcons.fileText, name: 'Documents', fileCount: 29, color: Colors.blue.shade300),
+      Category(icon: LucideIcons.lock, name: 'Vault', fileCount: 5, color: Colors.teal.shade300),
+      Category(icon: LucideIcons.archive, name: 'Archives', fileCount: 1, color: Colors.brown.shade300),
+      Category(icon: LucideIcons.download, name: 'Downloads', fileCount: 20, color: Colors.green.shade300),
+      Category(icon: LucideIcons.cloud, name: 'Cloud Drive', fileCount: 0, color: Colors.indigo.shade300),
     ];
 
     return Padding(

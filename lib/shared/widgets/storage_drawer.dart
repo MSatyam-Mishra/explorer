@@ -3,6 +3,7 @@ import 'package:disk_space_plus/disk_space_plus.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:filesize/filesize.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -64,32 +65,55 @@ class _StorageDrawerItemState extends State<StorageDrawerItem> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final total = _totalSpace;
+    final used = _usedSpace;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0),
-      child: ListTile(
-        leading: Icon(widget.icon),
-        title: Text(widget.title),
-        subtitle: _totalSpace == null
-            ? null
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: _totalSpace! > 0 ? _usedSpace! / _totalSpace! : 0,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${filesize(((_totalSpace! - _usedSpace!) * 1024 * 1024).toInt())} free of ${filesize((_totalSpace! * 1024 * 1024).toInt())}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
         onTap: () {
           dismissDrawer(context);
           context.read<FileExplorerBloc>().add(LoadDirectory(widget.path));
         },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Row(
+            children: [
+              Icon(widget.icon, size: 18, color: colors.foreground),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w500),
+                    ),
+                    if (total != null && used != null && total > 0) ...[
+                      const SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: used / total,
+                        minHeight: 4,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${filesize(((total - used) * 1024 * 1024).toInt())} '
+                        'free of ${filesize((total * 1024 * 1024).toInt())}',
+                        style: text.bodySmall,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

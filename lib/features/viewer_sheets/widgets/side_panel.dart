@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../controller/spreadsheet_controller.dart';
@@ -21,10 +22,8 @@ class SheetSidePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     return Material(
-      color: scheme.surfaceContainerLow.withValues(alpha: 0.92),
+      color: context.colors.background,
       child: ListenableBuilder(
         listenable: controller,
         builder: (context, _) {
@@ -32,20 +31,18 @@ class SheetSidePanel extends StatelessWidget {
           return CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text('Sheets', style: theme.textTheme.titleSmall)),
-                      if (onAdd != null)
-                        IconButton(
-                          tooltip: 'Add sheet',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.add_rounded),
-                          onPressed: onAdd,
-                        ),
-                    ],
-                  ),
+                child: ViewerPanelHeader(
+                  title: 'Sheets',
+                  subtitle: '${wb.sheets.length} sheet${wb.sheets.length == 1 ? '' : 's'}',
+                  actions: [
+                    if (onAdd != null)
+                      ViewerAction(
+                        tooltip: 'Add sheet',
+                        icon: LucideIcons.plus,
+                        iconSize: 18,
+                        onPressed: onAdd,
+                      ),
+                  ],
                 ),
               ),
               SliverList.builder(
@@ -56,27 +53,23 @@ class SheetSidePanel extends StatelessWidget {
                   return GestureDetector(
                     onSecondaryTapUp: (d) => onTabMenu(i, d.globalPosition),
                     onLongPressStart: (d) => onTabMenu(i, d.globalPosition),
-                    child: ListTile(
-                      dense: true,
+                    child: ViewerListTile(
+                      leading: Icon(hidden ? LucideIcons.eyeOff : LucideIcons.sheet),
+                      title: s.name,
+                      subtitle: s.usedRows == 0 ? 'Empty' : '${s.usedRows} rows · ${s.usedCols} columns',
                       selected: i == wb.activeSheet,
-                      selectedTileColor: scheme.primary.withValues(alpha: 0.1),
-                      leading: Icon(hidden ? Icons.visibility_off_outlined : Icons.grid_on_rounded, size: 18),
-                      title: Text(
-                        s.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: hidden ? const TextStyle(fontStyle: FontStyle.italic) : null,
-                      ),
-                      subtitle: Text(
-                        s.usedRows == 0 ? 'Empty' : '${s.usedRows} rows · ${s.usedCols} columns',
-                        maxLines: 1,
-                      ),
+                      maxLines: 1,
                       onTap: () => controller.activateSheet(i),
                     ),
                   );
                 },
               ),
-              const SliverToBoxAdapter(child: Divider(height: 24)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(height: 1, color: context.colors.border),
+                ),
+              ),
               SliverToBoxAdapter(child: _Inspector(controller: controller)),
             ],
           );
@@ -93,6 +86,7 @@ class _Inspector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = context.colors;
     final c = controller;
     final cell = c.activeCell;
     final st = cell?.style ?? CellStyle.plain;
@@ -130,20 +124,41 @@ class _Inspector extends StatelessWidget {
         children: [
           Text('Cell', style: theme.textTheme.titleSmall),
           const SizedBox(height: 8),
-          for (final (k, val) in rows)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: colors.border),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Column(
                 children: [
-                  SizedBox(
-                    width: 84,
-                    child: Text(k, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                  ),
-                  Expanded(child: SelectableText(val, style: theme.textTheme.bodySmall)),
+                  for (final (k, val) in rows)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 84,
+                            child: Text(k, style: theme.textTheme.bodySmall),
+                          ),
+                          Expanded(
+                            child: SelectableText(
+                              val,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.foreground,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
+          ),
           if (stats.cells > 1) ...[
             const SizedBox(height: 16),
             Text('Selection', style: theme.textTheme.titleSmall),

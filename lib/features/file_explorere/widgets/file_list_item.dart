@@ -1,13 +1,27 @@
 import 'dart:io';
-import 'package:explorer/core/files/file_types.dart';
-import 'package:filesize/filesize.dart';
+
+import 'package:explorer/core/services/folder_prefs_service.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
-import 'file_type_icon.dart';
-import 'gradient_folder_icon.dart';
+import 'entity_meta.dart';
 
+/// How a [FileListItem] lays out its details.
+enum FileRowStyle {
+  /// 60 px: icon, name and a "size · date" line.
+  comfortable,
+
+  /// 40 px: small icon, name and the size on the right.
+  compact,
+
+  /// Wide screens: name, modified, type and size in columns that line up
+  /// with [FileTableHeader].
+  table,
+}
+
+/// One file or folder in the explorer's list views.
 class FileListItem extends StatelessWidget {
   final FileSystemEntity entity;
   final bool isSelectionMode;
@@ -15,6 +29,10 @@ class FileListItem extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final String? displayName;
+  final FileRowStyle style;
+
+  /// Right click / two-finger tap (desktop, trackpads).
+  final VoidCallback? onSecondaryTap;
 
   const FileListItem({
     super.key,
@@ -24,106 +42,354 @@ class FileListItem extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     this.displayName,
+    this.style = FileRowStyle.comfortable,
+    this.onSecondaryTap,
   });
+
+  static double heightFor(FileRowStyle style) => switch (style) {
+        FileRowStyle.comfortable => 60,
+        FileRowStyle.compact => 40,
+        FileRowStyle.table => 48,
+      };
+
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final rawTitle = displayName ?? p.basename(entity.path);
     final title = rawTitle.isEmpty ? entity.path : rawTitle;
-    final isDirectory = entity is Directory;
+    final radius = BorderRadius.circular(8);
 
-    return InkWell(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Row(
+    final iconSize = switch (style) {
+      FileRowStyle.comfortable => 40.0,
+      FileRowStyle.compact => 24.0,
+      FileRowStyle.table => 28.0,
+    };
+
+    final row = Row(
+      children: [
+        EntityIcon(entity: entity, size: iconSize),
+        SizedBox(width: style == FileRowStyle.compact ? 10 : 12),
+        Expanded(child: _details(context, title)),
+        if (isSelectionMode) ...[
+          const SizedBox(width: 12),
+          SelectionCheck(selected: isSelected),
+        ],
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: Material(
+        color: isSelected ? colors.accent : Colors.transparent,
+        borderRadius: radius,
+        child: InkWell(
+          borderRadius: radius,
+          onTap: onTap,
+          onLongPress: onLongPress,
+          onSecondaryTap: onSecondaryTap,
+          child: SizedBox(
+            height: heightFor(style),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: style == FileRowStyle.compact ? 10 : 12,
+              ),
+              child: row,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _details(BuildContext context, String title) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final nameStyle = text.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w500,
+      color: isSelected ? colors.accentForeground : colors.foreground,
+    );
+    final name = Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: nameStyle,
+    );
+
+    switch (style) {
+      case FileRowStyle.comfortable:
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Conditionally show the correct icon
-          isDirectory ? const GradientFolderIcon() : FileTypeIcon(filePath: entity.path),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            name,
+            const SizedBox(height: 2),
+            EntityStatBuilder(
+              entity: entity,
+              builder: (context, stat) => Text(
+                stat == null ? ' ' : EntityFormat.summary(entity, stat),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text.bodySmall,
+              ),
+            ),
+          ],
+        );
+      case FileRowStyle.compact:
+        return Row(
+          children: [
+            Expanded(child: name),
+            if (entity is File)
+              EntityStatBuilder(
+                entity: entity,
+                builder: (context, stat) => stat == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Text(
+                          EntityFormat.size(stat.size),
+                          style: text.bodySmall,
+                        ),
+                      ),
+              ),
+          ],
+        );
+      case FileRowStyle.table:
+        final cell = text.bodySmall?.copyWith(
+          fontSize: 13,
+          color: colors.mutedForeground,
+        );
+        return Row(
+          children: [
+            Expanded(child: name),
+            EntityStatBuilder(
+              entity: entity,
+              builder: (context, stat) => Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
+                  _Cell(
+                    width: FileTableHeader.modifiedWidth,
+                    child: Text(
+                      stat == null ? '' : EntityFormat.date(stat.modified),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: cell,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
-                  _EntitySubtitle(
-                    entity: entity,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                  _Cell(
+                    width: FileTableHeader.typeWidth,
+                    child: Text(
+                      EntityFormat.kind(entity),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: cell,
+                    ),
+                  ),
+                  _Cell(
+                    width: FileTableHeader.sizeWidth,
+                    alignEnd: true,
+                    child: Text(
+                      stat == null || entity is Directory
+                          ? '—'
+                          : EntityFormat.size(stat.size),
+                      maxLines: 1,
+                      style: cell,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 16),
-
-            // Checkbox is now at the end, and only visible in selection mode
-            if (isSelectionMode)
-              Checkbox(
-                value: isSelected,
-                onChanged: (val) => onTap(),
-              ),
           ],
+        );
+    }
+  }
+}
+
+class _Cell extends StatelessWidget {
+  const _Cell({required this.width, required this.child, this.alignEnd = false});
+
+  final double width;
+  final Widget child;
+  final bool alignEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 16),
+        child: Align(
+          alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
+          child: child,
         ),
       ),
     );
   }
 }
 
-/// "1.2 MB · PDF document · Mar 4, 2026" for files, date only for folders.
-class _EntitySubtitle extends StatefulWidget {
-  const _EntitySubtitle({required this.entity, this.style});
+/// Column headings above [FileRowStyle.table] rows; tapping one sorts by it
+/// (tapping the active column again flips the order).
+class FileTableHeader extends StatelessWidget {
+  const FileTableHeader({
+    super.key,
+    required this.sortOption,
+    required this.sortOrder,
+    required this.onSort,
+    this.showSelectionColumn = false,
+  });
 
-  final FileSystemEntity entity;
-  final TextStyle? style;
+  static const double modifiedWidth = 184;
+  static const double typeWidth = 148;
+  static const double sizeWidth = 96;
 
-  @override
-  State<_EntitySubtitle> createState() => _EntitySubtitleState();
-}
-
-class _EntitySubtitleState extends State<_EntitySubtitle> {
-  static final _date = DateFormat.yMMMd();
-  late Future<FileStat> _stat = widget.entity.stat();
-
-  @override
-  void didUpdateWidget(_EntitySubtitle oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.entity.path != widget.entity.path) {
-      _stat = widget.entity.stat();
-    }
-  }
+  final SortOption sortOption;
+  final SortOrder sortOrder;
+  final void Function(SortOption option, SortOrder order) onSort;
+  final bool showSelectionColumn;
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<FileStat>(
-      future: _stat,
-      builder: (context, snapshot) {
-        final stat = snapshot.data;
-        String text = ' ';
-        if (stat != null && stat.type != FileSystemEntityType.notFound) {
-          final date = _date.format(stat.modified);
-          text = widget.entity is Directory
-              ? date
-              : '${filesize(stat.size)} · '
-                  '${FileTypes.describe(FileTypes.kindOf(widget.entity.path))} · $date';
-        }
-        return Text(
-          text,
-          style: widget.style,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+    final colors = context.colors;
+    Widget heading(String label, SortOption option, {bool alignEnd = false}) {
+      final active = sortOption == option;
+      final ascending = sortOrder == SortOrder.ascending;
+      return _HeaderButton(
+        label: label,
+        active: active,
+        ascending: ascending,
+        alignEnd: alignEnd,
+        onTap: () => onSort(
+          option,
+          active && ascending ? SortOrder.descending : SortOrder.ascending,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: colors.border)),
+        ),
+        child: SizedBox(
+          height: 40,
+          child: Padding(
+            // Lines up with the rows: 12 padding + 28 icon + 12 gap, minus
+            // the headings' own 8 px padding.
+            padding: const EdgeInsets.only(left: 52 - 8, right: 12),
+            child: Row(
+              children: [
+                Expanded(child: heading('Name', SortOption.name)),
+                SizedBox(
+                  width: modifiedWidth,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: heading('Modified', SortOption.date),
+                  ),
+                ),
+                SizedBox(
+                  width: typeWidth,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: heading('Type', SortOption.type),
+                  ),
+                ),
+                SizedBox(
+                  width: sizeWidth,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: heading('Size', SortOption.size, alignEnd: true),
+                  ),
+                ),
+                if (showSelectionColumn) const SizedBox(width: 12 + 18),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderButton extends StatelessWidget {
+  const _HeaderButton({
+    required this.label,
+    required this.active,
+    required this.ascending,
+    required this.onTap,
+    this.alignEnd = false,
+  });
+
+  final String label;
+  final bool active;
+  final bool ascending;
+  final bool alignEnd;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final style = Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: active ? colors.foreground : colors.mutedForeground,
         );
-      },
+    return Align(
+      alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(8, 6, alignEnd ? 0 : 8, 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label, style: style),
+              const SizedBox(width: 4),
+              Icon(
+                active
+                    ? (ascending ? LucideIcons.arrowUp : LucideIcons.arrowDown)
+                    : LucideIcons.chevronsUpDown,
+                size: 12,
+                color: active
+                    ? colors.foreground
+                    : colors.mutedForeground.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// shadcn-style checkbox drawn in rows and tiles while selecting; taps go
+/// to the row.
+class SelectionCheck extends StatelessWidget {
+  const SelectionCheck({super.key, required this.selected, this.size = 18});
+
+  final bool selected;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: selected ? colors.primary : colors.background,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(
+          color: selected ? colors.primary : colors.mutedForeground,
+          width: 1.25,
+        ),
+      ),
+      child: selected
+          ? Icon(
+              LucideIcons.check,
+              size: size - 5,
+              color: colors.primaryForeground,
+            )
+          : null,
     );
   }
 }

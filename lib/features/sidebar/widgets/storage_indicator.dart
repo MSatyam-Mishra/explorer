@@ -28,7 +28,7 @@ class _StorageIndicatorState extends State<StorageIndicator> {
     if (mounted) {
       setState(() {
         _totalSpace = total;
-        _usedSpace = total != null && free != null ? total - free : null;
+        _usedSpace = total - free;
       });
     }
   }
@@ -51,16 +51,13 @@ class _StorageIndicatorState extends State<StorageIndicator> {
         children: [
           Text(
             '${filesize(usedBytes)} of ${filesize(totalBytes)} Used',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)
-            ),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
             value: progress,
             minHeight: 6,
             borderRadius: BorderRadius.circular(3),
-            backgroundColor: Theme.of(context).colorScheme.surface,
           ),
         ],
       ),

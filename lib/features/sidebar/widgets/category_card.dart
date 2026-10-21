@@ -1,9 +1,7 @@
-import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:explorer/features/sidebar/model/category_model.dart';
-
-
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
-
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 class CategoryCard extends StatelessWidget {
   final Category category;
@@ -11,17 +9,19 @@ class CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        // TODO: Navigate to file list with a filter for this category
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.withOpacity(0.2)),
-        ),
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return Material(
+      color: colors.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          // TODO: Navigate to file list with a filter for this category
+        },
         child: Padding(
           padding: const EdgeInsets.all(12.0),
           child: Column(
@@ -31,16 +31,20 @@ class CategoryCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(category.icon, color: category.color, size: 28),
-                  Icon(BootstrapIcons.chevron_right, color: Colors.grey.shade700, size: 16),
+                  Icon(category.icon, color: colors.foreground, size: 22),
+                  Icon(
+                    LucideIcons.chevronRight,
+                    color: colors.mutedForeground,
+                    size: 16,
+                  ),
                 ],
               ),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(category.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  Text(category.name, style: text.titleSmall),
                   const SizedBox(height: 2),
-                  Text('${category.fileCount} Files', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+                  Text('${category.fileCount} files', style: text.bodySmall),
                 ],
               ),
             ],

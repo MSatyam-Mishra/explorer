@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
+import 'package:filesize/filesize.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -178,87 +179,227 @@ class _HexViewerScreenState extends State<HexViewerScreen> {
     const rowHeight = 22.0;
     _bytesPerRow = bytesPerRow;
     _rowHeight = rowHeight;
-    final iconColor = ClearGlassForeground.icon(context);
     final rows = (_length + bytesPerRow - 1) ~/ bytesPerRow;
     final topInset = DockedGlossyTopBar.contentTopInset(context);
+    final error = _error;
+
+    Widget body;
+    if (error != null) {
+      body = ViewerMessage(
+        icon: LucideIcons.fileX2,
+        title: "Can't read this file",
+        details: error,
+      );
+    } else if (_raf == null) {
+      body = const ViewerLoading();
+    } else {
+      final style = _style(context);
+      // Wide screens centre the dump; narrow ones scroll it sideways.
+      final painter = TextPainter(
+        text: TextSpan(text: '0' * (13 + bytesPerRow * 4), style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      final dumpWidth = painter.width + 2;
+      painter.dispose();
+      final center = width >= 720 && dumpWidth + 32 < width;
+      Widget line(Widget text) => center
+          ? Center(child: SizedBox(width: dumpWidth, child: text))
+          : SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(alignment: Alignment.centerLeft, child: text),
+            );
+      body = Column(
+        children: [
+          _header(context, bytesPerRow, style, line),
+          Expanded(
+            child: Scrollbar(
+              controller: _scroll,
+              interactive: true,
+              thumbVisibility: true,
+              child: ListView.builder(
+                controller: _scroll,
+                padding: const EdgeInsets.only(top: 4, bottom: 24),
+                itemExtent: rowHeight,
+                itemCount: rows,
+                itemBuilder: (context, row) =>
+                    _buildRow(context, row, bytesPerRow, style, line),
+              ),
+            ),
+          ),
+          _footer(context, rows),
+        ],
+      );
+    }
 
     return ExplorerScaffold(
       title: p.basename(widget.file.path),
-      trailing: ExplorerTopBar.actions(context, [
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: Icon(Icons.pin_drop_outlined, color: iconColor),
+      trailing: Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: AppIconButton(
+          icon: const Icon(LucideIcons.locateFixed),
           tooltip: 'Go to offset',
           onPressed: _raf == null
               ? null
               : () => _jumpToOffset(bytesPerRow, rowHeight),
         ),
-      ]),
-      body: _error != null
-          ? Center(child: Text('Cannot read file: $_error'))
-          : _raf == null
-              ? const Center(child: CircularProgressIndicator())
-              : Scrollbar(
-                  controller: _scroll,
-                  interactive: true,
-                  thumbVisibility: true,
-                  child: ListView.builder(
-                    controller: _scroll,
-                    padding: EdgeInsets.fromLTRB(
-                      12,
-                      topInset + 8,
-                      12,
-                      24 + MediaQuery.paddingOf(context).bottom,
-                    ),
-                    itemExtent: rowHeight,
-                    itemCount: rows,
-                    itemBuilder: (context, row) =>
-                        _buildRow(context, row, bytesPerRow),
-                  ),
-                ),
+      ),
+      body: Padding(padding: EdgeInsets.only(top: topInset), child: body),
     );
   }
 
-  Widget _buildRow(BuildContext context, int row, int bytesPerRow) {
-    final scheme = Theme.of(context).colorScheme;
+  TextStyle _style(BuildContext context) =>
+      CodeFont.style(fontSize: 13, color: context.colors.foreground);
+
+  /// Column labels: two hex digits and a space per byte, with an extra
+  /// space after 8 bytes (as in the rows).
+  static String _hexHeader(int bytesPerRow) {
+    final b = StringBuffer();
+    for (var i = 0; i < bytesPerRow; i++) {
+      if (i == 8) b.write(' ');
+      b.write('${i.toRadixString(16).padLeft(2, '0').toUpperCase()} ');
+    }
+    return b.toString();
+  }
+
+  Widget _header(
+    BuildContext context,
+    int bytesPerRow,
+    TextStyle style,
+    Widget Function(Widget) line,
+  ) {
+    final colors = context.colors;
+    final muted = style.copyWith(
+      color: colors.mutedForeground,
+      fontWeight: FontWeight.w500,
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.muted.withValues(alpha: 0.5),
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: SizedBox(
+        height: 32,
+        width: double.infinity,
+        child: line(
+          Text(
+            '${'Offset'.padRight(8)}   ${_hexHeader(bytesPerRow)} ASCII',
+            maxLines: 1,
+            style: muted,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _footer(BuildContext context, int rows) {
+    final colors = context.colors;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontSize: 11.5,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+    final hexLength = '0x${_length.toRadixString(16).toUpperCase()}';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.paddingOf(context).bottom,
+        ),
+        child: SizedBox(
+          height: 30,
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  _length < 1024
+                      ? filesize(_length)
+                      : '${filesize(_length)} · $_length bytes',
+                  style: style,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const StatusBadge('Read-only', icon: LucideIcons.lock),
+              const Spacer(),
+              Text('$hexLength · $rows rows', style: style),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow(
+    BuildContext context,
+    int row,
+    int bytesPerRow,
+    TextStyle style,
+    Widget Function(Widget) line,
+  ) {
+    final colors = context.colors;
     final start = row * bytesPerRow;
     final page = _page(start ~/ _pageSize);
-    final style = TextStyle(
-      fontFamily: 'monospace',
-      fontFamilyFallback: const ['Consolas', 'Menlo', 'Courier'],
-      fontSize: 13,
-      color: scheme.onSurface,
+    final offsetStyle = TextStyle(color: colors.mutedForeground);
+    final zeroStyle = TextStyle(
+      color: colors.mutedForeground.withValues(alpha: 0.55),
     );
+    final asciiStyle = TextStyle(color: colors.mutedForeground);
     final offset = start.toRadixString(16).padLeft(8, '0').toUpperCase();
-    if (page == null) {
-      return Text(offset, style: style.copyWith(color: scheme.outline));
-    }
-    final hex = StringBuffer();
-    final ascii = StringBuffer();
-    for (var i = 0; i < bytesPerRow; i++) {
-      final pos = start + i;
-      final inPage = pos - (start ~/ _pageSize) * _pageSize;
-      if (pos >= _length || inPage >= page.length) {
-        hex.write('   ');
-        continue;
+
+    final spans = <TextSpan>[TextSpan(text: '$offset   ', style: offsetStyle)];
+    if (page != null) {
+      // Runs of zero / non-zero bytes become one span each.
+      final run = StringBuffer();
+      bool? runZero;
+      void flush() {
+        if (run.isEmpty) return;
+        spans.add(TextSpan(
+          text: run.toString(),
+          style: runZero == true ? zeroStyle : null,
+        ));
+        run.clear();
       }
-      final b = page[inPage];
-      hex.write('${b.toRadixString(16).padLeft(2, '0').toUpperCase()} ');
-      ascii.writeCharCode(b >= 0x20 && b < 0x7F ? b : 0x2E);
+
+      final ascii = StringBuffer();
+      for (var i = 0; i < bytesPerRow; i++) {
+        final pos = start + i;
+        final inPage = pos - (start ~/ _pageSize) * _pageSize;
+        if (i == 8) run.write(' ');
+        if (pos >= _length || inPage >= page.length) {
+          run.write('   ');
+          continue;
+        }
+        final b = page[inPage];
+        final zero = b == 0;
+        if (runZero != null && zero != runZero) flush();
+        runZero = zero;
+        run.write('${b.toRadixString(16).padLeft(2, '0').toUpperCase()} ');
+        ascii.writeCharCode(b >= 0x20 && b < 0x7F ? b : 0x2E);
+      }
+      flush();
+      spans
+        ..add(const TextSpan(text: ' '))
+        ..add(TextSpan(text: ascii.toString(), style: asciiStyle));
     }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const NeverScrollableScrollPhysics(),
-      child: Text.rich(
-        TextSpan(
-          style: style,
-          children: [
-            TextSpan(text: '$offset  ', style: TextStyle(color: scheme.outline)),
-            TextSpan(text: '$hex '),
-            TextSpan(text: ascii.toString(), style: TextStyle(color: scheme.primary)),
-          ],
+
+    return ColoredBox(
+      color: row.isOdd
+          ? colors.muted.withValues(alpha: 0.3)
+          : Colors.transparent,
+      child: line(
+        Text.rich(
+          TextSpan(style: style, children: spans),
+          maxLines: 1,
         ),
-        maxLines: 1,
       ),
     );
   }

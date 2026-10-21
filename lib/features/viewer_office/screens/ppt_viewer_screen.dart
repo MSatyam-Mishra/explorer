@@ -4,8 +4,8 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -32,10 +32,6 @@ Future<OfficePackage> _decodeInBackground(String path) =>
 
 Future<Uint8List> _encodeInBackground(OfficePackage pkg) =>
     Isolate.run(() => pkg.encode());
-
-/// Placeholder colour for a slide that hasn't been read yet (matches
-/// [SlideCanvas] for pending slides).
-const _skeletonColor = Color(0xFFF1F3F4);
 
 /// Viewer for presentations (PPTX family, PPT/PPS/POT, ODP/OTP) with
 /// thumbnails, notes, a fullscreen slideshow and, for PPTX, editing (text,
@@ -385,24 +381,14 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
       );
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (d) => AlertDialog(
-        title: Text('Delete slide ${index + 1}?'),
-        content: const Text('The slide and its speaker notes will be removed.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(d, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(d, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final ok = await showViewerConfirm(
+      context,
+      title: 'Delete slide ${index + 1}?',
+      message: 'The slide and its speaker notes will be removed.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     await _apply((ed) {
       ed.deleteSlide(rel);
       return null;
@@ -525,55 +511,11 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
       ('Slides with notes', '$notes'),
       ('Slide size', '${cm(deck.width)} × ${cm(deck.height)} cm'),
     ];
-    ExplorerLiquidGlassBottomSheet.show<void>(
+    showViewerInfoSheet(
       context,
-      maxHeightFraction: 0.55,
-      child: Builder(
-        builder: (context) {
-          final fg = ClearGlassForeground.primaryText(context);
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Presentation info',
-                style: ClearGlassForeground.title(
-                  context,
-                ).copyWith(fontSize: 18),
-              ),
-              const SizedBox(height: 12),
-              for (final r in rows)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 150,
-                        child: Text(
-                          r.$1,
-                          style: TextStyle(
-                            color: fg.withValues(alpha: 0.7),
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          r.$2,
-                          style: TextStyle(
-                            color: fg,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
+      title: 'Presentation info',
+      description: p.basename(_file.path),
+      rows: rows,
     );
   }
 
@@ -642,99 +584,87 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   }
 
   Widget _viewActions(BuildContext context) {
-    final color = ClearGlassForeground.icon(context);
-    return ExplorerTopBar.actions(context, [
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(Icons.slideshow_outlined, color: color),
-        tooltip: 'Present',
-        onPressed: _present,
-      ),
-      if (_canEdit)
-        ExplorerTopBar.iconButton(
-          context: context,
-          icon: _busy
-              ? SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: color,
-                  ),
-                )
-              : Icon(Icons.edit_outlined, color: color),
-          tooltip: 'Edit',
-          onPressed: _busy ? null : _startEditing,
+    return ViewerActions(
+      children: [
+        ViewerAction(
+          icon: LucideIcons.presentation,
+          tooltip: 'Present',
+          onPressed: _present,
         ),
-      PopupMenuButton<String>(
-        tooltip: 'More',
-        icon: Icon(Icons.more_vert, color: color),
-        onSelected: _onMenu,
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            value: 'goto',
-            child: ListTile(
-              leading: Icon(Icons.pin_outlined),
-              title: Text('Go to slide'),
+        if (_canEdit)
+          ViewerAction(
+            icon: LucideIcons.penLine,
+            tooltip: 'Edit',
+            busy: _busy,
+            onPressed: _startEditing,
+          ),
+        ViewerMenuButton<String>(
+          onSelected: _onMenu,
+          itemBuilder: (context) => [
+            viewerMenuItem(
+              value: 'goto',
+              icon: LucideIcons.hash,
+              label: 'Go to slide…',
             ),
-          ),
-          CheckedPopupMenuItem(
-            value: 'notes',
-            checked: _showNotes,
-            child: const Text('Speaker notes'),
-          ),
-          const PopupMenuItem(
-            value: 'info',
-            child: ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('Presentation info'),
+            viewerMenuItem(
+              value: 'notes',
+              icon: LucideIcons.stickyNote,
+              label: 'Speaker notes',
+              checked: _showNotes,
             ),
-          ),
-          const PopupMenuItem(
-            value: 'share',
-            child: ListTile(
-              leading: Icon(Icons.share_outlined),
-              title: Text('Share'),
+            viewerMenuDivider(),
+            viewerMenuItem(
+              value: 'info',
+              icon: LucideIcons.info,
+              label: 'Presentation info',
             ),
-          ),
-          const PopupMenuItem(
-            value: 'open',
-            child: ListTile(
-              leading: Icon(Icons.open_in_new),
-              title: Text('Open with…'),
+            viewerMenuItem(
+              value: 'share',
+              icon: LucideIcons.share2,
+              label: 'Share',
             ),
-          ),
-        ],
-      ),
-    ]);
+            viewerMenuItem(
+              value: 'open',
+              icon: LucideIcons.externalLink,
+              label: 'Open with…',
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget _editActions(BuildContext context) {
-    final color = ClearGlassForeground.icon(context);
-    return ExplorerTopBar.actions(context, [
-      PopupMenuButton<bool>(
-        tooltip: 'Save',
-        enabled: !_busy,
-        icon: _busy
-            ? SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: color),
-              )
-            : Icon(Icons.save_outlined, color: color),
-        onSelected: (copy) => _save(copy: copy),
-        itemBuilder: (context) => const [
-          PopupMenuItem(value: false, child: Text('Save')),
-          PopupMenuItem(value: true, child: Text('Save as copy')),
-        ],
-      ),
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(Icons.check, color: color),
-        tooltip: 'Done',
-        onPressed: _busy ? null : _finishEditing,
-      ),
-    ]);
+    return ViewerActions(
+      children: [
+        ViewerMenuButton<bool>(
+          tooltip: 'Save',
+          icon: LucideIcons.save,
+          badge: _dirty,
+          busy: _busy,
+          onSelected: (copy) => _save(copy: copy),
+          itemBuilder: (context) => [
+            viewerMenuItem(
+              value: false,
+              icon: LucideIcons.save,
+              label: 'Save',
+              enabled: _dirty,
+            ),
+            viewerMenuItem(
+              value: true,
+              icon: LucideIcons.copy,
+              label: 'Save as copy',
+            ),
+          ],
+        ),
+        ViewerAction(
+          icon: LucideIcons.check,
+          tooltip: 'Done',
+          selected: true,
+          onPressed: _busy ? null : _finishEditing,
+        ),
+      ],
+    );
   }
 
   Widget _body(BuildContext context) {
@@ -744,32 +674,18 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
     if (_error != null || deck == null) {
       return Padding(
         padding: EdgeInsets.only(top: top),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.slideshow_outlined,
-                  size: 56,
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _error ?? 'Nothing to show.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  onPressed: () => OpenFilex.open(_file.path),
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('Open with another app'),
-                ),
-              ],
+        child: ViewerMessage(
+          icon: LucideIcons.presentation,
+          destructive: _error != null,
+          title: "Couldn't open this presentation",
+          message: _error ?? 'Nothing to show.',
+          actions: [
+            OutlinedButton.icon(
+              onPressed: () => OpenFilex.open(_file.path),
+              icon: const Icon(LucideIcons.externalLink, size: 16),
+              label: const Text('Open with another app'),
             ),
-          ),
+          ],
         ),
       );
     }
@@ -791,25 +707,38 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
     required Widget main,
     required Widget Function(Axis axis) thumbnails,
   }) {
+    final colors = context.colors;
     final pad = MediaQuery.paddingOf(context);
     final insets = EdgeInsets.fromLTRB(pad.left, top, pad.right, pad.bottom);
+    final canvas = ColoredBox(color: ViewerSurface.canvas(context), child: main);
     if (AdaptiveSplitView.isSplit(context)) {
-      return Padding(
-        padding: insets,
-        child: AdaptiveSplitView(
-          secondaryWidth: 240,
-          secondary: thumbnails(Axis.vertical),
-          primary: main,
+      return ColoredBox(
+        color: colors.background,
+        child: Padding(
+          padding: insets,
+          child: AdaptiveSplitView(
+            secondaryWidth: 240,
+            secondary: thumbnails(Axis.vertical),
+            primary: canvas,
+          ),
         ),
       );
     }
-    return Padding(
-      padding: insets,
-      child: Column(
-        children: [
-          Expanded(child: main),
-          SizedBox(height: 92, child: thumbnails(Axis.horizontal)),
-        ],
+    return ColoredBox(
+      color: colors.background,
+      child: Padding(
+        padding: insets,
+        child: Column(
+          children: [
+            Expanded(child: canvas),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: colors.border)),
+              ),
+              child: SizedBox(height: 92, child: thumbnails(Axis.horizontal)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -842,22 +771,15 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   }
 
   Widget _pendingSlide(BuildContext context, {bool spinner = false}) {
+    final colors = context.colors;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _skeletonColor,
-        borderRadius: BorderRadius.circular(2),
+        color: colors.background,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: colors.border),
       ),
       child: spinner
-          ? Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-              ),
-            )
+          ? const Center(child: ViewerSpinner(size: 22))
           : const SizedBox.expand(),
     );
   }
@@ -888,7 +810,8 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
 
   Widget _mainArea(BuildContext context, SlideDeck deck) {
     final slide = deck.slides[_index.clamp(0, deck.slides.length - 1)];
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     return Column(
       children: [
         Expanded(
@@ -918,33 +841,33 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
                           child: _pendingSlide(context, spinner: true),
                         )
                       : DecoratedBox(
-                          decoration: const BoxDecoration(
-                            boxShadow: [
-                              BoxShadow(
-                                color: Color(0x40000000),
-                                blurRadius: 12,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
+                          position: DecorationPosition.foreground,
+                          decoration: BoxDecoration(
+                            border: ViewerSurface.page(context).border,
                           ),
-                          child: SlideFit.builder(
-                            deck: deck,
-                            builder: (context, scale) => SlideCanvas(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              boxShadow: ViewerSurface.page(context).boxShadow,
+                            ),
+                            child: SlideFit.builder(
                               deck: deck,
-                              slide: deck.slides[i],
-                              images: _images!,
-                              onShapeTap: _editing && i == _index
-                                  ? _editShape
-                                  : null,
-                              onLink: _openLink,
-                              selectedShapeId: i == _index
-                                  ? _selectedShape
-                                  : null,
-                              // Decode pictures at screen size; sharper
-                              // once the user zooms in.
-                              pixelScale: _zoomed && i == _index
-                                  ? scale * 4
-                                  : scale,
+                              builder: (context, scale) => SlideCanvas(
+                                deck: deck,
+                                slide: deck.slides[i],
+                                images: _images!,
+                                onShapeTap: _editing && i == _index
+                                    ? _editShape
+                                    : null,
+                                onLink: _openLink,
+                                selectedShapeId: i == _index
+                                    ? _selectedShape
+                                    : null,
+                                // Decode pictures at screen size; sharper
+                                // once the user zooms in.
+                                pixelScale: _zoomed && i == _index
+                                    ? scale * 4
+                                    : scale,
+                              ),
                             ),
                           ),
                         ),
@@ -958,31 +881,40 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
             constraints: BoxConstraints(
               maxHeight: MediaQuery.sizeOf(context).height * 0.25,
             ),
-            child: Material(
-              color: scheme.surfaceContainerHigh,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.background,
+                border: Border(top: BorderSide(color: colors.border)),
+              ),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                 child: SizedBox(
                   width: double.infinity,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Speaker notes',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(color: scheme.primary),
+                      Row(
+                        children: [
+                          Icon(
+                            LucideIcons.stickyNote,
+                            size: 14,
+                            color: colors.mutedForeground,
+                          ),
+                          const SizedBox(width: 6),
+                          Text('Speaker notes', style: text.labelMedium),
+                        ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       SelectableText(
                         slide.notes.isNotEmpty
                             ? slide.notes
                             : _notesLoaded
                             ? 'No notes for this slide.'
                             : 'Loading notes…',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        style: text.bodyMedium?.copyWith(
                           color: slide.notes.isEmpty
-                              ? scheme.onSurfaceVariant
-                              : scheme.onSurface,
+                              ? colors.mutedForeground
+                              : colors.foreground,
                         ),
                       ),
                     ],
@@ -997,39 +929,50 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
   }
 
   Widget _bottomBar(BuildContext context, SlideDeck deck) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final n = deck.slides.length;
-    return Material(
-      color: scheme.surfaceContainer.withValues(alpha: 0.95),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
       child: SizedBox(
         height: 48,
         child: Row(
           children: [
-            IconButton(
+            const SizedBox(width: 4),
+            ViewerAction(
               tooltip: 'Previous slide',
-              icon: const Icon(Icons.chevron_left),
+              icon: LucideIcons.chevronLeft,
               onPressed: _index > 0 ? () => _goTo(_index - 1) : null,
             ),
-            TextButton(onPressed: _askGoTo, child: Text('${_index + 1} / $n')),
-            IconButton(
+            Tooltip(
+              message: 'Go to slide',
+              child: TextButton(
+                onPressed: _askGoTo,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(56, 36),
+                  textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                child: Text('${_index + 1} / $n'),
+              ),
+            ),
+            ViewerAction(
               tooltip: 'Next slide',
-              icon: const Icon(Icons.chevron_right),
+              icon: LucideIcons.chevronRight,
               onPressed: _index < n - 1 ? () => _goTo(_index + 1) : null,
             ),
             const Spacer(),
-            IconButton(
+            ViewerAction(
               tooltip: _showNotes ? 'Hide notes' : 'Show notes',
-              isSelected: _showNotes,
-              icon: const Icon(Icons.sticky_note_2_outlined),
-              selectedIcon: const Icon(Icons.sticky_note_2),
+              icon: LucideIcons.stickyNote,
+              selected: _showNotes,
               onPressed: () => setState(() => _showNotes = !_showNotes),
             ),
             if (_editing)
-              _slideMenu(
-                _index,
-                n,
-                icon: const Icon(Icons.view_carousel_outlined),
-              ),
+              _slideMenu(_index, n, icon: LucideIcons.galleryVerticalEnd),
             const SizedBox(width: 4),
           ],
         ),
@@ -1037,11 +980,12 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
     );
   }
 
-  Widget _slideMenu(int index, int count, {Widget? icon}) {
-    return PopupMenuButton<String>(
+  Widget _slideMenu(int index, int count, {IconData? icon}) {
+    return ViewerMenuButton<String>(
       tooltip: 'Slide actions',
       enabled: !_busy,
-      icon: icon ?? const Icon(Icons.more_vert, size: 18),
+      icon: icon ?? LucideIcons.ellipsisVertical,
+      size: icon == null ? 32 : 40,
       onSelected: (a) {
         switch (a) {
           case 'dup':
@@ -1055,36 +999,30 @@ class _PptViewerScreenState extends State<PptViewerScreen> {
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(
+        viewerMenuItem(
           value: 'dup',
-          child: ListTile(
-            leading: Icon(Icons.copy_outlined),
-            title: Text('Duplicate slide'),
-          ),
+          icon: LucideIcons.copyPlus,
+          label: 'Duplicate slide',
         ),
-        PopupMenuItem(
+        viewerMenuItem(
           value: 'up',
+          icon: LucideIcons.arrowUp,
+          label: 'Move earlier',
           enabled: index > 0,
-          child: const ListTile(
-            leading: Icon(Icons.arrow_upward),
-            title: Text('Move earlier'),
-          ),
         ),
-        PopupMenuItem(
+        viewerMenuItem(
           value: 'down',
+          icon: LucideIcons.arrowDown,
+          label: 'Move later',
           enabled: index < count - 1,
-          child: const ListTile(
-            leading: Icon(Icons.arrow_downward),
-            title: Text('Move later'),
-          ),
         ),
-        PopupMenuItem(
+        viewerMenuDivider(),
+        viewerMenuItem(
           value: 'del',
+          icon: LucideIcons.trash2,
+          label: 'Delete slide',
           enabled: count > 1,
-          child: const ListTile(
-            leading: Icon(Icons.delete_outline),
-            title: Text('Delete slide'),
-          ),
+          destructive: true,
         ),
       ],
     );

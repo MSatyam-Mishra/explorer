@@ -94,7 +94,7 @@ class _TextPromptDialogState extends State<_TextPromptDialog> {
         onSubmitted: (_) => _submit(),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: _submit, child: Text(widget.action)),
       ],
     );

@@ -1,14 +1,13 @@
 import 'dart:io';
 
 import 'package:bloc/bloc.dart';
-import 'package:bootstrap_icons/bootstrap_icons.dart';
 import 'package:explorer/core/services/directory_services.dart';
 import 'package:explorer/features/sidebar/model/category_model.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
 
 import 'package:flutter/material.dart';
-import 'package:meta/meta.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 part 'sidebar_event.dart';
 part 'sidebar_state.dart';
@@ -61,55 +60,55 @@ class SidebarBloc extends Bloc<SidebarEvent, SidebarState> {
 
       final List<Category> categories = [
         Category(
-          icon: BootstrapIcons.image_fill,
+          icon: LucideIcons.image,
           name: 'Photos',
           fileCount: photoCount,
           color: Colors.purple.shade300,
         ),
         Category(
-          icon: BootstrapIcons.play_circle_fill,
+          icon: LucideIcons.clapperboard,
           name: 'Video',
           fileCount: videoCount,
           color: Colors.red.shade300,
         ),
         Category(
-          icon: BootstrapIcons.music_note_beamed,
+          icon: LucideIcons.music,
           name: 'Audio',
           fileCount: audioCount,
           color: Colors.orange.shade300,
         ),
         Category(
-          icon: BootstrapIcons.file_earmark_text_fill,
+          icon: LucideIcons.fileText,
           name: 'Documents',
           fileCount: 0,
           color: Colors.blue.shade300,
         ),
         Category(
-          icon: BootstrapIcons.safe_fill,
+          icon: LucideIcons.lock,
           name: 'Vault',
           fileCount: 0,
           color: Colors.teal.shade300,
         ),
         Category(
-          icon: BootstrapIcons.archive_fill,
+          icon: LucideIcons.archive,
           name: 'Archives',
           fileCount: 0,
           color: Colors.brown.shade300,
         ),
         Category(
-          icon: BootstrapIcons.download,
+          icon: LucideIcons.download,
           name: 'Downloads',
           fileCount: downloadCount,
           color: Colors.green.shade300,
         ),
         Category(
-          icon: BootstrapIcons.cloud_fill,
+          icon: LucideIcons.cloud,
           name: 'Cloud Drive',
           fileCount: 0,
           color: Colors.indigo.shade300,
         ),
         Category(
-          icon: BootstrapIcons.grid_fill, // or android2
+          icon: LucideIcons.layoutGrid,
           name: 'Apps',
           fileCount: 0,
           color: Colors.tealAccent.shade700,

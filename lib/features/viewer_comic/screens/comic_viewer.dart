@@ -8,6 +8,7 @@ import 'package:explorer/core/services/bookmark_service.dart';
 import 'package:explorer/features/viewer_archive/archive_ui_utils.dart';
 import 'package:explorer/features/viewer_archive/widgets/archive_dialogs.dart';
 import 'package:explorer/features/viewer_comic/comic_book.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -259,14 +260,19 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
       child: Focus(
         focusNode: _focusNode,
         autofocus: true,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
-            children: [
-              Positioned.fill(child: _content(context)),
-              _topBar(context),
-              if (_book.pages.isNotEmpty) _bottomBar(context),
-            ],
+        // Pages sit on black: the reader's chrome uses the dark palette.
+        child: ImmersiveTheme(
+          child: Builder(
+            builder: (context) => Scaffold(
+              backgroundColor: Colors.black,
+              body: Stack(
+                children: [
+                  Positioned.fill(child: _content(context)),
+                  _topBar(context),
+                  if (_book.pages.isNotEmpty) _bottomBar(context),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -277,16 +283,7 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
     final err = _book.error;
     if (err != null) return _errorView(context, err);
     if (_book.loading || (_book.pages.isNotEmpty && !_restored)) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: Colors.white70),
-            SizedBox(height: 16),
-            Text('Opening comic…', style: TextStyle(color: Colors.white70)),
-          ],
-        ),
-      );
+      return const ViewerLoading(label: 'Opening comic…');
     }
     final spreads = _spreads(_book.pages.length, _isDouble);
     final controller = _controllerFor(_isDouble);
@@ -347,7 +344,27 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
     );
   }
 
+  /// Black-to-clear gradient behind the floating bars, so their white
+  /// controls stay readable over any page.
+  static const _scrimTop = BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Color(0xCC000000), Color(0x00000000)],
+    ),
+  );
+
+  static const _scrimBottom = BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.bottomCenter,
+      end: Alignment.topCenter,
+      colors: [Color(0xCC000000), Color(0x00000000)],
+    ),
+  );
+
   Widget _topBar(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final count = _book.pages.length;
     final spread = _spreads(count, _isDouble);
     final current = count == 0 ? null : spread[_spreadOf(_page, _isDouble).clamp(0, spread.length - 1)];
@@ -361,25 +378,20 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
       top: _chrome || _book.error != null || _book.loading ? 0 : -120,
       left: 0,
       right: 0,
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xCC000000), Color(0x00000000)],
-          ),
-        ),
+      child: DecoratedBox(
+        decoration: _scrimTop,
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 16),
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 20),
             child: Row(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                AppIconButton(
+                  icon: const Icon(LucideIcons.arrowLeft),
                   tooltip: 'Back',
                   onPressed: () => Navigator.maybePop(context),
                 ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -389,39 +401,32 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
                         _name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: text.titleMedium,
                       ),
                       if (label.isNotEmpty)
                         Text(
                           label,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
+                          style: text.bodySmall?.copyWith(
+                            color: colors.foreground.withValues(alpha: 0.7),
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
                     ],
                   ),
                 ),
-                IconButton(
+                ToolButton(
                   tooltip: _rtl ? 'Reading right to left' : 'Reading left to right',
-                  icon: Icon(
-                    _rtl
-                        ? Icons.format_textdirection_r_to_l
-                        : Icons.format_textdirection_l_to_r,
-                    color: Colors.white,
-                  ),
+                  icon: _rtl
+                      ? LucideIcons.arrowLeftFromLine
+                      : LucideIcons.arrowRightFromLine,
+                  size: 40,
+                  iconSize: 20,
+                  selected: _rtl,
                   onPressed: count == 0 ? null : () => setState(() => _rtl = !_rtl),
                 ),
-                PopupMenuButton<Object>(
+                MenuIconButton<Object>(
                   tooltip: 'Page layout',
-                  icon: Icon(
-                    _isDouble ? Icons.auto_stories : Icons.crop_portrait,
-                    color: Colors.white,
-                  ),
+                  icon: _isDouble ? LucideIcons.bookOpen : LucideIcons.rectangleVertical,
                   onSelected: (v) {
                     if (v is _Layout) {
                       setState(() {
@@ -433,20 +438,22 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
                     }
                   },
                   itemBuilder: (context) => [
-                    for (final (value, text) in [
-                      (_Layout.auto, 'Automatic'),
-                      (_Layout.single, 'Single page'),
-                      (_Layout.double, 'Two pages'),
+                    for (final (value, text, icon) in [
+                      (_Layout.auto, 'Automatic', LucideIcons.sparkles),
+                      (_Layout.single, 'Single page', LucideIcons.rectangleVertical),
+                      (_Layout.double, 'Two pages', LucideIcons.bookOpen),
                     ])
-                      CheckedPopupMenuItem<Object>(
+                      menuItem<Object>(
                         value: value,
+                        icon: icon,
+                        label: text,
                         checked: _layout == value,
-                        child: Text(text),
                       ),
                     const PopupMenuDivider(),
-                    const PopupMenuItem<Object>(
+                    menuItem<Object>(
                       value: 'external',
-                      child: Text('Open with another app'),
+                      icon: LucideIcons.externalLink,
+                      label: 'Open with another app',
                     ),
                   ],
                 ),
@@ -459,26 +466,26 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
   }
 
   Widget _bottomBar(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final spreads = _spreads(_book.pages.length, _isDouble);
     final current = _spreadOf(_page, _isDouble).clamp(0, spreads.length - 1);
     final waiting = _book.sequential && _book.unpacked < _book.pages.length;
+    final numberStyle = text.labelMedium?.copyWith(
+      color: colors.foreground,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 200),
       bottom: _chrome ? 0 : -140,
       left: 0,
       right: 0,
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [Color(0xCC000000), Color(0x00000000)],
-          ),
-        ),
+      child: DecoratedBox(
+        decoration: _scrimBottom,
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 20, 12, 8),
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -487,14 +494,20 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
                       'Unpacking pages… ${_book.unpacked} of ${_book.pages.length}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      style: text.bodySmall?.copyWith(
+                        color: colors.foreground.withValues(alpha: 0.7),
+                      ),
                     ),
                   ),
                 Row(
                   children: [
-                    Text(
-                      '${spreads[current].first + 1}',
-                      style: const TextStyle(color: Colors.white),
+                    SizedBox(
+                      width: 36,
+                      child: Text(
+                        '${spreads[current].first + 1}',
+                        textAlign: TextAlign.center,
+                        style: numberStyle,
+                      ),
                     ),
                     Expanded(
                       child: Directionality(
@@ -512,9 +525,13 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
                             : const SizedBox(height: 48),
                       ),
                     ),
-                    Text(
-                      '${_book.pages.length}',
-                      style: const TextStyle(color: Colors.white),
+                    SizedBox(
+                      width: 36,
+                      child: Text(
+                        '${_book.pages.length}',
+                        textAlign: TextAlign.center,
+                        style: numberStyle,
+                      ),
                     ),
                   ],
                 ),
@@ -529,62 +546,31 @@ class _ComicViewerScreenState extends State<ComicViewerScreen> {
   Widget _errorView(BuildContext context, ArcException err) {
     final needsPassword = err.kind == ArcErrorKind.needPassword ||
         err.kind == ArcErrorKind.wrongPassword;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                needsPassword ? Icons.lock_outline : Icons.menu_book_outlined,
-                size: 56,
-                color: Colors.white54,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                errorTitle(err.kind),
-                style: const TextStyle(color: Colors.white, fontSize: 20),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                err.message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 24),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  if (needsPassword)
-                    FilledButton.icon(
-                      onPressed: () => _askPassword(err),
-                      icon: const Icon(Icons.key),
-                      label: const Text('Enter password'),
-                    )
-                  else
-                    FilledButton.tonal(
-                      onPressed: () => _book.open(password: _book.password),
-                      child: const Text('Try again'),
-                    ),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: () =>
-                        FileOpener.openExternally(context, widget.comicFile),
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open with another app'),
-                  ),
-                ],
-              ),
-            ],
+    return ViewerMessage(
+      icon: needsPassword ? LucideIcons.lock : LucideIcons.bookImage,
+      title: errorTitle(err.kind),
+      message: err.message,
+      padding: const EdgeInsets.fromLTRB(32, 96, 32, 32),
+      actions: [
+        if (needsPassword)
+          FilledButton.icon(
+            onPressed: () => _askPassword(err),
+            icon: const Icon(LucideIcons.keyRound, size: 16),
+            label: const Text('Enter password'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: () => _book.open(password: _book.password),
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Try again'),
           ),
+        OutlinedButton.icon(
+          onPressed: () =>
+              FileOpener.openExternally(context, widget.comicFile),
+          icon: const Icon(LucideIcons.externalLink, size: 16),
+          label: const Text('Open with another app'),
         ),
-      ),
+      ],
     );
   }
 }
@@ -626,66 +612,33 @@ class _ComicPage extends StatelessWidget {
             alignment: alignment,
             gaplessPlayback: true,
             filterQuality: FilterQuality.medium,
-            errorBuilder: (context, error, stack) => _message(
-              Icons.broken_image_outlined,
-              'Page ${index + 1} can\'t be displayed.',
+            errorBuilder: (context, error, stack) => ViewerMessage(
+              icon: LucideIcons.imageOff,
+              title: "Page ${index + 1} can't be displayed",
             ),
           );
         }
         final err = state.error;
         if (err != null) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _message(Icons.broken_image_outlined, err.message),
-                TextButton(
-                  onPressed: () => book.retry(index),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
+          return ViewerMessage(
+            icon: LucideIcons.imageOff,
+            title: "Page ${index + 1} can't be displayed",
+            message: err.message,
+            actions: [
+              OutlinedButton.icon(
+                onPressed: () => book.retry(index),
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Retry'),
+              ),
+            ],
           );
         }
-        return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white54,
-                ),
-              ),
-              if (state.waiting) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Unpacking… ${book.unpacked} of ${book.pages.length} pages ready',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ],
-            ],
-          ),
+        return ViewerLoading(
+          label: state.waiting
+              ? 'Unpacking… ${book.unpacked} of ${book.pages.length} pages ready'
+              : null,
         );
       },
     );
   }
-
-  Widget _message(IconData icon, String text) => Padding(
-    padding: const EdgeInsets.all(24),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: Colors.white38, size: 48),
-        const SizedBox(height: 8),
-        Text(
-          text,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white54),
-        ),
-      ],
-    ),
-  );
 }

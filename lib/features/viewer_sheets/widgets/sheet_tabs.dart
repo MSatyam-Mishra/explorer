@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../controller/spreadsheet_controller.dart';
@@ -46,7 +47,8 @@ class _SheetTabsState extends State<SheetTabs> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
@@ -57,42 +59,42 @@ class _SheetTabsState extends State<SheetTabs> {
           _ensureActiveVisible();
         }
         return SizedBox(
-          height: 42,
+          height: 44,
           child: Row(
             children: [
-              if (widget.onAdd != null)
-                IconButton(
+              if (widget.onAdd != null) ...[
+                const SizedBox(width: 4),
+                ViewerAction(
                   tooltip: 'Add sheet',
-                  icon: const Icon(Icons.add_rounded),
+                  icon: LucideIcons.plus,
+                  size: 36,
+                  iconSize: 18,
                   onPressed: widget.onAdd,
                 ),
+              ],
               Expanded(
                 child: ListView.separated(
                   controller: _scroll,
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                   itemCount: wb.sheets.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 4),
+                  separatorBuilder: (_, _) => const SizedBox(width: 2),
                   itemBuilder: (context, i) {
                     final s = wb.sheets[i];
                     final isActive = i == active;
                     final hidden = s.visibility != SheetVisibility.visible;
-                    final fg = isActive ? scheme.primary : scheme.onSurfaceVariant;
+                    final fg = isActive ? colors.accentForeground : colors.mutedForeground;
                     return GestureDetector(
                       key: isActive ? _activeKey : null,
                       onLongPressStart: (d) => widget.onTabMenu(i, d.globalPosition),
                       onSecondaryTapUp: (d) => widget.onTabMenu(i, d.globalPosition),
                       child: Material(
-                        color: isActive ? scheme.primary.withValues(alpha: 0.12) : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                        color: isActive ? colors.accent : Colors.transparent,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: BorderSide(
-                            color: isActive ? scheme.primary : scheme.outlineVariant.withValues(alpha: 0.6),
-                            width: isActive ? 1.5 : 1,
-                          ),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: InkWell(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(6),
                           onTap: () => widget.controller.activateSheet(i),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -100,8 +102,8 @@ class _SheetTabsState extends State<SheetTabs> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (hidden) ...[
-                                  Icon(Icons.visibility_off_outlined, size: 14, color: fg),
-                                  const SizedBox(width: 4),
+                                  Icon(LucideIcons.eyeOff, size: 14, color: fg),
+                                  const SizedBox(width: 6),
                                 ],
                                 ConstrainedBox(
                                   constraints: const BoxConstraints(maxWidth: 160),
@@ -109,9 +111,9 @@ class _SheetTabsState extends State<SheetTabs> {
                                     s.name,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
+                                    style: text.labelLarge?.copyWith(
                                       color: fg,
-                                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                                       fontStyle: hidden ? FontStyle.italic : FontStyle.normal,
                                     ),
                                   ),

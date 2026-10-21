@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:explorer/core/services/video_downloader/downloader_settings.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
@@ -87,19 +88,26 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
           maxWidth: 760,
           child: ListView(
             padding: EdgeInsets.fromLTRB(
-              12,
+              16,
               DockedGlossyTopBar.contentTopInset(context) + 4,
-              12,
+              16,
               32 + MediaQuery.paddingOf(context).bottom,
             ),
             children: [
               _section(context, 'Save to'),
               _card([
                 ListTile(
-                  leading: const Icon(Icons.folder_outlined),
+                  leading: const Icon(LucideIcons.folderDown),
                   title: Text(_c.outputDir.isEmpty ? 'Default folder' : _c.outputDir),
                   subtitle: Text(_s.outputDir == null ? 'Default folder' : 'Custom folder'),
-                  trailing: TextButton(onPressed: _pickFolder, child: const Text('Change')),
+                  trailing: OutlinedButton(
+                    onPressed: _pickFolder,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    child: const Text('Change'),
+                  ),
                 ),
                 if (_s.outputDir != null)
                   Align(
@@ -168,14 +176,17 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                   child: TextField(
                     controller: _template,
                     autocorrect: false,
+                    style: CodeFont.style(
+                      fontSize: 13,
+                      color: context.colors.foreground,
+                    ),
                     decoration: InputDecoration(
                       labelText: 'Name template',
-                      border: const OutlineInputBorder(),
                       helperText: 'yt-dlp output template, e.g. %(uploader)s/%(title)s.%(ext)s',
                       helperMaxLines: 2,
                       suffixIcon: IconButton(
                         tooltip: 'Reset',
-                        icon: const Icon(Icons.restart_alt),
+                        icon: const Icon(LucideIcons.rotateCcw, size: 16),
                         onPressed: () {
                           _template.text = DownloaderSettings.defaultFilenameTemplate;
                           _set(_s.copyWith(
@@ -191,7 +202,7 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
               _card([
                 if (!_c.hasFfmpeg)
                   const ListTile(
-                    leading: Icon(Icons.info_outline),
+                    leading: Icon(LucideIcons.info),
                     title: Text('Needs FFmpeg'),
                     subtitle: Text(
                         'Embedding thumbnails, metadata, chapters and subtitles needs FFmpeg.'),
@@ -229,7 +240,6 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                       autocorrect: false,
                       decoration: const InputDecoration(
                         labelText: 'Languages',
-                        border: OutlineInputBorder(),
                         helperText: 'Comma-separated codes; en.* is every English variant',
                       ),
                       onChanged: (v) => _set(_s.copyWith(subtitleLangs: v)),
@@ -247,12 +257,12 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
               _section(context, 'About'),
               _card([
                 ListTile(
-                  leading: const Icon(Icons.gavel_outlined),
+                  leading: const Icon(LucideIcons.scale),
                   title: const Text('Download responsibly'),
                   subtitle: const Text(rightsNoticeText),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.description_outlined),
+                  leading: const Icon(LucideIcons.fileText),
                   title: const Text('Licenses'),
                   subtitle: const Text('yt-dlp, FFmpeg, Python, youtubedl-android and more'),
                   onTap: () => showLicensePage(context: context, applicationName: 'Explorer'),
@@ -270,7 +280,7 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
     final version = _c.ytDlpVersion;
     return [
       ListTile(
-        leading: const Icon(Icons.system_update_alt),
+        leading: const Icon(LucideIcons.refreshCw),
         title: Text(version == null
             ? (_c.engineState == EngineState.ready ? 'yt-dlp' : 'yt-dlp (not set up yet)')
             : 'yt-dlp $version'),
@@ -280,8 +290,12 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
         trailing: _c.updating
             ? const SizedBox.square(
                 dimension: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
-            : TextButton(
+            : OutlinedButton(
                 onPressed: _c.isSupported ? _update : null,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
                 child: const Text('Update'),
               ),
       ),
@@ -293,27 +307,29 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
         onChanged: (v) => _set(_s.copyWith(autoUpdate: v)),
       ),
       ListTile(
-        leading: const Icon(Icons.movie_filter_outlined),
+        leading: const Icon(LucideIcons.clapperboard),
         title: Text(_c.hasFfmpeg ? 'FFmpeg available' : 'FFmpeg not found'),
         subtitle: Text(_c.backendStatus?.ffmpegNote ?? ''),
       ),
     ];
   }
 
-  Widget _section(BuildContext context, String title) => Padding(
-        padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
-        child: Text(
-          title,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-              ),
-        ),
-      );
+  Widget _section(BuildContext context, String title) =>
+      SectionLabel(title, padding: const EdgeInsets.fromLTRB(4, 24, 4, 8));
 
-  Widget _card(List<Widget> children) => Card(
-        margin: EdgeInsets.zero,
-        clipBehavior: Clip.antiAlias,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+  /// Bordered group; rows separated by hairlines.
+  Widget _card(List<Widget> children) => SurfaceCard(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        clip: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0 && children[i] is! Align) const Divider(height: 1),
+              children[i],
+            ],
+          ],
+        ),
       );
 
   Widget _dropdown<T>({
@@ -330,7 +346,12 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
           children: [
             Expanded(
               flex: 4,
-              child: Text(title, style: Theme.of(context).textTheme.bodyLarge),
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -339,6 +360,14 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                 value: value,
                 isExpanded: true,
                 underline: const SizedBox.shrink(),
+                borderRadius: BorderRadius.circular(8),
+                dropdownColor: context.colors.popover,
+                icon: Icon(
+                  LucideIcons.chevronsUpDown,
+                  size: 16,
+                  color: context.colors.mutedForeground,
+                ),
+                style: Theme.of(context).textTheme.bodyMedium,
                 items: [
                   for (final e in items.entries)
                     DropdownMenuItem(

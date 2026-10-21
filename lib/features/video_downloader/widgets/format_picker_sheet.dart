@@ -1,4 +1,5 @@
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:flutter/material.dart';
 
 import 'downloader_text.dart';
@@ -13,7 +14,6 @@ Future<VideoFormat?> showFormatPicker(
   return showModalBottomSheet<VideoFormat>(
     context: context,
     isScrollControlled: true,
-    showDragHandle: true,
     useSafeArea: true,
     constraints: const BoxConstraints(maxWidth: 720),
     builder: (context) => DraggableScrollableSheet(
@@ -46,7 +46,8 @@ class _FormatList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final formats = info.pickableFormats;
     final groups = <String, List<VideoFormat>>{
       'Video and audio': formats.where((f) => !f.isAudioOnly && !f.isVideoOnly).toList(),
@@ -56,52 +57,51 @@ class _FormatList extends StatelessWidget {
 
     return ListView(
       controller: scrollController,
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-          child: Text('Choose a format', style: theme.textTheme.titleLarge),
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+          child: Text('Choose a format', style: text.titleLarge),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
           child: Text(
             hasFfmpeg
                 ? 'Video-only formats are combined with the best audio.'
                 : 'Without FFmpeg, video-only formats are saved without sound.',
-            style: theme.textTheme.bodySmall,
+            style: text.bodySmall,
           ),
         ),
         for (final group in groups.entries) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-            child: Text(
-              group.key,
-              style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary),
-            ),
+          SectionLabel(
+            group.key,
+            padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
+            trailing: CountPill('${group.value.length}'),
           ),
           for (final f in group.value)
-            ListTile(
+            ListRow(
               selected: selected?.id == f.id,
-              leading: Icon(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              leading: IconBox(
                 f.isAudioOnly
-                    ? Icons.audiotrack_outlined
+                    ? LucideIcons.music
                     : f.isVideoOnly
-                        ? Icons.videocam_off_outlined
-                        : Icons.movie_outlined,
+                        ? LucideIcons.videoOff
+                        : LucideIcons.film,
+                size: 36,
               ),
-              title: Text(f.shortLabel),
-              subtitle: Text(
-                [
-                  ?f.codecLabel,
-                  if (f.filesize != null)
-                    '${f.filesizeApprox ? '≈' : ''}${DownloaderText.bytes(f.filesize)}',
-                  if (f.tbr != null) '${f.tbr!.round()} kbit/s',
-                  if (f.note != null && f.note!.isNotEmpty) f.note!,
-                ].join(' · '),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              title: f.shortLabel,
+              subtitle: [
+                ?f.codecLabel,
+                if (f.filesize != null)
+                  '${f.filesizeApprox ? '≈' : ''}${DownloaderText.bytes(f.filesize)}',
+                if (f.tbr != null) '${f.tbr!.round()} kbit/s',
+                if (f.note != null && f.note!.isNotEmpty) f.note!,
+              ].join(' · '),
+              trailing: Text(
+                '#${f.id}',
+                style: CodeFont.style(fontSize: 11, color: colors.mutedForeground),
               ),
-              trailing: Text('#${f.id}', style: theme.textTheme.labelSmall),
               onTap: () => Navigator.pop(context, f),
             ),
         ],

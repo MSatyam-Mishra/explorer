@@ -2,11 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/file_icons/file_icons.dart';
+import 'package:explorer/shared/layout/adaptive_layout.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:filesize/filesize.dart';
-import 'package:percent_indicator/linear_percent_indicator.dart';
+import 'package:path/path.dart' as p;
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 import 'package:explorer/core/services/root_service.dart';
 import 'package:explorer/core/services/usb_host_service.dart';
 import 'package:explorer/core/services/usb_boot_service.dart';
@@ -102,30 +105,34 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
     if (_isoPath == null || _selectedDevice == null) return;
 
     // Safety check
-    final deviceName = _useRoot
-        ? (_selectedDevice as BlockDevice).name
-        : (_selectedDevice as UsbDeviceWrapper).name;
+    final deviceName = _deviceLabel(_selectedDevice);
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("WARNING: DATA LOSS"),
-        content: Text(
-          "Are you SURE you want to write to $deviceName?\n\nALL DATA will be ERASED.",
-          style: const TextStyle(color: Colors.red),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
+      builder: (ctx) {
+        final colors = ctx.colors;
+        return AlertDialog(
+          title: Text('Erase "$deviceName"?'),
+          content: Text(
+            'Everything on this drive will be permanently erased and '
+            "replaced with ${p.basename(_isoPath!)}. This can't be undone.",
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("ERASE & FLASH"),
-          ),
-        ],
-      ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.destructive,
+                foregroundColor: colors.destructiveForeground,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Erase and write'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirm != true) return;
@@ -149,11 +156,12 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
           final match = regex.firstMatch(data);
           if (match != null && _isoSize != null) {
             final bytes = int.parse(match.group(1)!);
-            if (mounted)
+            if (mounted) {
               setState(() {
                 _progress = (bytes / _isoSize!).clamp(0.0, 1.0);
                 _progressStatus = "${filesize(bytes)} / ${filesize(_isoSize)}";
               });
+            }
           }
         });
         await _flashProcess!.exitCode;
@@ -175,11 +183,12 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
           File(_isoPath!),
           wrapper,
           onProgress: (pct) {
-            if (mounted)
+            if (mounted) {
               setState(() {
                 _progress = pct;
                 _progressStatus = "${(pct * 100).toStringAsFixed(1)}%";
               });
+            }
           },
         );
       }
@@ -188,11 +197,11 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
         setState(() {
           _isFlashing = false;
           _progress = 1.0;
-          _progressStatus = "Success!";
+          _progressStatus = "Done. The drive is ready to boot.";
         });
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text("Flashing Complete!")));
+        ).showSnackBar(const SnackBar(content: Text("Image written to the drive")));
       }
     } catch (e) {
       if (mounted) {
@@ -214,127 +223,454 @@ class _UsbBootScreenState extends State<UsbBootScreen> {
     super.dispose();
   }
 
+  String _deviceLabel(dynamic device) => _useRoot
+      ? (device as BlockDevice).name
+      : (device as UsbDeviceWrapper).name;
+
+  String _deviceDetail(dynamic device) => _useRoot
+      ? '${(device as BlockDevice).sizeHumanReadable} · ${device.path}'
+      : 'USB device · ID ${(device as UsbDeviceWrapper).productId}';
+
   @override
   Widget build(BuildContext context) {
-    return ExplorerScaffold(
-      title: 'Bootable USB Creator',
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Root Mode',
-            style: TextStyle(color: ClearGlassForeground.primaryText(context)),
-          ),
-          Switch(
-            value: _useRoot,
-            onChanged: _isFlashing
-                ? null
-                : (v) {
-                    setState(() => _useRoot = v);
-                    _loadDevices();
-                  },
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (!_useRoot)
-              const Card(
-                color: Colors.blueAccent,
-                child: Padding(
-                  padding: EdgeInsets.all(8.0),
-                  child: Text(
-                    "Rootless Mode: Uses Android USB Host API. Requires OTG adapter.",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ),
-            // Step 1: ISO
-            _buildSectionHeader("1. Select ISO Image"),
-            Card(
-              child: ListTile(
-                title: Text(_isoPath?.split('/').last ?? "No ISO Selected"),
-                subtitle: Text(
-                  _isoPath != null ? filesize(_isoSize) : "Tap to select",
-                ),
-                trailing: const Icon(Icons.folder_open),
-                onTap: _isFlashing ? null : _pickIso,
-              ),
-            ),
-            const SizedBox(height: 24),
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final top = DockedGlossyTopBar.contentTopInset(context);
+    final wide = MediaQuery.sizeOf(context).width >= 840;
+    final side = wide ? 24.0 : 16.0;
+    final iso = _isoPath;
+    final canFlash = iso != null && _selectedDevice != null && !_isFlashing;
 
-            // Step 2: Device
-            _buildSectionHeader("2. Select Target USB Drive"),
-            if (_devices.isEmpty)
-              const Card(
-                color: Colors.orangeAccent,
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text("No Drives Detected"),
-                ),
-              )
-            else
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<dynamic>(
-                      value: _selectedDevice,
-                      isExpanded: true,
+    return ExplorerScaffold(
+      title: 'Bootable USB',
+      body: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          side,
+          top + 20,
+          side,
+          MediaQuery.paddingOf(context).bottom + 24,
+        ),
+        child: ReadableWidth(
+          maxWidth: 640,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Write a disk image to a USB drive to make it bootable.',
+                style: text.bodyMedium?.copyWith(color: colors.mutedForeground),
+              ),
+              const SizedBox(height: 16),
+              _Card(
+                child: Row(
+                  children: [
+                    _IconTile(
+                      _useRoot ? LucideIcons.shieldCheck : LucideIcons.usb,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Root mode', style: text.titleSmall),
+                          const SizedBox(height: 2),
+                          Text(
+                            _useRoot
+                                ? 'Writes with dd. Needs a rooted device.'
+                                : "Off: uses Android's USB host API through "
+                                    'an OTG adapter. No root needed.',
+                            style: text.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Switch(
+                      value: _useRoot,
                       onChanged: _isFlashing
                           ? null
-                          : (v) => setState(() => _selectedDevice = v),
-                      items: _devices.map((d) {
-                        String label = _useRoot
-                            ? "${(d as BlockDevice).name} (${d.sizeHumanReadable})"
-                            : "${(d as UsbDeviceWrapper).name} (ID: ${d.productId})";
-                        return DropdownMenuItem(value: d, child: Text(label));
-                      }).toList(),
+                          : (v) {
+                              setState(() => _useRoot = v);
+                              _loadDevices();
+                            },
                     ),
-                  ),
+                  ],
                 ),
               ),
-
-            const SizedBox(height: 24),
-
-            // Step 3: Flash
-            _buildSectionHeader("3. Flash Image"),
-            if (_isFlashing) ...[
-              LinearPercentIndicator(
-                lineHeight: 20.0,
-                percent: _progress.clamp(0.0, 1.0),
-                center: Text("${(_progress * 100).toStringAsFixed(1)}%"),
-                progressColor: Colors.blue,
+              const SizedBox(height: 12),
+              _StepCard(
+                step: 1,
+                title: 'Disk image',
+                description: 'An .iso or .img file to write.',
+                child: iso == null
+                    ? Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: _isFlashing ? null : _pickIso,
+                          icon: const Icon(LucideIcons.folderOpen, size: 16),
+                          label: const Text('Choose image'),
+                        ),
+                      )
+                    : _SelectedRow(
+                        leading: FileIcon(path: iso, size: 36),
+                        title: p.basename(iso),
+                        subtitle: _isoSize == null ? '' : filesize(_isoSize),
+                        trailing: TextButton(
+                          onPressed: _isFlashing ? null : _pickIso,
+                          child: const Text('Change'),
+                        ),
+                      ),
               ),
-              Text(_progressStatus, textAlign: TextAlign.center),
-            ] else
-              ElevatedButton.icon(
-                icon: const Icon(Icons.flash_on),
-                label: const Text("START FLASHING"),
-                onPressed: (_isoPath != null && _selectedDevice != null)
-                    ? _startFlashing
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.all(16),
-                  backgroundColor: Colors.deepPurple,
-                  foregroundColor: Colors.white,
+              const SizedBox(height: 12),
+              _StepCard(
+                step: 2,
+                title: 'Target drive',
+                description: 'Everything on this drive will be erased.',
+                trailing: AppIconButton(
+                  icon: const Icon(LucideIcons.refreshCw, size: 16),
+                  tooltip: 'Refresh drives',
+                  onPressed: _isFlashing || _isLoading ? null : _loadDevices,
                 ),
+                child: _buildDevices(context),
               ),
-          ],
+              const SizedBox(height: 12),
+              _StepCard(
+                step: 3,
+                title: 'Write',
+                description: 'Keep the drive connected until writing finishes.',
+                child: _isFlashing
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _progressStatus,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.bodySmall,
+                                ),
+                              ),
+                              Text(
+                                '${(_progress * 100).toStringAsFixed(1)}%',
+                                style: text.labelMedium?.copyWith(
+                                  color: colors.foreground,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          LinearProgressIndicator(
+                            value: _progress.clamp(0.0, 1.0),
+                            minHeight: 8,
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_progressStatus.isNotEmpty) ...[
+                            Text(
+                              _progressStatus,
+                              style: text.bodySmall?.copyWith(
+                                color: _progressStatus.startsWith('Error')
+                                    ? colors.destructive
+                                    : colors.mutedForeground,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          FilledButton.icon(
+                            onPressed: canFlash ? _startFlashing : null,
+                            icon: const Icon(LucideIcons.zap, size: 16),
+                            label: const Text('Write to drive'),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0, top: 16.0),
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+  Widget _buildDevices(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    if (_isLoading) {
+      return Row(
+        children: [
+          const SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Text('Looking for drives…', style: text.bodySmall),
+        ],
+      );
+    }
+    if (_devices.isEmpty) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.muted.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(LucideIcons.usb, size: 18, color: colors.mutedForeground),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No USB drives detected',
+                      style: text.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      _useRoot
+                          ? 'Connect a drive and allow root access, then '
+                              'refresh.'
+                          : 'Connect a drive with an OTG adapter, then '
+                              'refresh.',
+                      style: text.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        for (final device in _devices)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: _DeviceOption(
+              title: _deviceLabel(device),
+              subtitle: _deviceDetail(device),
+              selected: identical(device, _selectedDevice),
+              onTap: _isFlashing
+                  ? null
+                  : () => setState(() => _selectedDevice = device),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Bordered surface (shadcn card).
+class _Card extends StatelessWidget {
+  const _Card({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: Padding(padding: const EdgeInsets.all(16), child: child),
+    );
+  }
+}
+
+class _IconTile extends StatelessWidget {
+  const _IconTile(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: colors.muted,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(icon, size: 18, color: colors.foreground),
+    );
+  }
+}
+
+/// A numbered step: heading, description and its controls.
+class _StepCard extends StatelessWidget {
+  const _StepCard({
+    required this.step,
+    required this.title,
+    required this.description,
+    required this.child,
+    this.trailing,
+  });
+
+  final int step;
+  final String title;
+  final String description;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(
+                  '$step',
+                  style: text.labelMedium?.copyWith(color: colors.foreground),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: text.titleSmall),
+                    Text(description, style: text.bodySmall),
+                  ],
+                ),
+              ),
+              ?trailing,
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedRow extends StatelessWidget {
+  const _SelectedRow({
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+  });
+
+  final Widget leading;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Row(
+      children: [
+        leading,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+              ),
+              if (subtitle.isNotEmpty) Text(subtitle, style: text.bodySmall),
+            ],
+          ),
+        ),
+        ?trailing,
+      ],
+    );
+  }
+}
+
+/// A selectable drive (radio-card).
+class _DeviceOption extends StatelessWidget {
+  const _DeviceOption({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return Material(
+      color: selected ? colors.accent : Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: selected ? colors.ring : colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Icon(LucideIcons.hardDrive, size: 18, color: colors.foreground),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: text.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(subtitle, style: text.bodySmall),
+                  ],
+                ),
+              ),
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? colors.primary : colors.mutedForeground,
+                    width: selected ? 5 : 1.25,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

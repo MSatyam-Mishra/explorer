@@ -3,14 +3,14 @@ import 'dart:async';
 import 'package:explorer/core/services/video_downloader/downloader_backend.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
-import 'package:explorer/core/theme/app_theme.dart';
-import 'package:explorer/core/theme/app_theme_settings.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../support/themed_app.dart';
 
 const _info = '''
 {"id": "abc", "title": "Test clip", "uploader": "Someone", "duration": 75, "_type": "video",
@@ -111,10 +111,7 @@ class FakeBackend extends VideoDownloaderBackend {
   Future<List<DownloadJob>> jobs() async => jobsById.values.toList();
 }
 
-Widget _app(Widget home) => MaterialApp(
-      theme: AppTheme.forSettings(AppThemeSettings.defaults(), brightness: Brightness.light),
-      home: home,
-    );
+Widget _app(Widget home) => themedApp(home);
 
 void main() {
   late FakeBackend backend;

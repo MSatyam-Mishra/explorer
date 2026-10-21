@@ -1,23 +1,48 @@
-// Helper widget for a row in the info sheet
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
 
+/// A label / value row in the properties sheet.
 class InfoRow extends StatelessWidget {
   final String title;
   final String content;
-  const InfoRow({required this.title, required this.content});
+
+  /// Shows [content] in the muted colour (placeholders like "Calculating…").
+  final bool muted;
+
+  /// Lets the user select and copy [content] (paths).
+  final bool selectable;
+
+  const InfoRow({
+    super.key,
+    required this.title,
+    required this.content,
+    this.muted = false,
+    this.selectable = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final text = Theme.of(context).textTheme;
+    final valueStyle = text.bodyMedium?.copyWith(
+      color: muted ? context.colors.mutedForeground : null,
+    );
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 2),
-        Text(content, style: Theme.of(context).textTheme.bodyLarge),
+        SizedBox(
+          width: 96,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(title, style: text.bodySmall?.copyWith(fontSize: 13)),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: selectable
+              ? SelectableText(content, style: valueStyle)
+              : Text(content, style: valueStyle),
+        ),
       ],
     );
   }
 }
-
-
-

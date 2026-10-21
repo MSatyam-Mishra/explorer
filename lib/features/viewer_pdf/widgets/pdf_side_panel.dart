@@ -1,5 +1,5 @@
 import 'package:explorer/core/services/bookmark_service.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -89,26 +89,23 @@ class PdfSidePanel extends StatefulWidget {
   State<PdfSidePanel> createState() => _PdfSidePanelState();
 }
 
-class _PdfSidePanelState extends State<PdfSidePanel>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(
-    length: 3,
-    vsync: this,
-    initialIndex: widget.tabIndex.clamp(0, 2),
-  )..addListener(_onTab);
+class _PdfSidePanelState extends State<PdfSidePanel> {
+  static const _tabs = ['Outline', 'Bookmarks', 'Pages'];
+
+  late int _index = widget.tabIndex.clamp(0, 2);
   final Set<String> _expanded = {};
 
   /// Tabs that have been shown; others aren't built until first visited so
   /// the page manager only loads its data when it is actually opened.
-  late final Set<int> _visited = {_tabs.index};
+  late final Set<int> _visited = {_index};
 
-  bool _syncingFromWidget = false;
-
-  void _onTab() {
-    _visited.add(_tabs.index);
-    if (_syncingFromWidget) return;
-    setState(() {});
-    if (_tabs.index != widget.tabIndex) widget.onTabChanged(_tabs.index);
+  void _select(int index) {
+    if (index == _index) return;
+    setState(() {
+      _index = index;
+      _visited.add(index);
+    });
+    if (index != widget.tabIndex) widget.onTabChanged(index);
   }
 
   @override
@@ -117,96 +114,76 @@ class _PdfSidePanelState extends State<PdfSidePanel>
     // Only follow the owner when it asks for a different tab, so a rebuild
     // during a tab switch doesn't snap back to the old tab.
     final index = widget.tabIndex.clamp(0, 2);
-    if (widget.tabIndex != oldWidget.tabIndex && index != _tabs.index) {
+    if (widget.tabIndex != oldWidget.tabIndex && index != _index) {
+      _index = index;
       _visited.add(index);
-      _syncingFromWidget = true;
-      _tabs.index = index;
-      _syncingFromWidget = false;
     }
     if (!identical(oldWidget.outline, widget.outline)) _expanded.clear();
   }
 
   @override
-  void dispose() {
-    _tabs
-      ..removeListener(_onTab)
-      ..dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final foreground = ClearGlassForeground.icon(context);
-    final theme = Theme.of(context);
-    return Theme(
-      data: theme.copyWith(
-        listTileTheme: theme.listTileTheme.copyWith(
-          textColor: foreground,
-          iconColor: foreground,
-        ),
-        iconTheme: theme.iconTheme.copyWith(color: foreground),
-      ),
-      child: Material(
-        type: MaterialType.transparency,
-        child: Column(
-          children: [
-            Row(
+    return Material(
+      type: MaterialType.transparency,
+      child: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              12,
+              12,
+              widget.onClose != null ? 4 : 12,
+              8,
+            ),
+            child: Row(
               children: [
                 Expanded(
-                  child: TabBar(
-                    controller: _tabs,
-                    labelColor: foreground,
-                    unselectedLabelColor: foreground.withValues(alpha: 0.6),
-                    indicatorColor: theme.colorScheme.primary,
-                    dividerColor: Colors.transparent,
-                    tabs: const [
-                      Tab(text: 'Outline'),
-                      Tab(text: 'Bookmarks'),
-                      Tab(text: 'Pages'),
-                    ],
+                  child: ViewerTabs(
+                    tabs: _tabs,
+                    index: _index,
+                    onChanged: _select,
                   ),
                 ),
-                if (widget.onClose != null)
-                  IconButton(
+                if (widget.onClose != null) ...[
+                  const SizedBox(width: 4),
+                  ViewerAction(
+                    icon: LucideIcons.panelLeftClose,
                     tooltip: 'Hide panel',
-                    icon: const Icon(Icons.close),
                     onPressed: widget.onClose,
                   ),
+                ],
               ],
             ),
-            const Divider(height: 1),
-            // An IndexedStack instead of a TabBarView: the latter skips child
-            // updates while animating across tabs, leaving stale content.
-            Expanded(
-              child: IndexedStack(
-                index: _tabs.index,
-                children: [
-                  _visited.contains(0)
-                      ? _buildOutline(context, foreground)
-                      : const SizedBox.shrink(),
-                  _visited.contains(1)
-                      ? _buildBookmarks(context, foreground)
-                      : const SizedBox.shrink(),
-                  _visited.contains(2) ? widget.pages : const SizedBox.shrink(),
-                ],
-              ),
+          ),
+          // An IndexedStack keeps each tab's scroll position.
+          Expanded(
+            child: IndexedStack(
+              index: _index,
+              children: [
+                _visited.contains(0)
+                    ? _buildOutline(context)
+                    : const SizedBox.shrink(),
+                _visited.contains(1)
+                    ? _buildBookmarks(context)
+                    : const SizedBox.shrink(),
+                _visited.contains(2) ? widget.pages : const SizedBox.shrink(),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildOutline(BuildContext context, Color foreground) {
+  Widget _buildOutline(BuildContext context) {
     final outline = widget.outline;
     if (outline == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: ViewerSpinner(size: 20));
     }
     if (outline.isEmpty) {
-      return _EmptyMessage(
-        icon: Icons.toc,
-        text: 'This PDF has no outline',
-        color: foreground,
+      return const ViewerMessage(
+        icon: LucideIcons.listTree,
+        title: 'No outline',
+        message: "This PDF doesn't include a table of contents.",
       );
     }
     final rows = <(PdfOutlineNode, int, String)>[];
@@ -220,20 +197,26 @@ class _PdfSidePanelState extends State<PdfSidePanel>
 
     add(outline, 0, '');
     return ListView.builder(
+      padding: const EdgeInsets.only(top: 4, bottom: 16),
       itemCount: rows.length,
       itemBuilder: (context, index) {
         final (node, depth, key) = rows[index];
         final expandable = node.children.isNotEmpty;
         final expanded = _expanded.contains(key);
-        return ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.only(left: 12.0 + depth * 16, right: 4),
-          title: Text(node.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+        return ViewerListTile(
+          title: node.title,
+          indent: depth * 16.0,
+          emphasis: depth == 0,
           onTap: () => widget.onOutlineSelected(node),
           trailing: expandable
-              ? IconButton(
+              ? ViewerAction(
+                  size: 32,
+                  iconSize: 16,
+                  color: context.colors.mutedForeground,
                   tooltip: expanded ? 'Collapse' : 'Expand',
-                  icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                  icon: expanded
+                      ? LucideIcons.chevronDown
+                      : LucideIcons.chevronRight,
                   onPressed: () => setState(() {
                     if (!_expanded.remove(key)) _expanded.add(key);
                   }),
@@ -244,21 +227,25 @@ class _PdfSidePanelState extends State<PdfSidePanel>
     );
   }
 
-  Widget _buildBookmarks(BuildContext context, Color foreground) {
+  Widget _buildBookmarks(BuildContext context) {
     final bookmarks = [...widget.bookmarks]
       ..sort((a, b) => _page(a).compareTo(_page(b)));
-    final alreadyMarked = bookmarks.any(
-      (b) => _page(b) == widget.currentPage - 1,
-    );
+    final current = widget.currentPage - 1;
+    final alreadyMarked = bookmarks.any((b) => _page(b) == current);
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
           child: SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: alreadyMarked ? null : widget.onAddBookmark,
-              icon: const Icon(Icons.bookmark_add_outlined),
+              icon: Icon(
+                alreadyMarked
+                    ? LucideIcons.bookmarkCheck
+                    : LucideIcons.bookmarkPlus,
+                size: 16,
+              ),
               label: Text(
                 alreadyMarked
                     ? 'Page ${widget.currentPage} is bookmarked'
@@ -269,30 +256,31 @@ class _PdfSidePanelState extends State<PdfSidePanel>
         ),
         Expanded(
           child: bookmarks.isEmpty
-              ? _EmptyMessage(
-                  icon: Icons.bookmark_border,
-                  text: 'No bookmarks yet',
-                  color: foreground,
+              ? const ViewerMessage(
+                  icon: LucideIcons.bookmark,
+                  title: 'No bookmarks yet',
+                  message: 'Bookmark pages to come back to them quickly.',
                 )
               : ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 16),
                   itemCount: bookmarks.length,
                   itemBuilder: (context, index) {
                     final bookmark = bookmarks[index];
                     final created = bookmark.createdAt;
-                    return ListTile(
-                      leading: const Icon(Icons.bookmark_outline),
-                      title: Text(bookmark.label),
-                      subtitle: Text(
-                        '${created.year}-${_two(created.month)}-'
-                        '${_two(created.day)}',
-                        style: TextStyle(
-                          color: foreground.withValues(alpha: 0.7),
-                        ),
-                      ),
+                    return ViewerListTile(
+                      leading: const Icon(LucideIcons.bookmark),
+                      title: bookmark.label,
+                      subtitle:
+                          'Added ${created.year}-${_two(created.month)}-'
+                          '${_two(created.day)}',
+                      selected: _page(bookmark) == current,
                       onTap: () => widget.onBookmarkSelected(_page(bookmark)),
-                      trailing: IconButton(
+                      trailing: ViewerAction(
+                        size: 32,
+                        iconSize: 16,
+                        color: context.colors.mutedForeground,
                         tooltip: 'Remove bookmark',
-                        icon: const Icon(Icons.delete_outline),
+                        icon: LucideIcons.trash2,
                         onPressed: () => widget.onBookmarkRemoved(bookmark),
                       ),
                     );
@@ -311,37 +299,4 @@ class _PdfSidePanelState extends State<PdfSidePanel>
   }
 
   static String _two(int value) => value.toString().padLeft(2, '0');
-}
-
-class _EmptyMessage extends StatelessWidget {
-  const _EmptyMessage({
-    required this.icon,
-    required this.text,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 40, color: color.withValues(alpha: 0.5)),
-            const SizedBox(height: 12),
-            Text(
-              text,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: color.withValues(alpha: 0.8)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

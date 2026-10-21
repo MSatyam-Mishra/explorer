@@ -23,30 +23,33 @@ class CodeTheme {
   final Color match;
   final Color currentMatch;
 
-  static CodeTheme of(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return dark
-        ? const CodeTheme(
-            keyword: Color(0xFFC792EA),
-            string: Color(0xFFC3E88D),
-            comment: Color(0xFF7F8C98),
-            number: Color(0xFFF78C6C),
-            type: Color(0xFFFFCB6B),
-            tag: Color(0xFF82AAFF),
-            match: Color(0x66FFEB3B),
-            currentMatch: Color(0xCCFF9800),
-          )
-        : const CodeTheme(
-            keyword: Color(0xFF8E24AA),
-            string: Color(0xFF2E7D32),
-            comment: Color(0xFF78909C),
-            number: Color(0xFFD84315),
-            type: Color(0xFFB8860B),
-            tag: Color(0xFF1565C0),
-            match: Color(0x80FFEB3B),
-            currentMatch: Color(0xCCFFA726),
-          );
-  }
+  /// GitHub's light and dark syntax palettes: every token keeps at least
+  /// 4.5:1 contrast on the editor background (white / near-black) of all
+  /// colour schemes. Plain text uses the theme's foreground.
+  static const light = CodeTheme(
+    keyword: Color(0xFFCF222E),
+    string: Color(0xFF0A3069),
+    comment: Color(0xFF6E7781),
+    number: Color(0xFF0550AE),
+    type: Color(0xFF8250DF),
+    tag: Color(0xFF116329),
+    match: Color(0x66F2CC60),
+    currentMatch: Color(0xB3FF9632),
+  );
+
+  static const dark = CodeTheme(
+    keyword: Color(0xFFFF7B72),
+    string: Color(0xFFA5D6FF),
+    comment: Color(0xFF8B949E),
+    number: Color(0xFF79C0FF),
+    type: Color(0xFFD2A8FF),
+    tag: Color(0xFF7EE787),
+    match: Color(0x40F2CC60),
+    currentMatch: Color(0x99E09B13),
+  );
+
+  static CodeTheme of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? dark : light;
 }
 
 enum _Token { keyword, string, comment, number, type, tag }

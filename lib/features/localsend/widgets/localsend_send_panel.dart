@@ -4,6 +4,7 @@ import 'package:explorer/core/services/localsend/localsend.dart';
 import 'package:explorer/features/localsend/localsend_controller.dart';
 import 'package:explorer/features/localsend/widgets/localsend_common.dart';
 import 'package:explorer/features/localsend/widgets/localsend_dialogs.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/file_icons/file_icons.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -57,12 +58,15 @@ class _FilesSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = controller.items;
     final files = controller.sendFiles;
-    final theme = Theme.of(context);
     final busy =
         controller.sendSession != null && !controller.sendSession!.isDone;
     return LsSection(
       title: 'Files to send',
-      icon: Icons.upload_file,
+      icon: LucideIcons.fileUp,
+      subtitle: items.isNotEmpty && files != null
+          ? '${files.length} ${files.length == 1 ? 'file' : 'files'} · '
+              '${lsSize(controller.sendTotalBytes)}'
+          : null,
       trailing: items.isEmpty || busy
           ? null
           : TextButton(
@@ -73,12 +77,10 @@ class _FilesSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (items.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'Pick files or folders, then tap a device below. Folders keep their structure.',
-                style: theme.textTheme.bodyMedium,
-              ),
+            const LsHint(
+              'Pick files or folders, then tap a device below. Folders keep '
+              'their structure.',
+              icon: LucideIcons.info,
             )
           else
             ConstrainedBox(
@@ -91,27 +93,24 @@ class _FilesSection extends StatelessWidget {
                   final isDir = e is Directory;
                   final (count, bytes) = controller.statsFor(e);
                   final name = p.basename(p.normalize(e.path));
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
+                  return ListRow(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
+                    ),
                     leading: isDir
                         ? const FolderIcon(size: 40)
                         : FileIcon(path: name, size: 40),
-                    title: Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      files == null
-                          ? 'Counting…'
-                          : isDir
-                          ? 'Folder · $count ${count == 1 ? 'file' : 'files'} · ${lsSize(bytes)}'
-                          : (count == 0 ? 'Not readable' : lsSize(bytes)),
-                    ),
+                    title: name,
+                    subtitle: files == null
+                        ? 'Counting…'
+                        : isDir
+                        ? 'Folder · $count ${count == 1 ? 'file' : 'files'} · ${lsSize(bytes)}'
+                        : (count == 0 ? 'Not readable' : lsSize(bytes)),
                     trailing: busy
                         ? null
-                        : IconButton(
-                            icon: const Icon(Icons.close),
+                        : ToolButton(
+                            icon: LucideIcons.x,
                             tooltip: 'Remove',
                             onPressed: () => controller.removeItem(e),
                           ),
@@ -119,28 +118,20 @@ class _FilesSection extends StatelessWidget {
                 },
               ),
             ),
-          if (items.isNotEmpty && files != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 4),
-              child: Text(
-                '${files.length} ${files.length == 1 ? 'file' : 'files'} · ${lsSize(controller.sendTotalBytes)}',
-                style: theme.textTheme.bodySmall,
-              ),
-            ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               OutlinedButton.icon(
                 onPressed: busy ? null : () => _pickFiles(context),
-                icon: const Icon(Icons.note_add_outlined),
+                icon: const Icon(LucideIcons.filePlus2, size: 16),
                 label: const Text('Add files'),
               ),
               if (!Platform.isIOS)
                 OutlinedButton.icon(
                   onPressed: busy ? null : () => _pickFolder(context),
-                  icon: const Icon(Icons.create_new_folder_outlined),
+                  icon: const Icon(LucideIcons.folderPlus, size: 16),
                   label: const Text('Add folder'),
                 ),
             ],
@@ -186,33 +177,35 @@ class _DevicesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final devices = controller.devices;
-    final theme = Theme.of(context);
     final scanning = controller.scanning;
     return LsSection(
       title: 'Nearby devices',
-      icon: Icons.wifi_tethering,
+      icon: LucideIcons.radar,
+      subtitle: devices.isEmpty
+          ? null
+          : '${devices.length} found · tap one to send',
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (scanning)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
-              child: SizedBox(
-                width: 18,
-                height: 18,
+              child: SizedBox.square(
+                dimension: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             ),
-          IconButton(
-            icon: const Icon(Icons.add_link),
+          ToolButton(
+            icon: LucideIcons.link,
             tooltip: 'Add by IP',
             onPressed: controller.service == null
                 ? null
                 : () => _addByIp(context),
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
+          ToolButton(
+            icon: LucideIcons.refreshCw,
             tooltip: 'Refresh',
             onPressed: controller.service == null ? null : controller.refresh,
           ),
@@ -222,30 +215,30 @@ class _DevicesSection extends StatelessWidget {
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
+                LsHint(
                   scanning
                       ? 'Scanning the network…'
                       : 'Looking for devices… Open LocalSend on the other device '
                             'and make sure both are on the same Wi-Fi.',
-                  style: theme.textTheme.bodyMedium,
+                  icon: LucideIcons.wifi,
                 ),
                 if (controller.multicastError != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(
                       'Automatic discovery is limited here (${controller.multicastError}). '
                       'Use "Scan network" or add the device by IP.',
-                      style: theme.textTheme.bodySmall,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: OutlinedButton.icon(
                     onPressed: scanning || controller.service == null
                         ? null
                         : controller.scan,
-                    icon: const Icon(Icons.radar),
+                    icon: const Icon(LucideIcons.radar, size: 16),
                     label: const Text('Scan network'),
                   ),
                 ),
@@ -254,32 +247,25 @@ class _DevicesSection extends StatelessWidget {
           : Column(
               children: [
                 for (final d in devices)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.08,
+                  ListRow(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
+                    ),
+                    leading: IconBox(lsDeviceIcon(d.info.deviceType)),
+                    title: d.alias,
+                    subtitle: [
+                      if (d.info.deviceModel != null) d.info.deviceModel!,
+                      d.ip,
+                      if (d.protocol == LsProtocol.http) 'HTTP',
+                    ].join(' · '),
+                    trailing: Tooltip(
+                      message: 'Send to ${d.alias}',
+                      child: Icon(
+                        LucideIcons.send,
+                        size: 18,
+                        color: colors.primary,
                       ),
-                      foregroundColor: theme.colorScheme.onSurface,
-                      child: Icon(lsDeviceIcon(d.info.deviceType)),
-                    ),
-                    title: Text(
-                      d.alias,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      [
-                        if (d.info.deviceModel != null) d.info.deviceModel!,
-                        d.ip,
-                        if (d.protocol == LsProtocol.http) 'HTTP',
-                      ].join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Icon(
-                      Icons.send,
-                      color: theme.colorScheme.primary,
                     ),
                     onTap: () => _send(context, d),
                   ),
@@ -312,7 +298,7 @@ class _SendProgressSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final text = Theme.of(context).textTheme;
     final total = session.totalBytes;
     final sent = session.sentBytes;
     final done = session.isDone;
@@ -330,36 +316,37 @@ class _SendProgressSection extends StatelessWidget {
               child: const Text('Done'),
             )
           : TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: context.colors.destructive,
+              ),
               onPressed: controller.cancelSend,
               child: const Text('Cancel'),
             ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _stateText(),
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: done && !ok ? theme.colorScheme.error : null,
-            ),
+          LsProgress(
+            status: _stateText(),
+            tone: !done
+                ? Tone.neutral
+                : ok
+                ? Tone.success
+                : Tone.destructive,
+            value: waiting
+                ? null
+                : (total == 0 ? (done ? 1 : 0) : sent / total),
+            detail:
+                '${lsSize(sent)} / ${lsSize(total)} · ${files.where((f) => f.status == LsSendFileStatus.done).length}/${files.length} files',
           ),
           if (done &&
               !ok &&
               session.state == LsSendState.failed &&
               session.error?.detail != null)
-            Text(session.error!.detail!, style: theme.textTheme.bodySmall),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(session.error!.detail!, style: text.bodySmall),
+            ),
           const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: waiting
-                ? null
-                : (total == 0 ? (done ? 1 : 0) : sent / total),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${lsSize(sent)} / ${lsSize(total)} · ${files.where((f) => f.status == LsSendFileStatus.done).length}/${files.length} files',
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 4),
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 240),
             child: ListView.builder(
@@ -368,39 +355,25 @@ class _SendProgressSection extends StatelessWidget {
               itemBuilder: (context, i) {
                 final f = files[i];
                 final size = f.file.size;
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
+                return ListRow(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                   leading: LsFileIcon(f.file.fileName, size: 32),
-                  title: Text(
-                    f.file.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: switch (f.status) {
+                  title: f.file.fileName,
+                  subtitleWidget: switch (f.status) {
                     LsSendFileStatus.sending => LinearProgressIndicator(
                       value: size == 0 ? null : f.sent / size,
                     ),
-                    LsSendFileStatus.failed => Text(
-                      f.error ?? 'Failed',
-                      style: TextStyle(color: theme.colorScheme.error),
-                    ),
-                    LsSendFileStatus.skipped => const Text(
-                      'Skipped by receiver',
-                    ),
-                    _ => Text(lsSize(size)),
-                  },
-                  trailing: switch (f.status) {
-                    LsSendFileStatus.done => Icon(
-                      Icons.check_circle,
-                      color: theme.colorScheme.primary,
-                    ),
-                    LsSendFileStatus.failed => Icon(
-                      Icons.error,
-                      color: theme.colorScheme.error,
-                    ),
+                    LsSendFileStatus.failed => LsErrorText(f.error ?? 'Failed'),
                     _ => null,
                   },
+                  subtitle: switch (f.status) {
+                    LsSendFileStatus.skipped => 'Skipped by receiver',
+                    _ => lsSize(size),
+                  },
+                  trailing: LsFileState(
+                    done: f.status == LsSendFileStatus.done,
+                    failed: f.status == LsSendFileStatus.failed,
+                  ),
                 );
               },
             ),

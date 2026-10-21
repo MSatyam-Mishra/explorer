@@ -274,11 +274,10 @@ class FolderIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SvgPicture.asset(
-      FileIcons.folderAsset,
-      width: size,
-      height: size,
-      fit: BoxFit.contain,
+    // The folder art isn't square; keep it inside a size×size box.
+    return SizedBox.square(
+      dimension: size,
+      child: SvgPicture.asset(FileIcons.folderAsset, fit: BoxFit.contain),
     );
   }
 }

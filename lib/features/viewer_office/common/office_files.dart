@@ -6,6 +6,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart'
     show InAppBrowser, WebUri;
 import 'package:path/path.dart' as p;
 
+import 'viewer_ui.dart';
+
 /// A file next to [source] that doesn't exist yet: `name.ext`,
 /// `name (1).ext`, `name (2).ext` …
 Future<File> uniqueSibling(
@@ -46,7 +48,7 @@ String formatBytes(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
-/// Bottom sheet for a tapped hyperlink: open in the browser or copy.
+//// Bottom sheet for a tapped hyperlink: open in the browser or copy.
 Future<void> showLinkSheet(BuildContext context, String url) {
   final internal = url.startsWith('#');
   final canOpen =
@@ -55,72 +57,91 @@ Future<void> showLinkSheet(BuildContext context, String url) {
           url.startsWith('https://') ||
           url.startsWith('mailto:') ||
           url.startsWith('tel:'));
-  return showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (sheet) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-        child: Column(
+  return AppSheet.show<void>(
+    context,
+    child: Builder(
+      builder: (sheet) {
+        final colors = sheet.colors;
+        return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              internal ? 'Link within the document' : 'Link',
-              style: Theme.of(sheet).textTheme.titleMedium,
+            ViewerSheetHeader(
+              title: internal ? 'Link within the document' : 'Link',
             ),
-            const SizedBox(height: 8),
-            SelectableText(
-              internal ? url.substring(1) : url,
-              maxLines: 4,
-              style: Theme.of(sheet).textTheme.bodyMedium,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: colors.muted,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    internal ? LucideIcons.hash : LucideIcons.link,
+                    size: 16,
+                    color: colors.mutedForeground,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: SelectableText(
+                      internal ? url.substring(1) : url,
+                      maxLines: 4,
+                      style: Theme.of(sheet).textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton.icon(
-                  icon: const Icon(Icons.copy, size: 18),
-                  label: const Text('Copy'),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: url));
-                    Navigator.pop(sheet);
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      const SnackBar(content: Text('Link copied')),
-                    );
-                  },
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(LucideIcons.copy, size: 16),
+                    label: const Text('Copy'),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: url));
+                      Navigator.pop(sheet);
+                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                        const SnackBar(content: Text('Link copied')),
+                      );
+                    },
+                  ),
                 ),
                 if (canOpen) ...[
                   const SizedBox(width: 8),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.open_in_new, size: 18),
-                    label: const Text('Open'),
-                    onPressed: () async {
-                      Navigator.pop(sheet);
-                      try {
-                        await InAppBrowser.openWithSystemBrowser(
-                          url: WebUri(url),
-                        );
-                      } catch (_) {
-                        await Clipboard.setData(ClipboardData(text: url));
-                        if (context.mounted) {
-                          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Couldn\'t open a browser; link copied instead',
-                              ),
-                            ),
+                  Expanded(
+                    child: FilledButton.icon(
+                      icon: const Icon(LucideIcons.externalLink, size: 16),
+                      label: const Text('Open'),
+                      onPressed: () async {
+                        Navigator.pop(sheet);
+                        try {
+                          await InAppBrowser.openWithSystemBrowser(
+                            url: WebUri(url),
                           );
+                        } catch (_) {
+                          await Clipboard.setData(ClipboardData(text: url));
+                          if (context.mounted) {
+                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Couldn\'t open a browser; link copied instead',
+                                ),
+                              ),
+                            );
+                          }
                         }
-                      }
-                    },
+                      },
+                    ),
                   ),
                 ],
               ],
             ),
           ],
-        ),
-      ),
+        );
+      },
     ),
   );
 }
@@ -139,12 +160,13 @@ Future<UnsavedChoice> askUnsavedChanges(
       content: const Text('Do you want to save your changes before leaving?'),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(d, UnsavedChoice.cancel),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
+          style: TextButton.styleFrom(foregroundColor: d.colors.destructive),
           onPressed: () => Navigator.pop(d, UnsavedChoice.discard),
           child: const Text('Discard'),
+        ),
+        OutlinedButton(
+          onPressed: () => Navigator.pop(d, UnsavedChoice.cancel),
+          child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(d, UnsavedChoice.save),

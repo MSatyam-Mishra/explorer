@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
@@ -61,91 +62,95 @@ class PdfAnnotationToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final hint = hintFor(mode, selected);
-    final density = MediaQuery.sizeOf(context).width < 480
-        ? VisualDensity.compact
-        : VisualDensity.standard;
+    final compact = MediaQuery.sizeOf(context).width < 480;
+    final size = compact ? 36.0 : 40.0;
+    final iconSize = compact ? 18.0 : 20.0;
 
     Widget tool(PdfAnnotationMode value, IconData icon, String tooltip) {
       final active = mode == value;
-      return IconButton(
+      return ViewerAction(
         tooltip: tooltip,
-        visualDensity: density,
-        isSelected: active,
+        icon: icon,
+        size: size,
+        iconSize: iconSize,
+        selected: active,
         onPressed: enabled
             ? () => onModeChanged(active ? PdfAnnotationMode.none : value)
             : null,
-        style: active
-            ? IconButton.styleFrom(
-                backgroundColor: scheme.secondaryContainer,
-                foregroundColor: scheme.onSecondaryContainer,
-              )
-            : null,
-        icon: Icon(icon),
       );
     }
 
-    Widget action(IconData icon, String tooltip, VoidCallback? onPressed) {
-      return IconButton(
+    Widget action(
+      IconData icon,
+      String tooltip,
+      VoidCallback? onPressed, {
+      bool destructive = false,
+    }) {
+      return ViewerAction(
         tooltip: tooltip,
-        visualDensity: density,
+        icon: icon,
+        size: size,
+        iconSize: iconSize,
+        color: destructive && enabled && onPressed != null
+            ? colors.destructive
+            : null,
         onPressed: enabled ? onPressed : null,
-        icon: Icon(icon),
       );
     }
-
-    final divider = SizedBox(
-      height: 24,
-      child: VerticalDivider(width: 12, color: scheme.outlineVariant),
-    );
 
     final selection = selected;
     final colorButton = IconButton(
       tooltip: selection != null ? 'Annotation colour' : 'Colour',
-      visualDensity: density,
+      constraints: BoxConstraints.tightFor(width: size, height: size),
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
       onPressed: enabled && (selection == null || !selection.isLocked)
           ? onPickColor
           : null,
-      icon: Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: scheme.outline),
-        ),
-      ),
+      icon: ViewerSwatch(color: color, size: iconSize),
     );
     final children = <Widget>[
-      tool(
-        PdfAnnotationMode.none,
-        Icons.pan_tool_alt_outlined,
-        'Select / scroll',
-      ),
-      tool(
-        PdfAnnotationMode.highlight,
-        Icons.border_color_outlined,
-        'Highlight',
-      ),
-      tool(PdfAnnotationMode.underline, Icons.format_underlined, 'Underline'),
+      tool(PdfAnnotationMode.none, LucideIcons.mousePointer2, 'Select / scroll'),
+      tool(PdfAnnotationMode.highlight, LucideIcons.highlighter, 'Highlight'),
+      tool(PdfAnnotationMode.underline, LucideIcons.underline, 'Underline'),
       tool(
         PdfAnnotationMode.strikethrough,
-        Icons.format_strikethrough,
+        LucideIcons.strikethrough,
         'Strikethrough',
       ),
-      tool(PdfAnnotationMode.squiggly, Icons.waves, 'Squiggly underline'),
-      tool(
-        PdfAnnotationMode.stickyNote,
-        Icons.sticky_note_2_outlined,
-        'Sticky note',
+      tool(PdfAnnotationMode.squiggly, LucideIcons.spline, 'Squiggly underline'),
+      tool(PdfAnnotationMode.stickyNote, LucideIcons.stickyNote, 'Sticky note'),
+      ViewerToolDivider(spacing: compact ? 2 : 4),
+      ViewerMenuButton<VoidCallback>(
+        tooltip: 'Add to page',
+        icon: LucideIcons.plus,
+        size: size,
+        enabled: enabled,
+        minMenuWidth: 200,
+        onSelected: (action) => action(),
+        itemBuilder: (context) => [
+          viewerMenuItem(
+            value: onDraw,
+            icon: LucideIcons.penTool,
+            label: 'Draw on page',
+          ),
+          viewerMenuItem(value: onText, icon: LucideIcons.type, label: 'Add text'),
+          viewerMenuItem(
+            value: onImage,
+            icon: LucideIcons.imagePlus,
+            label: 'Add image or stamp',
+          ),
+          viewerMenuItem(
+            value: onSignature,
+            icon: LucideIcons.signature,
+            label: 'Add signature',
+          ),
+        ],
       ),
-      divider,
-      action(Icons.brush_outlined, 'Draw on page', onDraw),
-      action(Icons.text_fields, 'Add text', onText),
-      action(Icons.add_photo_alternate_outlined, 'Add image or stamp', onImage),
-      action(Icons.draw_outlined, 'Add signature', onSignature),
-      divider,
       if (selection == null) colorButton,
     ];
 
@@ -154,18 +159,19 @@ class PdfAnnotationToolbar extends StatelessWidget {
       if (selection != null) colorButton,
       if (selection is StickyNoteAnnotation)
         action(
-          Icons.edit_note,
+          LucideIcons.squarePen,
           'Edit note',
           selection.isLocked ? null : onEditNote,
         ),
       if (selection != null)
         action(
-          Icons.delete_outline,
+          LucideIcons.trash2,
           'Delete annotation',
           selection.isLocked ? null : onDeleteSelected,
+          destructive: true,
         ),
-      action(Icons.undo, 'Undo', canUndo ? onUndo : null),
-      action(Icons.redo, 'Redo', canRedo ? onRedo : null),
+      action(LucideIcons.undo2, 'Undo', canUndo ? onUndo : null),
+      action(LucideIcons.redo2, 'Redo', canRedo ? onRedo : null),
     ];
 
     return Column(
@@ -173,32 +179,14 @@ class PdfAnnotationToolbar extends StatelessWidget {
       children: [
         if (hint != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Material(
-              color: scheme.inverseSurface.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(16),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                child: Text(
-                  hint,
-                  style: TextStyle(
-                    color: scheme.onInverseSurface,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ),
+            padding: const EdgeInsets.only(bottom: 8),
+            child: ViewerPill(text: hint),
           ),
-        Material(
-          elevation: 6,
-          color: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(28),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        AppPanel(
+          translucent: true,
+          padding: const EdgeInsets.all(4),
+          child: Material(
+            type: MaterialType.transparency,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -211,7 +199,7 @@ class PdfAnnotationToolbar extends StatelessWidget {
                     ),
                   ),
                 ),
-                divider,
+                ViewerToolDivider(spacing: compact ? 2 : 4),
                 ...pinned,
               ],
             ),

@@ -10,6 +10,7 @@ import 'package:explorer/features/viewer_text/code_editor_controller.dart';
 import 'package:explorer/features/viewer_text/text_document.dart';
 import 'package:explorer/features/viewer_text/widgets/large_text_view.dart';
 import 'package:explorer/features/viewer_text/widgets/markdown_preview.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:filesize/filesize.dart';
@@ -51,8 +52,8 @@ class TextEditorPane extends StatefulWidget {
 enum _MarkdownMode { edit, preview, split }
 
 class TextEditorPaneState extends State<TextEditorPane> {
-  static const _fontFamily = 'monospace';
-  static const _fallbackFonts = ['Consolas', 'Menlo', 'Roboto Mono', 'Courier'];
+  static const _fontFamily = CodeFont.family;
+  static const _fallbackFonts = CodeFont.fallback;
 
   late final CodeEditorController _controller;
   final UndoHistoryController _undo = UndoHistoryController();
@@ -117,6 +118,10 @@ class TextEditorPaneState extends State<TextEditorPane> {
       language: SyntaxLanguage.forExtension(_ext),
     );
     _controller.addListener(_onChanged);
+    // The current-line highlight shows only while the editor has focus.
+    _focusNode.addListener(() {
+      if (mounted) setState(() {});
+    });
     _vScroll.addListener(() {
       if (_gutterScroll.hasClients &&
           _gutterScroll.offset != _vScroll.offset) {
@@ -172,7 +177,7 @@ class TextEditorPaneState extends State<TextEditorPane> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not open this file as text.\n$e';
+        _error = '$e';
         _loading = false;
       });
     }
@@ -423,11 +428,15 @@ class TextEditorPaneState extends State<TextEditorPane> {
     );
   }
 
+  // letterSpacing is explicit: TextField merges the theme's body style
+  // (which has some) into this one, and columns are measured without it.
   TextStyle get _textStyle => TextStyle(
         fontFamily: _fontFamily,
         fontFamilyFallback: _fallbackFonts,
         fontSize: _fontSize,
         height: 1.45,
+        letterSpacing: 0,
+        wordSpacing: 0,
         color: Theme.of(context).colorScheme.onSurface,
       );
 
@@ -573,30 +582,32 @@ class TextEditorPaneState extends State<TextEditorPane> {
     final text = large ? '' : _controller.text;
     final words = large ? 0 : RegExp(r'\S+').allMatches(text).length;
     final status = _largeStatus;
+    final entries = <String, String>{
+      'Size': filesize(_fileSize),
+      if (!large) ...{
+        'Lines': '$_lineCount',
+        'Words': '$words',
+        'Characters': '${text.length}',
+      } else if (status != null)
+        'Lines': '${status.lineCount}${status.complete ? '' : '+ (counting…)'}',
+      if (doc != null) 'Encoding': doc.encodingLabel,
+      if (large && status != null)
+        'Encoding': TextDocument.labelOf(status.encoding),
+      if (doc != null) 'Line endings': doc.lineEnding.label,
+      if (doc != null && !doc.isLossless)
+        'Invalid byte sequences': '${doc.malformedCount}',
+      if (!large && _controller.language != null)
+        'Highlighting': _controller.language!.name,
+    };
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Document info'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Size: ${filesize(_fileSize)}'),
-            if (!large) ...[
-              Text('Lines: $_lineCount'),
-              Text('Words: $words'),
-              Text('Characters: ${text.length}'),
-            ] else if (status != null)
-              Text('Lines: ${status.lineCount}${status.complete ? '' : '+ (counting…)'}'),
-            if (doc != null) Text('Encoding: ${doc.encodingLabel}'),
-            if (large && status != null)
-              Text('Encoding: ${TextDocument.labelOf(status.encoding)}'),
-            if (doc != null) Text('Line endings: ${doc.lineEnding.label}'),
-            if (doc != null && !doc.isLossless)
-              Text('Invalid byte sequences: ${doc.malformedCount}'),
-            if (!large && _controller.language != null)
-              Text('Highlighting: ${_controller.language!.name}'),
-          ],
+        content: SizedBox(
+          width: 360,
+          child: SingleChildScrollView(
+            child: DetailList(entries: entries.entries, labelWidth: 150),
+          ),
         ),
         actions: [
           TextButton(
@@ -608,16 +619,33 @@ class TextEditorPaneState extends State<TextEditorPane> {
     );
   }
 
+
   // ---- UI ----------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) {
+      return Padding(
+        padding: EdgeInsets.only(top: widget.topPadding),
+        child: const ViewerLoading(label: 'Opening…'),
+      );
+    }
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(_error!, textAlign: TextAlign.center),
+      return Padding(
+        padding: EdgeInsets.only(top: widget.topPadding),
+        child: ViewerMessage(
+          icon: LucideIcons.fileX2,
+          title: "Can't open this file as text",
+          message: 'It may be a binary file. You can still look at its bytes '
+              'in the hex viewer.',
+          details: _error,
+          actions: [
+            OutlinedButton.icon(
+              onPressed: _openHex,
+              icon: const Icon(LucideIcons.binary, size: 16),
+              label: const Text('Open in hex viewer'),
+            ),
+          ],
         ),
       );
     }
@@ -647,33 +675,37 @@ class TextEditorPaneState extends State<TextEditorPane> {
     }
 
     final doc = _document;
+    final notices = <Widget>[
+      if (widget.saveAsCopy)
+        const ViewerNotice(
+          icon: LucideIcons.copy,
+          message: 'This is a temporary copy of the file you picked. Save asks '
+              'where to store your changes.',
+        ),
+      if (doc != null && !doc.isLossless && _readOnly)
+        ViewerNotice(
+          icon: LucideIcons.triangleAlert,
+          tone: Tone.warning,
+          message: 'This file has ${doc.malformedCount} byte sequence'
+              '${doc.malformedCount == 1 ? '' : 's'} that aren\'t valid '
+              '${doc.encodingLabel}. They show as �, and saving would '
+              'write � in their place.',
+          actions: [
+            TextButton(
+              onPressed: () => setState(() => _readOnly = false),
+              child: const Text('Edit anyway'),
+            ),
+          ],
+        ),
+    ];
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding),
       child: Column(
         children: [
           _buildToolbar(wide),
-          if (widget.saveAsCopy)
-            _notice(
-              Icons.content_copy_outlined,
-              'This is a temporary copy of the file you picked. Save asks '
-              'where to store your changes.',
-            ),
-          if (doc != null && !doc.isLossless && _readOnly)
-            _notice(
-              Icons.warning_amber_rounded,
-              'This file has ${doc.malformedCount} byte sequence'
-              '${doc.malformedCount == 1 ? '' : 's'} that aren\'t valid '
-              '${doc.encodingLabel}. They show as �, and saving would '
-              'write � in their place.',
-              actions: [
-                TextButton(
-                  onPressed: () => setState(() => _readOnly = false),
-                  child: const Text('Edit anyway'),
-                ),
-              ],
-            ),
+          ...notices,
+          if (notices.isNotEmpty) const SizedBox(height: 8),
           if (_showFind) _buildFindBar(),
-          const Divider(height: 1),
           Expanded(child: content),
           _buildStatusBar(),
         ],
@@ -687,70 +719,64 @@ class TextEditorPaneState extends State<TextEditorPane> {
       padding: EdgeInsets.only(top: widget.topPadding),
       child: Column(
         children: [
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  tooltip: 'Find',
-                  isSelected: _showFind,
-                  onPressed: () => toggleFind(),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.format_list_numbered),
-                  tooltip: 'Go to line',
-                  onPressed: _goToLine,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.text_decrease),
-                  tooltip: 'Smaller text',
-                  onPressed: _fontSize > 9 ? () => setState(() => _fontSize -= 1) : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.text_increase),
-                  tooltip: 'Larger text',
-                  onPressed: _fontSize < 32 ? () => setState(() => _fontSize += 1) : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.memory),
-                  tooltip: 'Open in hex viewer',
-                  onPressed: _openHex,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.info_outline),
-                  tooltip: 'Document info',
-                  onPressed: _showInfo,
-                ),
-              ],
+          _toolbarFrame(
+            [
+              ToolButton(
+                icon: LucideIcons.search,
+                tooltip: 'Find',
+                selected: _showFind,
+                onPressed: () => toggleFind(),
+              ),
+              ToolButton(
+                icon: LucideIcons.listOrdered,
+                tooltip: 'Go to line',
+                onPressed: _goToLine,
+              ),
+              const ToolDivider(),
+              ..._fontSizeButtons(),
+              const ToolDivider(),
+              ToolButton(
+                icon: LucideIcons.binary,
+                tooltip: 'Open in hex viewer',
+                onPressed: _openHex,
+              ),
+            ],
+            trailing: ToolButton(
+              icon: LucideIcons.info,
+              tooltip: 'Document info',
+              onPressed: _showInfo,
             ),
           ),
-          _notice(
-            Icons.speed,
-            'Large file (${filesize(_fileSize)}) shown read-only so it opens '
-            'instantly.${canEdit ? ' Editing it in full can be slow.' : ''}',
+          ViewerNotice(
+            icon: LucideIcons.gauge,
+            message: 'Large file (${filesize(_fileSize)}) shown read-only so '
+                'it opens instantly.'
+                '${canEdit ? ' Editing it in full can be slow.' : ''}',
             actions: [
               if (canEdit)
                 TextButton(onPressed: _loadForEditing, child: const Text('Edit')),
             ],
           ),
+          const SizedBox(height: 8),
           if (_showFind) _buildFindBar(),
-          const Divider(height: 1),
           Expanded(
-            child: LargeTextView(
-              key: _largeKey,
-              file: widget.file,
-              style: _textStyle,
-              strut: _strut,
-              lineHeight: _lineHeight,
-              onStatus: (s) {
-                if (mounted) setState(() => _largeStatus = s);
-              },
-              onSearch: (s) {
-                if (mounted) setState(() => _largeSearch = s);
-              },
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: context.colors.border)),
+              ),
+              child: LargeTextView(
+                key: _largeKey,
+                file: widget.file,
+                style: _textStyle,
+                strut: _strut,
+                lineHeight: _lineHeight,
+                onStatus: (s) {
+                  if (mounted) setState(() => _largeStatus = s);
+                },
+                onSearch: (s) {
+                  if (mounted) setState(() => _largeSearch = s);
+                },
+              ),
             ),
           ),
           _buildStatusBar(),
@@ -759,136 +785,140 @@ class TextEditorPaneState extends State<TextEditorPane> {
     );
   }
 
-  /// A compact one-line-ish notice (MaterialBanner is too tall on phones).
-  Widget _notice(IconData icon, String text, {List<Widget> actions = const []}) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.secondaryContainer.withValues(alpha: 0.6),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+  /// Toolbar row: [tools] scroll horizontally on narrow screens, [trailing]
+  /// stays at the end.
+  Widget _toolbarFrame(List<Widget> tools, {Widget? trailing}) {
+    final colors = context.colors;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: SizedBox(
+        height: 48,
         child: Row(
           children: [
-            Icon(icon, size: 18, color: scheme.onSecondaryContainer),
-            const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                text,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSecondaryContainer,
-                    ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(children: tools),
               ),
             ),
-            ...actions,
+            if (trailing != null) ...[
+              const ToolDivider(),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: trailing,
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
+  List<Widget> _fontSizeButtons() => [
+        ToolButton(
+          icon: LucideIcons.aArrowDown,
+          tooltip: 'Smaller text',
+          onPressed: _fontSize > 9 ? () => setState(() => _fontSize -= 1) : null,
+        ),
+        ToolButton(
+          icon: LucideIcons.aArrowUp,
+          tooltip: 'Larger text',
+          onPressed: _fontSize < 32 ? () => setState(() => _fontSize += 1) : null,
+        ),
+      ];
+
   Widget _buildToolbar(bool wide) {
-    return SizedBox(
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        children: [
-          ValueListenableBuilder<UndoHistoryValue>(
-            valueListenable: _undo,
-            builder: (context, value, _) => Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.undo),
-                  tooltip: 'Undo',
-                  onPressed: value.canUndo && !_readOnly ? _undo.undo : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.redo),
-                  tooltip: 'Redo',
-                  onPressed: value.canRedo && !_readOnly ? _undo.redo : null,
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: 'Find',
-            isSelected: _showFind && !_showReplace,
-            onPressed: () => toggleFind(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.find_replace),
-            tooltip: 'Find and replace',
-            isSelected: _showFind && _showReplace,
-            onPressed: _readOnly ? null : () => toggleFind(replace: true),
-          ),
-          IconButton(
-            icon: const Icon(Icons.wrap_text),
-            tooltip: _wrap ? 'Disable word wrap' : 'Enable word wrap',
-            isSelected: _wrap,
-            onPressed: () => setState(() => _wrap = !_wrap),
-          ),
-          IconButton(
-            icon: const Icon(Icons.text_decrease),
-            tooltip: 'Smaller text',
-            onPressed: _fontSize > 9
-                ? () => setState(() => _fontSize -= 1)
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.text_increase),
-            tooltip: 'Larger text',
-            onPressed: _fontSize < 32
-                ? () => setState(() => _fontSize += 1)
-                : null,
-          ),
-          if (_isJson)
-            IconButton(
-              icon: const Icon(Icons.data_object),
-              tooltip: 'Format JSON',
-              onPressed: _readOnly ? null : _formatJson,
-            ),
-          if (_isMarkdown) ...[
-            const SizedBox(width: 8),
-            Center(
-              child: SegmentedButton<_MarkdownMode>(
-                showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                segments: [
-                  const ButtonSegment(
-                    value: _MarkdownMode.edit,
-                    icon: Icon(Icons.edit_note, size: 18),
-                    tooltip: 'Edit',
-                  ),
-                  if (wide)
-                    const ButtonSegment(
-                      value: _MarkdownMode.split,
-                      icon: Icon(Icons.vertical_split, size: 18),
-                      tooltip: 'Edit and preview',
-                    ),
-                  const ButtonSegment(
-                    value: _MarkdownMode.preview,
-                    icon: Icon(Icons.visibility, size: 18),
-                    tooltip: 'Preview',
-                  ),
-                ],
-                selected: {
-                  !wide && _mdMode == _MarkdownMode.split
-                      ? _MarkdownMode.preview
-                      : _mdMode,
-                },
-                onSelectionChanged: (s) => setState(() => _mdMode = s.first),
+    return _toolbarFrame(
+      [
+        ValueListenableBuilder<UndoHistoryValue>(
+          valueListenable: _undo,
+          builder: (context, value, _) => Row(
+            children: [
+              ToolButton(
+                icon: LucideIcons.undo2,
+                tooltip: 'Undo',
+                onPressed: value.canUndo && !_readOnly ? _undo.undo : null,
               ),
-            ),
-          ],
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            tooltip: 'Document info',
-            onPressed: _showInfo,
+              ToolButton(
+                icon: LucideIcons.redo2,
+                tooltip: 'Redo',
+                onPressed: value.canRedo && !_readOnly ? _undo.redo : null,
+              ),
+            ],
+          ),
+        ),
+        const ToolDivider(),
+        ToolButton(
+          icon: LucideIcons.search,
+          tooltip: 'Find',
+          selected: _showFind && !_showReplace,
+          onPressed: () => toggleFind(),
+        ),
+        ToolButton(
+          icon: LucideIcons.replace,
+          tooltip: 'Find and replace',
+          selected: _showFind && _showReplace,
+          onPressed: _readOnly ? null : () => toggleFind(replace: true),
+        ),
+        const ToolDivider(),
+        ToolButton(
+          icon: LucideIcons.wrapText,
+          tooltip: _wrap ? 'Disable word wrap' : 'Enable word wrap',
+          selected: _wrap,
+          onPressed: () => setState(() => _wrap = !_wrap),
+        ),
+        ..._fontSizeButtons(),
+        if (_isJson) ...[
+          const ToolDivider(),
+          ToolButton(
+            icon: LucideIcons.braces,
+            tooltip: 'Format JSON',
+            onPressed: _readOnly ? null : _formatJson,
           ),
         ],
+        if (_isMarkdown) ...[
+          const ToolDivider(),
+          SegmentedButton<_MarkdownMode>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity(horizontal: -2, vertical: -2),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            segments: [
+              const ButtonSegment(
+                value: _MarkdownMode.edit,
+                icon: Icon(LucideIcons.squarePen, size: 16),
+                tooltip: 'Edit',
+              ),
+              if (wide)
+                const ButtonSegment(
+                  value: _MarkdownMode.split,
+                  icon: Icon(LucideIcons.columns2, size: 16),
+                  tooltip: 'Edit and preview',
+                ),
+              const ButtonSegment(
+                value: _MarkdownMode.preview,
+                icon: Icon(LucideIcons.eye, size: 16),
+                tooltip: 'Preview',
+              ),
+            ],
+            selected: {
+              !wide && _mdMode == _MarkdownMode.split
+                  ? _MarkdownMode.preview
+                  : _mdMode,
+            },
+            onSelectionChanged: (s) => setState(() => _mdMode = s.first),
+          ),
+        ],
+      ],
+      trailing: ToolButton(
+        icon: LucideIcons.info,
+        tooltip: 'Document info',
+        onPressed: _showInfo,
       ),
     );
   }
@@ -916,99 +946,141 @@ class TextEditorPaneState extends State<TextEditorPane> {
               ? 'No results'
               : '${current + 1}/${matches.length}';
     }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _findController,
-                  autofocus: true,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: 'Find',
-                    suffixText: label,
-                    border: const OutlineInputBorder(),
-                  ),
-                  onChanged: (_) {
-                    if (_largeView) {
-                      _scheduleLargeSearch();
-                    } else {
-                      setState(_runSearch);
-                    }
-                  },
-                  onSubmitted: (_) => _gotoMatch(1),
-                ),
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.text_fields,
-                  color: _caseSensitive
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                tooltip: 'Match case',
-                onPressed: () => setState(() {
-                  _caseSensitive = !_caseSensitive;
-                  if (_largeView) {
-                    _scheduleLargeSearch(immediate: true);
-                  } else {
-                    _runSearch();
-                  }
-                }),
-              ),
-              IconButton(
-                icon: const Icon(Icons.keyboard_arrow_up),
-                tooltip: 'Previous',
-                onPressed: hasMatches ? () => _gotoMatch(-1) : null,
-              ),
-              IconButton(
-                icon: const Icon(Icons.keyboard_arrow_down),
-                tooltip: 'Next',
-                onPressed: hasMatches ? () => _gotoMatch(1) : null,
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Close',
-                onPressed: () => toggleFind(replace: _showReplace),
-              ),
-            ],
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    InputDecoration decoration(String hint, IconData icon, {String? suffix}) =>
+        InputDecoration(
+          isDense: true,
+          hintText: hint,
+          prefixIcon: Icon(icon, size: 16),
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 34, minHeight: 34),
+          suffixText: suffix == null || suffix.isEmpty ? null : suffix,
+          suffixStyle: text.labelMedium?.copyWith(
+            color: colors.mutedForeground,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
-          if (_showReplace && !_largeView)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _replaceController,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        hintText: 'Replace with',
-                        border: OutlineInputBorder(),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        );
+    final compactButton = OutlinedButton.styleFrom(
+      minimumSize: const Size(0, 36),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _findController,
+                    autofocus: true,
+                    style: text.bodyMedium,
+                    decoration: decoration(
+                      'Find',
+                      LucideIcons.search,
+                      suffix: label,
+                    ),
+                    onChanged: (_) {
+                      if (_largeView) {
+                        _scheduleLargeSearch();
+                      } else {
+                        setState(_runSearch);
+                      }
+                    },
+                    onSubmitted: (_) => _gotoMatch(1),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                ToolButton(
+                  icon: LucideIcons.caseSensitive,
+                  tooltip: 'Match case',
+                  selected: _caseSensitive,
+                  onPressed: () => setState(() {
+                    _caseSensitive = !_caseSensitive;
+                    if (_largeView) {
+                      _scheduleLargeSearch(immediate: true);
+                    } else {
+                      _runSearch();
+                    }
+                  }),
+                ),
+                ToolButton(
+                  icon: LucideIcons.chevronUp,
+                  tooltip: 'Previous',
+                  onPressed: hasMatches ? () => _gotoMatch(-1) : null,
+                ),
+                ToolButton(
+                  icon: LucideIcons.chevronDown,
+                  tooltip: 'Next',
+                  onPressed: hasMatches ? () => _gotoMatch(1) : null,
+                ),
+                ToolButton(
+                  icon: LucideIcons.x,
+                  tooltip: 'Close',
+                  onPressed: () => toggleFind(replace: _showReplace),
+                ),
+              ],
+            ),
+            if (_showReplace && !_largeView)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _replaceController,
+                        style: text.bodyMedium,
+                        decoration:
+                            decoration('Replace with', LucideIcons.replace),
                       ),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: hasMatches ? _replaceCurrent : null,
-                    child: const Text('Replace'),
-                  ),
-                  TextButton(
-                    onPressed: hasMatches ? _replaceAll : null,
-                    child: const Text('All'),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      style: compactButton,
+                      onPressed: hasMatches ? _replaceCurrent : null,
+                      child: const Text('Replace'),
+                    ),
+                    const SizedBox(width: 6),
+                    OutlinedButton(
+                      style: compactButton,
+                      onPressed: hasMatches ? _replaceAll : null,
+                      child: const Text('All'),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
+  /// No border in any state: InputDecoration.collapsed alone still picks
+  /// up the theme's focused border.
+  static const _bareDecoration = InputDecoration(
+    isCollapsed: true,
+    contentPadding: EdgeInsets.zero,
+    border: InputBorder.none,
+    enabledBorder: InputBorder.none,
+    focusedBorder: InputBorder.none,
+    disabledBorder: InputBorder.none,
+    errorBorder: InputBorder.none,
+    focusedErrorBorder: InputBorder.none,
+    filled: false,
+  );
+
   Widget _buildEditor() {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final field = TextField(
       controller: _controller,
       undoController: _undo,
@@ -1024,7 +1096,7 @@ class TextEditorPaneState extends State<TextEditorPane> {
       style: _textStyle,
       strutStyle: _strut,
       scrollPhysics: const NeverScrollableScrollPhysics(),
-      decoration: const InputDecoration.collapsed(hintText: ''),
+      decoration: _bareDecoration,
     );
     final editable = CallbackShortcuts(
       bindings: {
@@ -1034,10 +1106,11 @@ class TextEditorPaneState extends State<TextEditorPane> {
     );
 
     final showGutter = !_wrap;
+    final focused = _focusNode.hasFocus;
     return LayoutBuilder(
       builder: (context, constraints) {
         final gutterWidth = showGutter
-            ? 16 + '$_lineCount'.length * _charWidth()
+            ? 20 + '$_lineCount'.length * _charWidth()
             : 0.0;
         Widget editor;
         if (_wrap) {
@@ -1057,9 +1130,24 @@ class TextEditorPaneState extends State<TextEditorPane> {
               scrollDirection: Axis.horizontal,
               child: SizedBox(
                 width: contentWidth,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 16, 48),
-                  child: editable,
+                child: Stack(
+                  children: [
+                    // Current line (rows have a fixed strut height).
+                    if (focused)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 12 + (_cursorLine - 1) * _lineHeight,
+                        height: _lineHeight,
+                        child: ColoredBox(
+                          color: colors.muted.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 16, 48),
+                      child: editable,
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1074,31 +1162,43 @@ class TextEditorPaneState extends State<TextEditorPane> {
           ),
         );
 
-        if (!showGutter) return GestureDetector(onTap: _focusNode.requestFocus, child: body);
+        if (!showGutter) {
+          return GestureDetector(onTap: _focusNode.requestFocus, child: body);
+        }
 
         // Line numbers are a lazily built list (one row per line, same strut
         // height as the editor) instead of one giant paragraph.
-        final gutterStyle = _textStyle.copyWith(color: scheme.outline);
+        final gutterStyle = _textStyle.copyWith(
+          color: colors.mutedForeground.withValues(alpha: 0.75),
+        );
+        final currentStyle = _textStyle.copyWith(color: colors.foreground);
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: gutterWidth,
-              color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-              child: ScrollConfiguration(
-                behavior: const ScrollBehavior().copyWith(scrollbars: false),
-                child: ListView.builder(
-                  controller: _gutterScroll,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(4, 12, 8, 48),
-                  itemExtent: _lineHeight,
-                  itemCount: _lineCount,
-                  itemBuilder: (context, i) => Text(
-                    '${i + 1}',
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    style: gutterStyle,
-                    strutStyle: _strut,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.muted.withValues(alpha: 0.35),
+                border: Border(right: BorderSide(color: colors.border)),
+              ),
+              child: SizedBox(
+                width: gutterWidth,
+                child: ScrollConfiguration(
+                  behavior: const ScrollBehavior().copyWith(scrollbars: false),
+                  child: ListView.builder(
+                    controller: _gutterScroll,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(4, 12, 10, 48),
+                    itemExtent: _lineHeight,
+                    itemCount: _lineCount,
+                    itemBuilder: (context, i) => Text(
+                      '${i + 1}',
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      style: focused && i + 1 == _cursorLine
+                          ? currentStyle
+                          : gutterStyle,
+                      strutStyle: _strut,
+                    ),
                   ),
                 ),
               ),
@@ -1112,44 +1212,65 @@ class TextEditorPaneState extends State<TextEditorPane> {
 
   Widget _buildStatusBar() {
     final doc = _document;
-    final style = Theme.of(context).textTheme.labelSmall;
+    final colors = context.colors;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontSize: 11.5,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
     final large = _largeStatus;
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        4,
-        16,
-        4 + MediaQuery.paddingOf(context).bottom,
+    final details = [
+      if (doc != null && !_largeView) doc.encodingLabel,
+      if (doc != null && !_largeView) doc.lineEnding.label,
+      if (_largeView && large != null) TextDocument.labelOf(large.encoding),
+      if (!_largeView && _controller.language != null)
+        _controller.language!.name,
+    ].join('  ·  ');
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border(top: BorderSide(color: colors.border)),
       ),
-      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-      child: Row(
-        children: [
-          Text(
-            _largeView
-                ? (large == null
-                    ? 'Reading…'
-                    : '${large.lineCount}${large.complete ? '' : '+'} lines')
-                : 'Ln $_cursorLine, Col $_cursorColumn',
-            style: style,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          12,
+          0,
+          12,
+          MediaQuery.paddingOf(context).bottom,
+        ),
+        child: SizedBox(
+          height: 30,
+          child: Row(
+            children: [
+              Text(
+                _largeView
+                    ? (large == null
+                        ? 'Reading…'
+                        : '${large.lineCount}${large.complete ? '' : '+'} lines')
+                    : 'Ln $_cursorLine, Col $_cursorColumn',
+                style: style,
+              ),
+              if (_readOnly || _largeView) ...[
+                const SizedBox(width: 8),
+                const StatusBadge('Read-only', icon: LucideIcons.lock),
+              ],
+              if (_dirty) ...[
+                const SizedBox(width: 8),
+                const StatusBadge('Modified', tone: Tone.warning),
+              ],
+              const SizedBox(width: 12),
+              // Ellipsizes instead of overflowing on narrow screens.
+              Expanded(
+                child: Text(
+                  details,
+                  style: style,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          // Ellipsizes instead of overflowing on narrow screens / large text.
-          Expanded(
-            child: Text(
-              [
-                if (_readOnly || _largeView) 'Read-only',
-                if (_dirty) 'Modified',
-                if (doc != null && !_largeView) doc.encodingLabel,
-                if (doc != null && !_largeView) doc.lineEnding.label,
-                if (_largeView && large != null) TextDocument.labelOf(large.encoding),
-              ].join('  ·  '),
-              style: style,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

@@ -3,13 +3,12 @@ import 'package:explorer/core/theme/app_color_theme.dart';
 import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/shared/file_icons/file_icons.dart';
-import 'package:explorer/shared/icons/app_icons.dart';
-import 'package:explorer/shared/liquid_glass/explorer_liquid_glass.dart';
-import 'package:explorer/shared/widgets/theme_palette_circle.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
-/// Options sheet with liquid-glass panel (sort, view, themes, etc.).
+/// Options sheet: view, sorting, appearance and sharing.
 class ExplorerOptionsSheet extends StatelessWidget {
   const ExplorerOptionsSheet({
     super.key,
@@ -31,7 +30,7 @@ class ExplorerOptionsSheet extends StatelessWidget {
     required void Function(SortOption option, SortOrder order) onSortChanged,
     required void Function(ViewMode mode) onViewModeChanged,
   }) {
-    return ExplorerLiquidGlassBottomSheet.show<void>(
+    return AppSheet.show<void>(
       context,
       child: ExplorerOptionsSheet(
         fileState: fileState,
@@ -44,209 +43,150 @@ class ExplorerOptionsSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeSettings = context.watch<ThemeCubit>().state;
-    final appearance = themeSettings.colorTheme.appearanceFor(
-      themeSettings.isDark ? Brightness.dark : Brightness.light,
-    );
-    final fg = ExplorerLiquidGlassForeground.icon(context);
+    final settings = context.watch<ThemeCubit>().state;
+    final cubit = context.read<ThemeCubit>();
+    final text = Theme.of(context).textTheme;
+    final ascending = fileState.sortOrder == SortOrder.ascending;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          'Options',
-          style: ExplorerLiquidGlassForeground.title(context),
+        Text('Options', style: text.titleLarge),
+        const SizedBox(height: 4),
+        Text('View, sorting and appearance.', style: text.bodySmall),
+        const _Heading('Layout'),
+        SegmentedButton<ViewMode>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: ViewMode.list, label: Text('List')),
+            ButtonSegment(value: ViewMode.grid, label: Text('Grid')),
+            ButtonSegment(value: ViewMode.compact, label: Text('Compact')),
+            ButtonSegment(value: ViewMode.gallery, label: Text('Gallery')),
+          ],
+          selected: {fileState.viewMode},
+          onSelectionChanged: (s) => onViewModeChanged(s.first),
         ),
-        const SizedBox(height: 16),
-        _SectionLabel('Sort by', color: appearance.textSecondary),
-        _SortSection(
-          currentOption: fileState.sortOption,
-          currentOrder: fileState.sortOrder,
-          onChanged: onSortChanged,
-        ),
-        const SizedBox(height: 12),
-        _SectionLabel('View mode', color: appearance.textSecondary),
-        _ViewModeSection(
-          current: fileState.viewMode,
-          onChanged: onViewModeChanged,
-        ),
-        const SizedBox(height: 8),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: AppIcons.globe(color: fg),
-          title: Text(
-            'HTTP file server',
-            style: TextStyle(color: fg),
-          ),
-          subtitle: Text(
-            'Share this folder on your network',
-            style: TextStyle(
-              color: appearance.textSecondary,
+        const _Heading('Sort by'),
+        Row(
+          children: [
+            Expanded(
+              child: SegmentedButton<SortOption>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: SortOption.name, label: Text('Name')),
+                  ButtonSegment(value: SortOption.date, label: Text('Date')),
+                  ButtonSegment(value: SortOption.size, label: Text('Size')),
+                  ButtonSegment(value: SortOption.type, label: Text('Type')),
+                ],
+                selected: {fileState.sortOption},
+                onSelectionChanged: (s) =>
+                    onSortChanged(s.first, fileState.sortOrder),
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: () => onSortChanged(
+                fileState.sortOption,
+                ascending ? SortOrder.descending : SortOrder.ascending,
+              ),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                padding: EdgeInsets.zero,
+              ),
+              child: Tooltip(
+                message: ascending ? 'Ascending' : 'Descending',
+                child: Icon(
+                  ascending
+                      ? LucideIcons.arrowUpNarrowWide
+                      : LucideIcons.arrowDownWideNarrow,
+                  size: 18,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const _Heading('Theme'),
+        SegmentedButton<ThemeMode>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(
+              value: ThemeMode.system,
+              icon: Icon(LucideIcons.monitor, size: 16),
+              label: Text('System'),
+            ),
+            ButtonSegment(
+              value: ThemeMode.light,
+              icon: Icon(LucideIcons.sun, size: 16),
+              label: Text('Light'),
+            ),
+            ButtonSegment(
+              value: ThemeMode.dark,
+              icon: Icon(LucideIcons.moon, size: 16),
+              label: Text('Dark'),
+            ),
+          ],
+          selected: {settings.themeMode},
+          onSelectionChanged: (s) => cubit.setThemeMode(s.first),
+        ),
+        const _Heading('Color'),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final spec in AppColorThemes.all)
+              _Swatch(
+                spec: spec,
+                selected: settings.colorThemeId == spec.id,
+                onTap: () => cubit.setColorTheme(spec.id),
+              ),
+          ],
+        ),
+        const _Heading('File icons'),
+        SegmentedButton<FileIconStyle>(
+          showSelectedIcon: false,
+          segments: [
+            for (final style in FileIconStyle.values)
+              ButtonSegment(
+                value: style,
+                icon: FileIcon(path: 'preview.pdf', size: 18, style: style),
+                label: Text(style.label),
+              ),
+          ],
+          selected: {settings.fileIconStyle},
+          onSelectionChanged: (s) => cubit.setFileIconStyle(s.first),
+        ),
+        const _Heading('Sharing'),
+        _ActionRow(
+          icon: LucideIcons.globe,
+          title: 'HTTP file server',
+          subtitle: 'Share this folder with devices on your network',
           onTap: () {
             Navigator.pop(context);
             onHttpShare();
           },
         ),
-        Divider(color: fg.withValues(alpha: 0.15), height: 1),
-        _SectionLabel('Theme mode', color: appearance.textSecondary),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          secondary: themeSettings.isDark
-              ? AppIcons.moon(color: fg)
-              : AppIcons.sun(color: fg),
-          title: Text(
-            themeSettings.isDark ? 'Night mode' : 'Day mode',
-            style: TextStyle(color: fg),
-          ),
-          subtitle: Text(
-            'Tap to switch light / dark',
-            style: TextStyle(color: appearance.textSecondary),
-          ),
-          value: themeSettings.isDark,
-          onChanged: (_) {
-            context.read<ThemeCubit>().toggleBrightness();
-          },
-        ),
-        const SizedBox(height: 8),
-        _SectionLabel('File icons', color: appearance.textSecondary),
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final style in FileIconStyle.values)
-              ChoiceChip(
-                avatar: FileIcon(path: 'preview.pdf', size: 20, style: style),
-                label: Text(style.label),
-                selected: themeSettings.fileIconStyle == style,
-                onSelected: (_) =>
-                    context.read<ThemeCubit>().setFileIconStyle(style),
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        _SectionLabel('Color theme', color: appearance.textSecondary),
-        ...AppColorThemes.all.map(
-          (spec) => _ColorThemeTile(
-            spec: spec,
-            selected: themeSettings.colorThemeId == spec.id,
-            onTap: () {
-              context.read<ThemeCubit>().setColorTheme(spec.id);
-            },
-          ),
-        ),
       ],
     );
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.label, {required this.color});
+class _Heading extends StatelessWidget {
+  const _Heading(this.label);
 
   final String label;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 6),
-      child: Text(
-        label.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.06,
-          color: color,
-        ),
-      ),
+      padding: const EdgeInsets.only(top: 20, bottom: 8),
+      child: Text(label, style: Theme.of(context).textTheme.titleSmall),
     );
   }
 }
 
-class _SortSection extends StatelessWidget {
-  const _SortSection({
-    required this.currentOption,
-    required this.currentOrder,
-    required this.onChanged,
-  });
-
-  final SortOption currentOption;
-  final SortOrder currentOrder;
-  final void Function(SortOption option, SortOrder order) onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final option in SortOption.values)
-          FilterChip(
-            label: Text(_sortLabel(option)),
-            selected: currentOption == option,
-            onSelected: (_) => onChanged(option, currentOrder),
-          ),
-        FilterChip(
-          label: const Text('Ascending'),
-          selected: currentOrder == SortOrder.ascending,
-          onSelected: (_) => onChanged(currentOption, SortOrder.ascending),
-        ),
-        FilterChip(
-          label: const Text('Descending'),
-          selected: currentOrder == SortOrder.descending,
-          onSelected: (_) => onChanged(currentOption, SortOrder.descending),
-        ),
-      ],
-    );
-  }
-
-  String _sortLabel(SortOption option) {
-    return switch (option) {
-      SortOption.name => 'Name',
-      SortOption.size => 'Size',
-      SortOption.date => 'Date',
-      SortOption.type => 'Type',
-    };
-  }
-}
-
-class _ViewModeSection extends StatelessWidget {
-  const _ViewModeSection({
-    required this.current,
-    required this.onChanged,
-  });
-
-  final ViewMode current;
-  final void Function(ViewMode mode) onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      children: [
-        for (final mode in ViewMode.values)
-          ChoiceChip(
-            label: Text(_viewLabel(mode)),
-            selected: current == mode,
-            onSelected: (_) => onChanged(mode),
-          ),
-      ],
-    );
-  }
-
-  String _viewLabel(ViewMode mode) {
-    return switch (mode) {
-      ViewMode.list => 'List',
-      ViewMode.grid => 'Grid',
-      ViewMode.compact => 'Compact',
-      ViewMode.gallery => 'Gallery',
-    };
-  }
-}
-
-class _ColorThemeTile extends StatelessWidget {
-  const _ColorThemeTile({
+class _Swatch extends StatelessWidget {
+  const _Swatch({
     required this.spec,
     required this.selected,
     required this.onTap,
@@ -258,27 +198,102 @@ class _ColorThemeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeSettings = context.watch<ThemeCubit>().state;
-    final appearance = spec.appearanceFor(
-      themeSettings.isDark ? Brightness.dark : Brightness.light,
-    );
-    final fg = ExplorerLiquidGlassForeground.icon(context);
-
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: ThemePaletteCircle(
-        colors: spec.paletteSwatches,
-        selected: selected,
-      ),
-      title: Text(
-        spec.name,
-        style: TextStyle(
-          color: appearance.textPrimary,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+    final colors = context.colors;
+    final swatch = spec.swatch;
+    return Tooltip(
+      message: spec.name,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 36,
+          height: 36,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? colors.foreground : Colors.transparent,
+              width: 2,
+            ),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: swatch,
+              border: Border.all(color: colors.border),
+            ),
+            child: selected
+                ? const Icon(LucideIcons.check, size: 16, color: Colors.white)
+                : null,
+          ),
         ),
       ),
-      trailing: selected ? AppIcons.check(color: fg) : null,
-      onTap: onTap,
+    );
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: colors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: colors.muted,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 18, color: colors.foreground),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: text.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    Text(subtitle, style: text.bodySmall),
+                  ],
+                ),
+              ),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 18,
+                color: colors.mutedForeground,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

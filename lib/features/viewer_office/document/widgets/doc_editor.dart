@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
+import '../../common/viewer_ui.dart';
 import '../delta_converter.dart';
 import '../doc_model.dart';
 import '../layout/doc_layout.dart';
@@ -381,7 +382,7 @@ class _DocEditorViewState extends State<DocEditorView> {
       _init();
     }
     final controller = widget.session.controller;
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final sizes = <String, String>{
       for (final s in const [
         8,
@@ -403,6 +404,31 @@ class _DocEditorViewState extends State<DocEditorView> {
         '$s': '$s',
       'Clear': '0',
     };
+
+    // shadcn toggles: ghost buttons, the active one on the accent colour.
+    final buttonShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(6),
+    );
+    final iconTheme = QuillIconTheme(
+      iconButtonUnselectedData: IconButtonData(
+        style: IconButton.styleFrom(
+          foregroundColor: colors.foreground,
+          disabledForegroundColor: colors.mutedForeground.withValues(
+            alpha: 0.5,
+          ),
+          shape: buttonShape,
+        ),
+      ),
+      iconButtonSelectedData: IconButtonData(
+        style: IconButton.styleFrom(
+          backgroundColor: colors.accent,
+          foregroundColor: colors.accentForeground,
+          shape: buttonShape,
+        ),
+      ),
+    );
+    QuillToolbarToggleStyleButtonOptions toggle(IconData icon) =>
+        QuillToolbarToggleStyleButtonOptions(iconData: icon);
 
     final toolbar = QuillSimpleToolbar(
       controller: controller,
@@ -433,21 +459,75 @@ class _DocEditorViewState extends State<DocEditorView> {
         showSubscript: true,
         showSuperscript: true,
         showDividers: !compact,
-        color: scheme.surfaceContainer,
+        color: colors.background,
+        sectionDividerColor: colors.border,
+        iconTheme: iconTheme,
         buttonOptions: QuillSimpleToolbarButtonOptions(
+          base: QuillToolbarBaseButtonOptions(iconSize: 17, iconTheme: iconTheme),
           fontFamily: QuillToolbarFontFamilyButtonOptions(items: _fonts()),
           fontSize: QuillToolbarFontSizeButtonOptions(items: sizes),
+          undoHistory: const QuillToolbarHistoryButtonOptions(
+            iconData: LucideIcons.undo2,
+          ),
+          redoHistory: const QuillToolbarHistoryButtonOptions(
+            iconData: LucideIcons.redo2,
+          ),
+          bold: toggle(LucideIcons.bold),
+          italic: toggle(LucideIcons.italic),
+          underLine: toggle(LucideIcons.underline),
+          strikeThrough: toggle(LucideIcons.strikethrough),
+          subscript: toggle(LucideIcons.subscript),
+          superscript: toggle(LucideIcons.superscript),
+          listNumbers: toggle(LucideIcons.listOrdered),
+          listBullets: toggle(LucideIcons.list),
+          indentIncrease: const QuillToolbarIndentButtonOptions(
+            iconData: LucideIcons.indentIncrease,
+          ),
+          indentDecrease: const QuillToolbarIndentButtonOptions(
+            iconData: LucideIcons.indentDecrease,
+          ),
+          color: const QuillToolbarColorButtonOptions(
+            iconData: LucideIcons.baseline,
+          ),
+          backgroundColor: const QuillToolbarColorButtonOptions(
+            iconData: LucideIcons.highlighter,
+          ),
+          clearFormat: const QuillToolbarClearFormatButtonOptions(
+            iconData: LucideIcons.removeFormatting,
+          ),
+          linkStyle: const QuillToolbarLinkStyleButtonOptions(
+            iconData: LucideIcons.link,
+          ),
+          search: const QuillToolbarSearchButtonOptions(
+            iconData: LucideIcons.search,
+          ),
+          selectAlignmentButtons: const QuillToolbarSelectAlignmentButtonOptions(
+            iconsData: QuillSelectAlignmentValues(
+              leftAlignment: LucideIcons.alignLeft,
+              centerAlignment: LucideIcons.alignCenter,
+              rightAlignment: LucideIcons.alignRight,
+              justifyAlignment: LucideIcons.alignJustify,
+            ),
+          ),
         ),
       ),
     );
 
     final page = widget.session.model.page;
     final maxW = math.max(480.0, page.width * scale + 96);
+    // The page being edited is always paper: white with the document's own
+    // (dark) text, in light and dark mode alike, so typed text never ends
+    // up dark on a dark background.
     final editor = Theme(
       data: ThemeData(
         brightness: Brightness.light,
-        colorScheme: ColorScheme.fromSeed(seedColor: scheme.primary),
+        colorScheme: ColorScheme.fromSeed(seedColor: colors.primary),
         useMaterial3: true,
+        textSelectionTheme: TextSelectionThemeData(
+          cursorColor: const Color(0xFF111827),
+          selectionColor: const Color(0xFF3B82F6).withValues(alpha: 0.3),
+          selectionHandleColor: const Color(0xFF2563EB),
+        ),
       ),
       child: DefaultTextStyle(
         style: _ts(widget.session.model.baseStyle),
@@ -484,28 +564,35 @@ class _DocEditorViewState extends State<DocEditorView> {
       child: Column(
         children: [
           SizedBox(height: widget.topPadding),
-          Material(
-            color: scheme.surfaceContainer,
-            elevation: 1,
-            child: compact
-                ? toolbar
-                : Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: toolbar,
-                  ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.background,
+              border: Border(bottom: BorderSide(color: colors.border)),
+            ),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: compact ? 2 : 4,
+              ),
+              child: toolbar,
+            ),
           ),
           Expanded(
-            child: Container(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF2A2A2E)
-                  : const Color(0xFFE9E9EE),
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxW),
-                child: Material(
-                  color: Colors.white,
-                  elevation: compact ? 0 : 2,
-                  child: editor,
+            child: ColoredBox(
+              color: ViewerSurface.canvas(context),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxW),
+                  child: Padding(
+                    padding: EdgeInsets.only(top: compact ? 0 : 16),
+                    child: DecoratedBox(
+                      decoration: compact
+                          ? const BoxDecoration(color: Colors.white)
+                          : ViewerSurface.page(context),
+                      child: Material(color: Colors.white, child: editor),
+                    ),
+                  ),
                 ),
               ),
             ),

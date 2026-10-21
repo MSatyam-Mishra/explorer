@@ -1,8 +1,9 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../reader/reader_settings.dart';
 
-/// Always-visible slim status line under the page.
+/// Always-visible slim status line under the page, in the page's colours.
 class ReaderFooter extends StatelessWidget {
   const ReaderFooter({
     super.key,
@@ -11,6 +12,7 @@ class ReaderFooter extends StatelessWidget {
     required this.status,
   });
 
+  /// The resolved page theme (not [ReaderTheme.system]).
   final ReaderTheme theme;
   final String title;
   final String status;
@@ -22,6 +24,7 @@ class ReaderFooter extends StatelessWidget {
     final style = TextStyle(
       color: theme.foreground.withValues(alpha: 0.62),
       fontSize: 12,
+      fontFeatures: const [FontFeature.tabularFigures()],
     );
     return Container(
       color: theme.background,
@@ -46,7 +49,8 @@ class ReaderFooter extends StatelessWidget {
 }
 
 /// Bottom controls shown when the centre of the page is tapped: chapter
-/// title, page in chapter, overall progress and a scrubber.
+/// title, page in chapter, overall progress and a scrubber. Drawn as app
+/// chrome (a floating card), readable on every page theme.
 class ReaderControlsPanel extends StatelessWidget {
   const ReaderControlsPanel({
     super.key,
@@ -61,6 +65,7 @@ class ReaderControlsPanel extends StatelessWidget {
     this.onNextChapter,
   });
 
+  /// The page theme behind the panel.
   final ReaderTheme theme;
   final String title;
   final String detail;
@@ -75,18 +80,13 @@ class ReaderControlsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = theme.foreground;
-    final accent = theme.link;
-    return Material(
-      color: Color.alphaBlend(
-        (theme.isDark ? Colors.white : Colors.black).withValues(alpha: 0.05),
-        theme.background,
-      ),
-      elevation: 8,
-      shadowColor: Colors.black54,
-      borderRadius: BorderRadius.circular(20),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+    final text = Theme.of(context).textTheme;
+    return AppPanel(
+      translucent: true,
+      borderRadius: 16,
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 10),
+      child: Material(
+        type: MaterialType.transparency,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -96,31 +96,29 @@ class ReaderControlsPanel extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: fg,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
+                style: text.titleSmall,
               ),
             ),
+            const SizedBox(height: 2),
+            Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: text.bodySmall?.copyWith(
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 4),
             Row(
               children: [
-                IconButton(
+                ViewerAction(
                   tooltip: 'Previous chapter',
-                  color: fg,
-                  disabledColor: fg.withValues(alpha: 0.3),
-                  icon: const Icon(Icons.skip_previous_rounded),
+                  icon: LucideIcons.skipBack,
+                  iconSize: 18,
                   onPressed: onPrevChapter,
                 ),
                 Expanded(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: accent,
-                      inactiveTrackColor: fg.withValues(alpha: 0.2),
-                      thumbColor: accent,
-                      overlayColor: accent.withValues(alpha: 0.15),
-                      valueIndicatorColor: accent,
-                    ),
+                  child: ViewerSliderTheme(
                     child: Slider(
                       value: value.clamp(0.0, 1.0),
                       label: labelFor(value),
@@ -130,18 +128,13 @@ class ReaderControlsPanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                IconButton(
+                ViewerAction(
                   tooltip: 'Next chapter',
-                  color: fg,
-                  disabledColor: fg.withValues(alpha: 0.3),
-                  icon: const Icon(Icons.skip_next_rounded),
+                  icon: LucideIcons.skipForward,
+                  iconSize: 18,
                   onPressed: onNextChapter,
                 ),
               ],
-            ),
-            Text(
-              detail,
-              style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 12),
             ),
           ],
         ),

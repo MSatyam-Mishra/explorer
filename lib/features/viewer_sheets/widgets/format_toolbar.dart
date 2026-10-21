@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 
 import '../controller/spreadsheet_controller.dart';
@@ -32,7 +33,7 @@ String numberFormatLabel(String code) {
   return 'Custom';
 }
 
-/// Cell formatting controls: bold/italic/underline, colours, alignment,
+//// Cell formatting controls: bold/italic/underline, colours, alignment,
 /// wrap, number format, decimals and merge.
 class FormatToolbar extends StatelessWidget {
   const FormatToolbar({
@@ -53,33 +54,33 @@ class FormatToolbar extends StatelessWidget {
       builder: (context, _) {
         final c = controller;
         final st = c.activeStyle;
-        final scheme = Theme.of(context).colorScheme;
+        final colors = context.colors;
         final items = <Widget>[
           if (showUndoRedo) ...[
             _ToolButton(
-              icon: Icons.undo_rounded,
+              icon: LucideIcons.undo2,
               tooltip: c.undoLabel == null ? 'Undo' : 'Undo ${c.undoLabel}',
               onPressed: c.canUndo ? c.undo : null,
             ),
             _ToolButton(
-              icon: Icons.redo_rounded,
+              icon: LucideIcons.redo2,
               tooltip: c.redoLabel == null ? 'Redo' : 'Redo ${c.redoLabel}',
               onPressed: c.canRedo ? c.redo : null,
             ),
             const _Sep(),
           ],
-          _ToolButton(icon: Icons.format_bold_rounded, tooltip: 'Bold', selected: st.bold, onPressed: c.toggleBold),
-          _ToolButton(icon: Icons.format_italic_rounded, tooltip: 'Italic', selected: st.italic, onPressed: c.toggleItalic),
+          _ToolButton(icon: LucideIcons.bold, tooltip: 'Bold', selected: st.bold, onPressed: c.toggleBold),
+          _ToolButton(icon: LucideIcons.italic, tooltip: 'Italic', selected: st.italic, onPressed: c.toggleItalic),
           _ToolButton(
-            icon: Icons.format_underlined_rounded,
+            icon: LucideIcons.underline,
             tooltip: 'Underline',
             selected: st.underline,
             onPressed: c.toggleUnderline,
           ),
           _ColorButton(
-            icon: Icons.format_color_text_rounded,
+            icon: LucideIcons.baseline,
             tooltip: 'Text color',
-            color: st.fontColor == null ? scheme.onSurface : Color(st.fontColor!),
+            color: st.fontColor == null ? colors.foreground : Color(st.fontColor!),
             onPressed: () async {
               final choice = await showColorPalette(context,
                   title: 'Text color', noneLabel: 'Automatic', current: st.fontColor);
@@ -87,7 +88,7 @@ class FormatToolbar extends StatelessWidget {
             },
           ),
           _ColorButton(
-            icon: Icons.format_color_fill_rounded,
+            icon: LucideIcons.paintBucket,
             tooltip: 'Fill color',
             color: st.fillColor == null ? Colors.transparent : Color(st.fillColor!),
             onPressed: () async {
@@ -98,26 +99,26 @@ class FormatToolbar extends StatelessWidget {
           ),
           const _Sep(),
           _ToolButton(
-            icon: Icons.format_align_left_rounded,
+            icon: LucideIcons.alignLeft,
             tooltip: 'Align left',
             selected: st.hAlign == HAlign.left,
             onPressed: () => c.setAlignment(st.hAlign == HAlign.left ? HAlign.general : HAlign.left),
           ),
           _ToolButton(
-            icon: Icons.format_align_center_rounded,
+            icon: LucideIcons.alignCenter,
             tooltip: 'Center',
             selected: st.hAlign == HAlign.center,
             onPressed: () => c.setAlignment(st.hAlign == HAlign.center ? HAlign.general : HAlign.center),
           ),
           _ToolButton(
-            icon: Icons.format_align_right_rounded,
+            icon: LucideIcons.alignRight,
             tooltip: 'Align right',
             selected: st.hAlign == HAlign.right,
             onPressed: () => c.setAlignment(st.hAlign == HAlign.right ? HAlign.general : HAlign.right),
           ),
-          _ToolButton(icon: Icons.wrap_text_rounded, tooltip: 'Wrap text', selected: st.wrap, onPressed: c.toggleWrap),
+          _ToolButton(icon: LucideIcons.wrapText, tooltip: 'Wrap text', selected: st.wrap, onPressed: c.toggleWrap),
           _ToolButton(
-            icon: c.selectionHasMerge ? Icons.call_split_rounded : Icons.merge_type_rounded,
+            icon: c.selectionHasMerge ? LucideIcons.tableCellsSplit : LucideIcons.tableCellsMerge,
             tooltip: c.selectionHasMerge ? 'Unmerge cells' : 'Merge cells',
             onPressed: c.selectionHasMerge
                 ? c.unmergeSelection
@@ -126,12 +127,12 @@ class FormatToolbar extends StatelessWidget {
           const _Sep(),
           _NumberFormatButton(controller: c, current: st.numFmt),
           _ToolButton(
-            icon: Icons.exposure_neg_1_rounded,
+            icon: LucideIcons.decimalsArrowLeft,
             tooltip: 'Decrease decimals',
             onPressed: () => c.changeDecimals(-1),
           ),
           _ToolButton(
-            icon: Icons.exposure_plus_1_rounded,
+            icon: LucideIcons.decimalsArrowRight,
             tooltip: 'Increase decimals',
             onPressed: () => c.changeDecimals(1),
           ),
@@ -140,7 +141,7 @@ class FormatToolbar extends StatelessWidget {
         if (!scrollable) return row;
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           child: row,
         );
       },
@@ -152,12 +153,7 @@ class _Sep extends StatelessWidget {
   const _Sep();
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: 1,
-        height: 22,
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        color: Theme.of(context).colorScheme.outlineVariant,
-      );
+  Widget build(BuildContext context) => const ViewerToolDivider();
 }
 
 class _ToolButton extends StatelessWidget {
@@ -175,18 +171,12 @@ class _ToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return IconButton(
+    return ViewerAction(
       tooltip: tooltip,
-      isSelected: selected,
-      visualDensity: VisualDensity.compact,
-      iconSize: 20,
-      style: IconButton.styleFrom(
-        backgroundColor: selected ? scheme.primary.withValues(alpha: 0.14) : null,
-        foregroundColor: selected ? scheme.primary : scheme.onSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-      icon: Icon(icon),
+      icon: icon,
+      selected: selected,
+      size: 36,
+      iconSize: 18,
       onPressed: onPressed,
     );
   }
@@ -207,26 +197,28 @@ class _ColorButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     return IconButton(
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+      padding: EdgeInsets.zero,
       style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       onPressed: onPressed,
       icon: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: scheme.onSurface),
-          const SizedBox(height: 1),
+          Icon(icon, size: 16, color: colors.foreground),
+          const SizedBox(height: 2),
           Container(
-            width: 18,
-            height: 4,
+            width: 16,
+            height: 3,
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(1),
-              border: Border.all(color: scheme.outlineVariant, width: 0.5),
+              border: Border.all(color: colors.border, width: 0.5),
             ),
           ),
         ],
@@ -243,9 +235,11 @@ class _NumberFormatButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final label = numberFormatLabel(current);
-    return PopupMenuButton<String>(
+    return ViewerMenuButton<String>(
       tooltip: 'Number format',
+      minMenuWidth: 240,
       onSelected: (code) async {
         if (code == '__custom') {
           final custom = await _askCustom(context, current);
@@ -256,36 +250,37 @@ class _NumberFormatButton extends StatelessWidget {
       },
       itemBuilder: (context) => [
         for (final p in kNumberFormatPresets)
-          CheckedPopupMenuItem<String>(
+          viewerMenuItem(
             value: p.$2,
+            label: p.$1,
+            hint: _sample(p.$2),
             checked: p.$2 == current,
-            child: Row(
-              children: [
-                Expanded(child: Text(p.$1)),
-                Text(
-                  _sample(p.$2),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
           ),
-        const PopupMenuDivider(),
-        const PopupMenuItem<String>(value: '__custom', child: Text('Custom format…')),
+        viewerMenuDivider(),
+        viewerMenuItem(
+          value: '__custom',
+          icon: LucideIcons.slidersHorizontal,
+          label: 'Custom format…',
+        ),
       ],
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.onetwothree_rounded, size: 22),
-            const SizedBox(width: 2),
+            Icon(LucideIcons.hash, size: 16, color: colors.foreground),
+            const SizedBox(width: 6),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 76),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+              constraints: const BoxConstraints(maxWidth: 84),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
             ),
-            const Icon(Icons.arrow_drop_down_rounded, size: 20),
+            const SizedBox(width: 2),
+            Icon(LucideIcons.chevronDown, size: 14, color: colors.mutedForeground),
           ],
         ),
       ),

@@ -1,3 +1,4 @@
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -57,7 +58,7 @@ class FormulaBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     final textTheme = Theme.of(context).textTheme;
     final h = dense ? 40.0 : 44.0;
     return ListenableBuilder(
@@ -68,15 +69,21 @@ class FormulaBar extends StatelessWidget {
           height: h,
           child: Row(
             children: [
+              const SizedBox(width: 6),
               Tooltip(
                 message: 'Go to cell',
                 child: InkWell(
                   onTap: onGoTo,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(6),
                   child: Container(
+                    height: h - 12,
                     constraints: const BoxConstraints(minWidth: 64, maxWidth: 110),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: colors.input),
+                    ),
                     child: Text(
                       controller.selectionLabel,
                       maxLines: 1,
@@ -89,14 +96,13 @@ class FormulaBar extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(width: 1, height: h * 0.55, color: scheme.outlineVariant),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
                   'fx',
                   style: textTheme.titleSmall?.copyWith(
                     fontStyle: FontStyle.italic,
-                    color: editing ? scheme.primary : scheme.onSurfaceVariant,
+                    color: editing ? colors.primary : colors.mutedForeground,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -110,11 +116,19 @@ class FormulaBar extends StatelessWidget {
                     controller: controller.editText,
                     focusNode: focusNode,
                     maxLines: 1,
-                    style: textTheme.bodyMedium?.copyWith(fontFamily: 'monospace', fontSize: 14),
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontFamily: 'packages/shadcn_ui/GeistMono',
+                      fontFamilyFallback: const ['monospace'],
+                      fontSize: 14,
+                    ),
+                    cursorColor: colors.foreground,
                     textInputAction: TextInputAction.done,
                     decoration: const InputDecoration(
                       isDense: true,
                       border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
                       hintText: 'Value or =formula',
                       contentPadding: EdgeInsets.symmetric(vertical: 10),
                     ),
@@ -137,18 +151,23 @@ class FormulaBar extends StatelessWidget {
                 ),
               ),
               if (editing) ...[
-                IconButton(
+                ViewerAction(
                   tooltip: 'Cancel',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.close_rounded, color: scheme.error),
+                  icon: LucideIcons.x,
+                  size: 36,
+                  iconSize: 18,
+                  color: colors.destructive,
                   onPressed: onCancel,
                 ),
-                IconButton(
+                ViewerAction(
                   tooltip: 'Enter',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.check_rounded, color: scheme.primary),
+                  icon: LucideIcons.check,
+                  size: 36,
+                  iconSize: 18,
+                  color: colors.primary,
                   onPressed: () => onCommit(0, 0),
                 ),
+                const SizedBox(width: 4),
               ],
             ],
           ),

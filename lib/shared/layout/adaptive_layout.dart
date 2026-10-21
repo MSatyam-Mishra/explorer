@@ -1,5 +1,6 @@
 import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
 
+import 'package:explorer/shared/ui/app_tokens.dart';
 import 'package:flutter/material.dart';
 
 /// Material 3 window size classes, used to adapt layouts for phones,
@@ -123,6 +124,32 @@ class AdaptiveSplitView extends StatelessWidget {
       if (!secondaryOnLeading) side,
     ];
     return Row(children: children);
+  }
+}
+
+/// Full-height navigation pane for wide screens, in the style of the
+/// shadcn/ui sidebar: a lightly tinted surface below the status bar. Put it
+/// in [AdaptiveSplitView.secondary] (which draws the hairline border).
+class DockedSidebar extends StatelessWidget {
+  const DockedSidebar({super.key, required this.child});
+
+  final Widget child;
+
+  /// The pane's background, a step off the page background.
+  static Color backgroundOf(BuildContext context) {
+    final colors = context.colors;
+    return Color.alphaBlend(
+      colors.muted.withValues(alpha: context.isDarkMode ? 0.45 : 0.4),
+      colors.background,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: backgroundOf(context),
+      child: SafeArea(right: false, child: child),
+    );
   }
 }
 

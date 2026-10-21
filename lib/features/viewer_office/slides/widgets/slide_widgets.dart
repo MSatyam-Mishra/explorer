@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../common/viewer_ui.dart';
 import '../slide_model.dart';
 import 'slide_canvas.dart';
 
@@ -28,7 +29,7 @@ class SlideThumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = context.colors;
     return Semantics(
       button: true,
       selected: selected,
@@ -47,50 +48,60 @@ class SlideThumbnail extends StatelessWidget {
                 child: Text(
                   '${slide.index + 1}',
                   textAlign: TextAlign.right,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: selected ? scheme.primary : scheme.onSurfaceVariant,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: selected ? colors.foreground : colors.mutedForeground,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
               ),
               const SizedBox(width: 6),
               Expanded(
-                child: DecoratedBox(
+                child: Container(
+                  padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                      color: selected ? scheme.primary : scheme.outlineVariant,
-                      width: selected ? 2.5 : 1,
+                      color: selected ? colors.ring : Colors.transparent,
+                      width: 2,
                     ),
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: Stack(
-                      children: [
-                        RepaintBoundary(
-                          child: SlideFit.builder(
-                            deck: deck,
-                            builder: (context, scale) => SlideCanvas(
+                  child: DecoratedBox(
+                    position: DecorationPosition.foreground,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: Stack(
+                        children: [
+                          RepaintBoundary(
+                            child: SlideFit.builder(
                               deck: deck,
-                              slide: slide,
-                              images: images,
-                              pixelScale: scale,
-                            ),
-                          ),
-                        ),
-                        if (slide.hidden)
-                          Positioned.fill(
-                            child: ColoredBox(
-                              color: Colors.white.withValues(alpha: 0.55),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.visibility_off_outlined,
-                                  size: 18,
-                                ),
+                              builder: (context, scale) => SlideCanvas(
+                                deck: deck,
+                                slide: slide,
+                                images: images,
+                                pixelScale: scale,
                               ),
                             ),
                           ),
-                      ],
+                          if (slide.hidden)
+                            Positioned.fill(
+                              child: ColoredBox(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                child: const Center(
+                                  child: Icon(
+                                    LucideIcons.eyeOff,
+                                    size: 16,
+                                    color: Color(0xFF374151),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -270,10 +281,12 @@ class _PresentationModeState extends State<PresentationMode> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            // The slideshow is always on black.
                             DecoratedBox(
                               decoration: BoxDecoration(
                                 color: Colors.black54,
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: Colors.white24),
                               ),
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -282,14 +295,22 @@ class _PresentationModeState extends State<PresentationMode> {
                                 ),
                                 child: Text(
                                   '${_index + 1} / ${_shown.length}',
-                                  style: const TextStyle(color: Colors.white),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    fontFeatures: [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                            IconButton(
+                            const SizedBox(width: 4),
+                            ViewerAction(
                               tooltip: 'Exit slideshow',
                               color: Colors.white,
-                              icon: const Icon(Icons.close),
+                              icon: LucideIcons.x,
                               onPressed: _exit,
                             ),
                           ],
@@ -307,88 +328,144 @@ class _PresentationModeState extends State<PresentationMode> {
   }
 }
 
-/// Edits the text of one shape: one line per paragraph. Returns the new
+//// Edits the text of one shape: one line per paragraph. Returns the new
 /// paragraphs or null when cancelled.
 Future<List<String>?> showShapeTextEditor(
   BuildContext context, {
   required List<String> paragraphs,
   String? title,
 }) {
-  final controller = TextEditingController(text: paragraphs.join('\n'));
   return showDialog<List<String>>(
     context: context,
-    builder: (d) {
-      final width = MediaQuery.sizeOf(d).width;
-      return AlertDialog(
-        // Scrolls instead of overflowing once the keyboard is up on phones.
-        scrollable: true,
-        title: Text(title ?? 'Edit text'),
-        content: SizedBox(
-          width: width < 600 ? width : 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Each line is a paragraph. Formatting of unchanged text is kept.',
-                style: Theme.of(d).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                minLines: 3,
-                maxLines: 12,
-                keyboardType: TextInputType.multiline,
-                decoration: const InputDecoration(border: OutlineInputBorder()),
-              ),
-            ],
-          ),
+    builder: (_) => _ShapeTextDialog(paragraphs: paragraphs, title: title),
+  );
+}
+
+/// Owns its text controller, so it lives as long as the dialog (including
+/// its closing animation).
+class _ShapeTextDialog extends StatefulWidget {
+  const _ShapeTextDialog({required this.paragraphs, this.title});
+
+  final List<String> paragraphs;
+  final String? title;
+
+  @override
+  State<_ShapeTextDialog> createState() => _ShapeTextDialogState();
+}
+
+class _ShapeTextDialogState extends State<_ShapeTextDialog> {
+  late final _controller = TextEditingController(
+    text: widget.paragraphs.join('\n'),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return AlertDialog(
+      // Scrolls instead of overflowing once the keyboard is up on phones.
+      scrollable: true,
+      title: Text(widget.title ?? 'Edit text'),
+      content: SizedBox(
+        width: width < 600 ? width : 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Each line is a paragraph. Formatting of unchanged text is kept.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              minLines: 3,
+              maxLines: 12,
+              keyboardType: TextInputType.multiline,
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(d),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(d, controller.text.split('\n')),
-            child: const Text('Apply'),
-          ),
-        ],
-      );
-    },
-  ).whenComplete(controller.dispose);
+      ),
+      actions: [
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.pop(context, _controller.text.split('\n')),
+          child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
 }
 
 /// Asks for a slide number (1-based); returns a 0-based index.
 Future<int?> showGoToSlide(BuildContext context, int count) {
-  final controller = TextEditingController();
   return showDialog<int>(
     context: context,
-    builder: (d) {
-      void submit() {
-        final n = int.tryParse(controller.text.trim());
-        if (n != null && n >= 1 && n <= count) Navigator.pop(d, n - 1);
-      }
+    builder: (_) => _GoToSlideDialog(count: count),
+  );
+}
 
-      return AlertDialog(
-        title: const Text('Go to slide'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(hintText: '1 – $count'),
-          onSubmitted: (_) => submit(),
+class _GoToSlideDialog extends StatefulWidget {
+  const _GoToSlideDialog({required this.count});
+
+  final int count;
+
+  @override
+  State<_GoToSlideDialog> createState() => _GoToSlideDialogState();
+}
+
+class _GoToSlideDialogState extends State<_GoToSlideDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final n = int.tryParse(_controller.text.trim());
+    if (n != null && n >= 1 && n <= widget.count) {
+      Navigator.pop(context, n - 1);
+    } else {
+      setState(() => _error = 'Enter 1 to ${widget.count}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Go to slide'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(
+          labelText: 'Slide (1–${widget.count})',
+          prefixIcon: const Icon(LucideIcons.hash, size: 16),
+          errorText: _error,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(d),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(onPressed: submit, child: const Text('Go')),
-        ],
-      );
-    },
-  ).whenComplete(controller.dispose);
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Go')),
+      ],
+    );
+  }
 }

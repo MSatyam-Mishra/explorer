@@ -13,46 +13,50 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
     on<LoadCategoryAssets>(_onLoadCategoryAssets);
   }
 
-  // Inside CategoryBloc
-
- // In lib/features/category_view/bloc/category_bloc.dart
-
-// In lib/features/category_view/bloc/category_bloc.dart
-
   Future<void> _onLoadCategoryAssets(
     LoadCategoryAssets event,
     Emitter<CategoryState> emit,
   ) async {
     emit(CategoryLoading());
     try {
-      // --- THIS IS THE CORRECTED LOGIC FOR FOLDERS ---
+      // A folder: its files grouped by day.
       if (event.type == RequestType.common) {
         final dir = Directory(event.path!);
         if (await dir.exists()) {
-          // Get a flat list of all FILES recursively
-          final files = await dir.list(recursive: true).where((e) => e is File).toList();
-          
-          // Sort the files by their modified date
-          files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+          // All files under the folder, newest first. Each file is stat'ed
+          // once (not inside the sort comparator).
+          final files = await dir
+              .list(recursive: true)
+              .handleError((Object _) {})
+              .where((e) => e is File)
+              .toList();
+          final modified = <FileSystemEntity, DateTime>{};
+          for (final file in files) {
+            try {
+              modified[file] = (await file.stat()).modified;
+            } catch (_) {
+              modified[file] = DateTime.fromMillisecondsSinceEpoch(0);
+            }
+          }
+          files.sort((a, b) => modified[b]!.compareTo(modified[a]!));
 
-          final groupedFiles = groupBy(
-            files,
-            (FileSystemEntity file) => DateTime(
-              file.statSync().modified.year,
-              file.statSync().modified.month,
-              file.statSync().modified.day,
-            ),
-          );
+          final groupedFiles = groupBy(files, (FileSystemEntity file) {
+            final m = modified[file]!;
+            return DateTime(m.year, m.month, m.day);
+          });
           emit(CategoryLoaded(groupedFiles));
         } else {
           emit(CategoryError('Folder not found: ${event.path}'));
         }
         return; // Exit after handling this case
       }
-      // ---------------------------------------------
-
-      // Media logic remains the same
-      final List<AssetPathEntity> albums = await PhotoManager.getAssetPathList(type: event.type);
+      // Photos, videos or audio from the media library.
+      // Only the "all" album: listing every album too would repeat each
+      // photo once per album it's in.
+      final List<AssetPathEntity> albums = await PhotoManager.getAssetPathList(
+        type: event.type,
+        onlyAll: true,
+      );
       final List<AssetEntity> allAssets = [];
 
       for (final album in albums) {

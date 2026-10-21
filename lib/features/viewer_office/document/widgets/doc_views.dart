@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../common/viewer_ui.dart';
 import '../doc_model.dart';
 import '../layout/doc_layout.dart';
 import '../layout/doc_render_context.dart';
@@ -85,34 +86,34 @@ class _ZoomPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHigh.withValues(alpha: 0.92),
-      elevation: 3,
-      shape: const StadiumBorder(),
+    return ViewerPill(
+      padding: const EdgeInsets.all(2),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
+          ViewerAction(
             tooltip: 'Zoom out',
-            icon: const Icon(Icons.remove, size: 18),
+            icon: LucideIcons.minus,
+            size: 32,
+            iconSize: 16,
             onPressed: onMinus,
           ),
-          InkWell(
-            onTap: onReset,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.labelMedium,
+          Tooltip(
+            message: 'Reset zoom',
+            child: InkWell(
+              onTap: onReset,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                child: Text(label),
               ),
             ),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
+          ViewerAction(
             tooltip: 'Zoom in',
-            icon: const Icon(Icons.add, size: 18),
+            icon: LucideIcons.plus,
+            size: 32,
+            iconSize: 16,
             onPressed: onPlus,
           ),
         ],
@@ -271,9 +272,7 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
         final scale = _scale;
         _extents = [for (final p in r.pages) p.setup.height * scale + _gap];
         final contentW = maxW * scale + 24;
-        final shadow = Theme.of(context).brightness == Brightness.dark
-            ? const Color(0x66000000)
-            : const Color(0x33000000);
+        final page = ViewerSurface.page(context);
 
         Widget list = ListView.builder(
           controller: _v,
@@ -287,26 +286,24 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: _gap / 2),
                 child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    boxShadow: [
-                      BoxShadow(
-                        color: shadow,
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: RepaintBoundary(
-                    child: SizedBox(
-                      width: s.width * scale,
-                      height: s.height * scale,
-                      child: FittedBox(
-                        fit: BoxFit.fill,
-                        alignment: Alignment.topLeft,
-                        child: DocPageView(
-                          result: r,
-                          pageIndex: i,
-                          ctx: widget.ctx,
+                  // The page paints its own paper (white, or dark with
+                  // "Dark page"); this adds the edge and shadow.
+                  position: DecorationPosition.foreground,
+                  decoration: BoxDecoration(border: page.border),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(boxShadow: page.boxShadow),
+                    child: RepaintBoundary(
+                      child: SizedBox(
+                        width: s.width * scale,
+                        height: s.height * scale,
+                        child: FittedBox(
+                          fit: BoxFit.fill,
+                          alignment: Alignment.topLeft,
+                          child: DocPageView(
+                            result: r,
+                            pageIndex: i,
+                            ctx: widget.ctx,
+                          ),
                         ),
                       ),
                     ),
@@ -361,7 +358,10 @@ class _DocPagesViewState extends State<DocPagesView> implements _Revealer {
           child: Stack(
             children: [
               Positioned.fill(
-                child: Scrollbar(controller: _v, child: list),
+                child: ColoredBox(
+                  color: ViewerSurface.canvas(context),
+                  child: Scrollbar(controller: _v, child: list),
+                ),
               ),
               Positioned(
                 left: 12,
@@ -396,18 +396,7 @@ class _PageBadge extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHigh.withValues(alpha: 0.92),
-      elevation: 3,
-      shape: const StadiumBorder(),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text(text, style: Theme.of(context).textTheme.labelMedium),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ViewerPill(text: text);
 }
 
 // ---------------------------------------------------------------------------

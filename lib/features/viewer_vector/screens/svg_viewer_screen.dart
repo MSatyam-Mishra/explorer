@@ -1,4 +1,7 @@
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/features/viewer_vector/svg_path_loader.dart';
+import 'package:explorer/features/viewer_vector/widgets/vector_canvas.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -37,28 +40,62 @@ class _SvgViewerScreenState extends State<SvgViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return ExplorerScaffold(
-      backgroundColor: Colors.white,
       title: p.basename(widget.filePath),
-      body: Center(child: _buildBody()),
+      trailing: const Padding(
+        padding: EdgeInsets.only(right: 4),
+        child: CanvasBackgroundButton(),
+      ),
+      body: Padding(
+        padding: EdgeInsets.only(
+          top: DockedGlossyTopBar.contentTopInset(context),
+        ),
+        child: ValueListenableBuilder<CanvasBackground>(
+          valueListenable: canvasBackground,
+          builder: (context, background, _) => VectorCanvas(
+            background: background,
+            child: _buildBody(),
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildBody() {
     if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          'Could not load SVG:\n$_error',
-          textAlign: TextAlign.center,
-        ),
+      return ViewerMessage(
+        icon: LucideIcons.imageOff,
+        title: "Couldn't load this SVG",
+        details: '$_error',
       );
     }
-    if (_svg == null) {
-      return const CircularProgressIndicator();
-    }
-    return SvgPicture.string(
-      _svg!,
-      placeholderBuilder: (context) => const CircularProgressIndicator(),
+    if (_svg == null) return const ViewerLoading();
+    return InteractiveViewer(
+      maxScale: 12,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          24,
+          24,
+          24,
+          24 + MediaQuery.paddingOf(context).bottom,
+        ),
+        // Fit to the window (up to a comfortable size): icons are often
+        // drawn on tiny canvases.
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return Center(
+              child: SizedBox(
+                width: constraints.maxWidth.clamp(0.0, 720.0),
+                height: constraints.maxHeight.clamp(0.0, 560.0),
+                child: SvgPicture.string(
+                  _svg!,
+                  fit: BoxFit.contain,
+                  placeholderBuilder: (context) => const ViewerLoading(),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

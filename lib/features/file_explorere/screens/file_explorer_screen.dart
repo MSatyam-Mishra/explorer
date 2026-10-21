@@ -1,38 +1,35 @@
+import 'dart:async';
 import 'dart:io';
 
-import 'package:bootstrap_icons/bootstrap_icons.dart';
-import 'package:explorer/features/localsend/screens/localsend_screen.dart';
-
 import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/router/file_opener.dart';
-import 'package:explorer/shared/icons/app_icons.dart';
-import 'package:explorer/shared/widgets/explorer_options_sheet.dart';
-import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
-import 'package:explorer/core/services/file_action_service.dart';
-
 import 'package:explorer/core/services/archive_service.dart';
+import 'package:explorer/core/services/file_action_service.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/core/services/http_server_service.dart';
-import 'package:explorer/features/network/widgets/server_status_dialog.dart';
-import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
-
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
+import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
+import 'package:explorer/features/file_explorere/widgets/explorer_header.dart';
+import 'package:explorer/features/file_explorere/widgets/file_grid_item.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
-import 'package:explorer/features/file_explorere/widgets/file_type_icon.dart';
-import 'package:explorer/features/file_explorere/widgets/gradient_folder_icon.dart';
+import 'package:explorer/features/file_explorere/widgets/paste_bar.dart';
+import 'package:explorer/features/localsend/screens/localsend_screen.dart';
+import 'package:explorer/features/network/widgets/server_status_dialog.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
-
 import 'package:explorer/features/tasks/bloc/task_progress_bloc.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
+import 'package:explorer/shared/widgets/explorer_options_sheet.dart';
 import 'package:explorer/shared/widgets/main_drawer.dart';
 import 'package:explorer/shared/widgets/progress_card.dart';
 import 'package:flutter/material.dart';
-
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 FileActionsService fileActionsService = FileActionsService();
 
@@ -43,11 +40,32 @@ class FileExplorerScreen extends StatefulWidget {
   State<FileExplorerScreen> createState() => _FileExplorerScreenState();
 }
 
-class _FileExplorerScreenState extends State<FileExplorerScreen> {
+class _FileExplorerScreenState extends State<FileExplorerScreen>
+    with WidgetsBindingObserver {
   // Created once: building the FutureBuilder with a fresh future on every
   // rebuild re-ran the permission check each time.
-  late final Future<PermissionStatus> _permission =
-      _checkAndRequestPermission();
+  late Future<PermissionStatus> _permission = _checkAndRequestPermission();
+  bool _granted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Coming back from system settings: pick up a newly granted permission.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_granted) {
+      setState(() => _permission = Permission.manageExternalStorage.status);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,17 +74,28 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       future: _permission,
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+          return Scaffold(
+            backgroundColor: context.colors.background,
+            body: const Center(
+              child: SizedBox.square(
+                dimension: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
           );
         }
 
         final status = snapshot.data!;
+        _granted = status.isGranted;
         // Handle both standard usage and "manage external storage" scenarios
         if (status.isGranted) {
           return const _FileExplorerWithProviders();
         } else {
-          return const _PermissionDeniedScreen();
+          return _PermissionDeniedScreen(
+            onRequest: () => setState(
+              () => _permission = Permission.manageExternalStorage.request(),
+            ),
+          );
         }
       },
     );
@@ -83,11 +112,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (!status.isGranted) {
       status = await Permission.manageExternalStorage.request();
     }
-
-    // Fallback for older Android versions (SDK < 30) if needed,
-    // strictly speaking should check SDK version, but checking Permission.storage
-    // is a common pattern if manageExternalStorage is not applicable.
-    // However, keeping consistent with existing logic which only used manageExternalStorage.
 
     return status;
   }
@@ -120,9 +144,20 @@ class _FileExplorerWithProviders extends StatelessWidget {
   }
 }
 
+/// The folder a state is about, if any.
+String? _pathOf(FileExplorerState state) => switch (state) {
+      FileExplorerLoaded(:final path) => path,
+      FileExplorerLoading(:final path) => path,
+      FileExplorerError(:final path) => path,
+      _ => null,
+    };
+
 // This is the actual UI, which is now guaranteed to be under all the providers.
 class _FileExplorerUI extends StatelessWidget {
   _FileExplorerUI();
+
+  /// Sidebar width when it's docked next to the files (tablets, desktops).
+  static const double _sidebarWidth = 280;
 
   @override
   Widget build(BuildContext context) {
@@ -131,17 +166,59 @@ class _FileExplorerUI extends StatelessWidget {
     final clipboardState = context.watch<ClipboardBloc>().state;
     final taskState = context.watch<TaskProgressBloc>().state;
 
-    final bool canPop = fileExplorerState is FileExplorerLoaded
-        ? ExplorerPaths.isAppRoot(fileExplorerState.path)
-        : true;
-    final bool isSelectionMode = fileExplorerState is FileExplorerLoaded
-        ? fileExplorerState.isSelectionMode
-        : false;
+    final path = _pathOf(fileExplorerState);
+    final loaded =
+        fileExplorerState is FileExplorerLoaded ? fileExplorerState : null;
+    final bool isSelectionMode = loaded?.isSelectionMode ?? false;
+    final String? parentPath = path == null ? null : ExplorerPaths.parentOf(path);
+    final bool canPop = !isSelectionMode && parentPath == null;
+
     // Tablets, unfolded foldables and desktops keep navigation docked.
     final bool docked = AdaptiveSplitView.isSplit(context);
-    final content = Stack(
+    final bool busy = taskState is TaskInProgress;
+    final pasteState =
+        clipboardState is ClipboardReadyToPaste && !busy ? clipboardState : null;
+    final bool canCreate =
+        loaded != null && !ExplorerPaths.isWindowsRoots(loaded.path);
+    final bool showFab = !docked &&
+        canCreate &&
+        loaded.entities.isNotEmpty &&
+        !isSelectionMode &&
+        pasteState == null &&
+        !busy;
+
+    final bottomInset = (pasteState != null ? PasteBar.reservedHeight : 0.0) +
+        (showFab ? 72.0 : 0) +
+        (busy ? 120.0 : 0);
+
+    final body = Stack(
       children: [
-        _buildFileList(context, fileExplorerState),
+        Positioned.fill(
+          child: _buildFileList(
+            context,
+            fileExplorerState,
+            bottomInset: bottomInset,
+            canCreate: canCreate,
+          ),
+        ),
+        if (pasteState != null)
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: MediaQuery.paddingOf(context).bottom + 16,
+            child: Center(
+              child: PasteBar(
+                clipboard: pasteState,
+                onCancel: () =>
+                    context.read<ClipboardBloc>().add(ClearClipboard()),
+                onPaste: loaded == null || ExplorerPaths.isWindowsRoots(path!)
+                    ? null
+                    : () => context
+                        .read<ClipboardBloc>()
+                        .add(PasteFromClipboard(loaded.path)),
+              ),
+            ),
+          ),
         if (taskState is TaskInProgress)
           ProgressCard(
             title: taskState.title,
@@ -150,62 +227,66 @@ class _FileExplorerUI extends StatelessWidget {
           ),
       ],
     );
-    // final int selectionCount = fileExplorerState is FileExplorerLoaded
-    //     ? fileExplorerState.selectedItems.length
-    //     : 0;
+
+    final page = DockedTopBarScaffold(
+      drawer: docked ? null : const MainDrawer(),
+      topBarBuilder: (scaffoldContext) => _buildDockedTopBar(
+        scaffoldContext,
+        fileExplorerState: fileExplorerState,
+        isSelectionMode: isSelectionMode,
+        docked: docked,
+        canCreate: canCreate,
+      ),
+      // Show pasted items, and say why a paste failed.
+      body: BlocListener<ClipboardBloc, ClipboardState>(
+        listener: (context, state) {
+          final current = context.read<FileExplorerBloc>().state;
+          if (state is ClipboardPasteSuccess && current is FileExplorerLoaded) {
+            context.read<FileExplorerBloc>().add(LoadDirectory(current.path));
+          } else if (state is ClipboardPasteFailure) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Couldn't paste: ${state.error}")),
+            );
+          }
+        },
+        child: body,
+      ),
+      floatingActionButton: showFab
+          ? FloatingActionButton(
+              tooltip: 'New folder',
+              onPressed: () => fileActionsService.showCreateFolderDialog(
+                context,
+                loaded.path,
+              ),
+              child: const Icon(LucideIcons.folderPlus),
+            )
+          : null,
+    );
 
     return PopScope(
       canPop: canPop,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (fileExplorerState is FileExplorerLoaded) {
-          final parentPath = ExplorerPaths.parentOf(fileExplorerState.path);
-          if (parentPath != null) {
-            context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
-          }
+        if (isSelectionMode) {
+          context.read<FileExplorerBloc>().add(
+            ToggleSelectionMode(enable: false),
+          );
+          return;
+        }
+        if (parentPath != null) {
+          context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
         }
       },
-      child: DockedTopBarScaffold(
-        drawer: docked ? null : const MainDrawer(),
-        topBarBuilder: (scaffoldContext) => _buildDockedTopBar(
-          scaffoldContext,
-          fileExplorerState: fileExplorerState,
-          isSelectionMode: isSelectionMode,
-          docked: docked,
-        ),
-        body: docked
-            ? AdaptiveSplitView(
-                divider: false,
-                secondaryWidth: 300,
-                primary: content,
-                secondary: ClearGlassPanel(
-                  borderRadius: 24,
-                  margin: EdgeInsets.fromLTRB(
-                    12,
-                    DockedGlossyTopBar.contentTopInset(context),
-                    0,
-                    12 + MediaQuery.paddingOf(context).bottom,
-                  ),
-                  child: const MainDrawerContent(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
-              )
-            : content,
-        floatingActionButton: (clipboardState is ClipboardReadyToPaste)
-            ? FloatingActionButton.extended(
-                onPressed: () {
-                  if (fileExplorerState is FileExplorerLoaded) {
-                    context.read<ClipboardBloc>().add(
-                      PasteFromClipboard(fileExplorerState.path),
-                    );
-                  }
-                },
-                label: const Text('Paste'),
-                icon: AppIcons.clipboard(),
-              )
-            : null,
-      ),
+      child: docked
+          ? ColoredBox(
+              color: context.colors.background,
+              child: AdaptiveSplitView(
+                secondaryWidth: _sidebarWidth,
+                primary: page,
+                secondary: const DockedSidebar(child: MainDrawerContent()),
+              ),
+            )
+          : page,
     );
   }
 
@@ -214,208 +295,313 @@ class _FileExplorerUI extends StatelessWidget {
     required FileExplorerState fileExplorerState,
     required bool isSelectionMode,
     required bool docked,
+    required bool canCreate,
   }) {
-    final title = fileExplorerState is FileExplorerLoaded
-        ? ExplorerPaths.titleForPath(fileExplorerState.path)
-        : 'Files';
+    final bloc = context.read<FileExplorerBloc>();
 
     if (isSelectionMode && fileExplorerState is FileExplorerLoaded) {
-      return DockedGlossyTopBar(
-        title: title,
-        leading: IconButton(
-          icon: AppIcons.cancel(),
-          tooltip: 'Cancel selection',
-          onPressed: () {
-            context.read<FileExplorerBloc>().add(
-              ToggleSelectionMode(enable: false),
-            );
-          },
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (fileExplorerState.selectedItems.length == 1)
-              IconButton(
-                icon: AppIcons.optionsMenu(),
-                tooltip: 'More actions',
-                onPressed: () {
-                  final entity = fileExplorerState.selectedItems.first;
-                  context.read<FileExplorerBloc>().add(
-                    ToggleSelectionMode(enable: false),
-                  );
-                  fileActionsService.showFileOptionsMenu(context, entity);
-                },
-              ),
-            IconButton(
-              icon: const Icon(BootstrapIcons.broadcast),
-              tooltip: 'Send nearby (LocalSend)',
-              onPressed: () {
-                final items = List<FileSystemEntity>.of(
-                  fileExplorerState.selectedItems,
-                );
-                context.read<FileExplorerBloc>().add(
-                  ToggleSelectionMode(enable: false),
-                );
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => LocalSendScreen(initialItems: items),
-                  ),
-                );
-              },
+      final selected = fileExplorerState.selectedItems.toList();
+      void exitSelection() => bloc.add(ToggleSelectionMode(enable: false));
+      return ExplorerSelectionHeader(
+        count: selected.length,
+        total: fileExplorerState.entities.length,
+        wide: docked,
+        onClose: exitSelection,
+        onShare: () => fileActionsService.shareMany(context, selected),
+        onSendNearby: () {
+          exitSelection();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => LocalSendScreen(initialItems: selected),
             ),
-            IconButton(
-              icon: AppIcons.archive(),
-              tooltip: 'Compress',
-              onPressed: () => _handleCompress(context, fileExplorerState),
-            ),
-            IconButton(
-              icon: AppIcons.delete(),
-              tooltip: 'Delete',
-              onPressed: () {
-                FileActionsService().deleteFiles(
-                  context,
-                  fileExplorerState.selectedItems
-                      .map((e) => e as File)
-                      .toList(),
-                );
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Delete not implemented yet here'),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
+          );
+        },
+        onCompress: () => _handleCompress(context, fileExplorerState),
+        onDelete: () => fileActionsService.deleteFiles(context, selected),
+        onMenuAction: (action) {
+          switch (action) {
+            case SelectionMenuAction.selectAll:
+              bloc.add(SelectAll());
+            case SelectionMenuAction.clear:
+              bloc.add(ClearSelection());
+            case SelectionMenuAction.copy:
+              exitSelection();
+              context.read<ClipboardBloc>().add(CopyToClipboard(selected.first));
+            case SelectionMenuAction.cut:
+              exitSelection();
+              context.read<ClipboardBloc>().add(CutToClipboard(selected.first));
+            case SelectionMenuAction.rename:
+              exitSelection();
+              fileActionsService.showRenameDialog(context, selected.first);
+            case SelectionMenuAction.properties:
+              exitSelection();
+              fileActionsService.showInfoSheet(selected.first, context);
+            case SelectionMenuAction.allActions:
+              exitSelection();
+              fileActionsService.showFileOptionsMenu(context, selected.first);
+          }
+        },
       );
     }
 
-    return DockedGlossyTopBar(
-      title: title,
-      leading: docked ? const SizedBox(width: 12) : null,
-      onMenuPressed: () => Scaffold.of(context).openDrawer(),
-      onMorePressed: fileExplorerState is FileExplorerLoaded
-          ? () {
+    final path = _pathOf(fileExplorerState);
+    final loaded =
+        fileExplorerState is FileExplorerLoaded ? fileExplorerState : null;
+    return ExplorerHeader(
+      crumbs: path == null
+          ? const []
+          : explorerCrumbs(path, labels: loaded?.pathLabels ?? const {}),
+      wide: docked,
+      onNavigate: (target) => bloc.add(LoadDirectory(target)),
+      onMenuPressed: docked ? null : () => Scaffold.of(context).openDrawer(),
+      viewMode: loaded?.viewMode,
+      sortOption: loaded?.sortOption,
+      sortOrder: loaded?.sortOrder,
+      onViewModeChanged: loaded == null
+          ? null
+          : (mode) => bloc.add(ChangeViewMode(mode)),
+      onSortChanged: loaded == null
+          ? null
+          : (option, order) => bloc.add(ChangeSortOrder(option, order)),
+      onNewFolder: canCreate && loaded != null
+          ? () => fileActionsService.showCreateFolderDialog(context, loaded.path)
+          : null,
+      onOptionsPressed: loaded == null
+          ? null
+          : () {
               ExplorerOptionsSheet.show(
                 context,
-                fileState: fileExplorerState,
-                onHttpShare: () => _handleHttpShare(context, fileExplorerState),
+                fileState: loaded,
+                onHttpShare: () => _handleHttpShare(context, loaded),
                 onSortChanged: (SortOption option, SortOrder order) {
-                  context.read<FileExplorerBloc>().add(
-                    ChangeSortOrder(option, order),
-                  );
+                  bloc.add(ChangeSortOrder(option, order));
                 },
                 onViewModeChanged: (ViewMode mode) {
-                  context.read<FileExplorerBloc>().add(ChangeViewMode(mode));
+                  bloc.add(ChangeViewMode(mode));
                 },
               );
-            }
-          : null,
+            },
     );
   }
 
-  Widget _buildFileList(BuildContext context, FileExplorerState state) {
+  Widget _buildFileList(
+    BuildContext context,
+    FileExplorerState state, {
+    required double bottomInset,
+    required bool canCreate,
+  }) {
+    final topInset = DockedGlossyTopBar.contentTopInset(context);
+    final bottom = MediaQuery.paddingOf(context).bottom + 16 + bottomInset;
+    final statePadding = EdgeInsets.fromLTRB(24, topInset + 24, 24, bottom);
+
     if (state is FileExplorerLoading || state is FileExplorerInitial) {
-      return const Center(child: CircularProgressIndicator());
+      return _DelayedReveal(
+        child: _ListSkeleton(top: topInset + 8),
+      );
     }
     if (state is FileExplorerError) {
-      return Center(child: Text('Error: ${state.message}'));
+      final parent =
+          state.path == null ? null : ExplorerPaths.parentOf(state.path!);
+      final bloc = context.read<FileExplorerBloc>();
+      return ExplorerEmptyState(
+        padding: statePadding,
+        destructive: true,
+        icon: LucideIcons.folderX,
+        title: "Can't open this folder",
+        description: _friendlyError(state.message),
+        actions: [
+          if (parent != null)
+            OutlinedButton.icon(
+              onPressed: () => bloc.add(LoadDirectory(parent)),
+              icon: const Icon(LucideIcons.arrowLeft, size: 16),
+              label: const Text('Go back'),
+            ),
+          FilledButton.icon(
+            onPressed: () => bloc.add(
+              LoadDirectory(state.path ?? ExplorerPaths.initialPath),
+            ),
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Try again'),
+          ),
+        ],
+      );
     }
     if (state is FileExplorerLoaded) {
       if (state.entities.isEmpty) {
-        return const Center(child: Text('This folder is empty.'));
-      }
-
-      if (state.viewMode == ViewMode.grid ||
-          state.viewMode == ViewMode.gallery) {
-        return GridView.builder(
-          physics: const BouncingScrollPhysics(),
-          // Column count follows the window width (phones ≈3, tablets 6+).
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 128,
-            childAspectRatio: 0.8,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          padding: EdgeInsets.fromLTRB(
-            8,
-            DockedGlossyTopBar.contentTopInset(context) + 8,
-            8,
-            8,
-          ),
-          itemCount: state.entities.length,
-          itemBuilder: (context, index) {
-            final entity = state.entities[index];
-            final isSelected = state.selectedItems.contains(entity);
-            final isDirectory = entity is Directory;
-
-            return InkWell(
-              onTap: () => _handleTap(context, state, entity),
-              onLongPress: () => _handleLongPress(context, state, entity),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                decoration: isSelected
-                    ? BoxDecoration(
-                        color: Theme.of(context).primaryColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Theme.of(
-                            context,
-                          ).primaryColor.withOpacity(0.5),
-                          width: 2,
-                        ),
-                      )
-                    : null,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    isDirectory
-                        ? const GradientFolderIcon(size: 56)
-                        : FileTypeIcon(filePath: entity.path, size: 56),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                      child: Text(
-                        state.labelFor(entity),
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 2,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
+        return ExplorerEmptyState(
+          padding: statePadding,
+          icon: LucideIcons.folderOpen,
+          title: 'This folder is empty',
+          description: canCreate
+              ? 'Create a folder, or copy files here from another folder.'
+              : 'There is nothing to show here.',
+          actions: [
+            if (canCreate)
+              OutlinedButton.icon(
+                onPressed: () => fileActionsService.showCreateFolderDialog(
+                  context,
+                  state.path,
                 ),
+                icon: const Icon(LucideIcons.folderPlus, size: 16),
+                label: const Text('New folder'),
               ),
-            );
-          },
+          ],
         );
       }
 
-      // Default to List View (Compact or List)
-      return ListView.separated(
-        physics: const BouncingScrollPhysics(),
-        padding: EdgeInsets.only(
-          top: DockedGlossyTopBar.contentTopInset(context),
+      return LayoutBuilder(
+        builder: (context, constraints) => _buildEntries(
+          context,
+          state,
+          width: constraints.maxWidth,
+          top: topInset,
+          bottom: bottom,
         ),
-        itemCount: state.entities.length,
-        itemBuilder: (context, index) {
-          final entity = state.entities[index];
-          final isSelected = state.selectedItems.contains(entity);
-          return FileListItem(
-            entity: entity,
-            displayName: state.labelFor(entity),
-            isSelectionMode: state.isSelectionMode,
-            isSelected: isSelected,
-            onTap: () => _handleTap(context, state, entity),
-            onLongPress: () => _handleLongPress(context, state, entity),
-          );
-        },
-        separatorBuilder: (context, index) =>
-            const Divider(height: 1, indent: 74),
       );
     }
-    return const Center(child: Text('Something went wrong.'));
+    return ExplorerEmptyState(
+      padding: statePadding,
+      icon: LucideIcons.circleAlert,
+      title: 'Something went wrong',
+    );
+  }
+
+  Widget _buildEntries(
+    BuildContext context,
+    FileExplorerLoaded state, {
+    required double width,
+    required double top,
+    required double bottom,
+  }) {
+    final wide = width >= 720;
+    final entities = state.entities;
+    final bloc = context.read<FileExplorerBloc>();
+
+    void onTap(FileSystemEntity e) => _handleTap(context, state, e);
+    void onLongPress(FileSystemEntity e) => _handleLongPress(context, state, e);
+    VoidCallback? onSecondaryTap(FileSystemEntity e) => state.isSelectionMode
+        ? null
+        : () => fileActionsService.showFileOptionsMenu(context, e);
+
+    final footer = SliverToBoxAdapter(
+      child: _FolderSummary(entities: entities),
+    );
+
+    final List<Widget> slivers;
+    if (state.viewMode == ViewMode.grid ||
+        state.viewMode == ViewMode.gallery) {
+      final gallery = state.viewMode == ViewMode.gallery;
+      final pad = wide ? 24.0 : 16.0;
+      final spacing = wide ? 12.0 : 10.0;
+      slivers = [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(pad, top + pad - 4, pad, 0),
+          sliver: SliverGrid(
+            // Column count follows the window width (phones ≈3, tablets 6+).
+            gridDelegate: gallery
+                ? SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: wide ? 200 : 180,
+                    childAspectRatio: 0.84,
+                    crossAxisSpacing: spacing,
+                    mainAxisSpacing: spacing,
+                  )
+                : SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: wide ? 144 : 128,
+                    childAspectRatio: 0.84,
+                    crossAxisSpacing: spacing,
+                    mainAxisSpacing: spacing,
+                  ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final entity = entities[index];
+                return FileGridItem(
+                  entity: entity,
+                  displayName: state.labelFor(entity),
+                  gallery: gallery,
+                  isSelectionMode: state.isSelectionMode,
+                  isSelected: state.selectedItems.contains(entity),
+                  onTap: () => onTap(entity),
+                  onLongPress: () => onLongPress(entity),
+                  onSecondaryTap: onSecondaryTap(entity),
+                );
+              },
+              childCount: entities.length,
+            ),
+          ),
+        ),
+        footer,
+      ];
+    } else {
+      final style = state.viewMode == ViewMode.compact
+          ? FileRowStyle.compact
+          : wide
+              ? FileRowStyle.table
+              : FileRowStyle.comfortable;
+      final sidePad = wide ? 8.0 : 0.0;
+      slivers = [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(sidePad, top + 8, sidePad, 0),
+          sliver: SliverList.list(
+            children: [
+              if (style == FileRowStyle.table)
+                FileTableHeader(
+                  sortOption: state.sortOption,
+                  sortOrder: state.sortOrder,
+                  showSelectionColumn: state.isSelectionMode,
+                  onSort: (option, order) =>
+                      bloc.add(ChangeSortOrder(option, order)),
+                ),
+            ],
+          ),
+        ),
+        SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: sidePad),
+          sliver: SliverFixedExtentList(
+            itemExtent: FileListItem.heightFor(style) + 2,
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final entity = entities[index];
+                return FileListItem(
+                  entity: entity,
+                  displayName: state.labelFor(entity),
+                  style: style,
+                  isSelectionMode: state.isSelectionMode,
+                  isSelected: state.selectedItems.contains(entity),
+                  onTap: () => onTap(entity),
+                  onLongPress: () => onLongPress(entity),
+                  onSecondaryTap: onSecondaryTap(entity),
+                );
+              },
+              childCount: entities.length,
+            ),
+          ),
+        ),
+        footer,
+      ];
+    }
+
+    return Scrollbar(
+      child: CustomScrollView(
+        // Remembers each folder's scroll position when coming back up.
+        key: PageStorageKey<String>('explorer:${state.path}'),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        slivers: [
+          ...slivers,
+          SliverToBoxAdapter(child: SizedBox(height: bottom)),
+        ],
+      ),
+    );
+  }
+
+  static String _friendlyError(String message) {
+    if (message.contains('not found or access denied')) {
+      return "It may have been moved or deleted, or Explorer isn't allowed "
+          'to read it.';
+    }
+    return message;
   }
 
   void _handleTap(
@@ -444,6 +630,7 @@ class _FileExplorerUI extends StatelessWidget {
     FileExplorerLoaded state,
     FileSystemEntity entity,
   ) {
+    HapticFeedback.selectionClick();
     if (!state.isSelectionMode) {
       context.read<FileExplorerBloc>().add(ToggleSelectionMode(enable: true));
     }
@@ -455,31 +642,18 @@ class _FileExplorerUI extends StatelessWidget {
     FileExplorerLoaded state,
   ) async {
     if (state.selectedItems.isEmpty) return;
+    final count = state.selectedItems.length;
 
-    final TextEditingController nameController = TextEditingController(
-      text: 'archive.zip',
-    );
-
-    final String? fileName = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Compress to ZIP'),
-        content: TextField(
-          controller: nameController,
-          decoration: const InputDecoration(labelText: 'Archive Name'),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, nameController.text),
-            child: const Text('Compress'),
-          ),
-        ],
-      ),
+    final String? fileName = await fileActionsService.promptForName(
+      context,
+      title: 'Compress to ZIP',
+      description: count == 1
+          ? 'The selected item will be added to a new ZIP archive in this '
+              'folder.'
+          : '$count items will be added to a new ZIP archive in this folder.',
+      initialValue: 'archive.zip',
+      selectBaseName: true,
+      confirmLabel: 'Compress',
     );
 
     if (fileName != null && fileName.isNotEmpty && context.mounted) {
@@ -491,7 +665,7 @@ class _FileExplorerUI extends StatelessWidget {
       if (filesOnly.length != state.selectedItems.length) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Warning: Folders skipped (not supported yet)'),
+            content: Text("Folders were skipped: they can't be compressed yet"),
           ),
         );
       }
@@ -518,10 +692,7 @@ class _FileExplorerUI extends StatelessWidget {
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Compression failed: $e'),
-              backgroundColor: Colors.red,
-            ),
+            SnackBar(content: Text('Compression failed: $e')),
           );
         }
       }
@@ -555,9 +726,7 @@ class _FileExplorerUI extends StatelessWidget {
           builder: (context) => ServerStatusDialog(
             url: url,
             onStop: () async {
-              // Dialog closes by itself in logic or we close it here?
-              // The dialog calls onStop then pops.
-              // So we just stop here.
+              // The dialog calls onStop then pops; we only stop the server.
               await _httpService.stopServer();
             },
           ),
@@ -577,39 +746,150 @@ class _FileExplorerUI extends StatelessWidget {
   }
 }
 
-// A simple, clean screen for handling the permission request.
+/// "4 folders · 14 files" under the last row.
+class _FolderSummary extends StatelessWidget {
+  const _FolderSummary({required this.entities});
+
+  final List<FileSystemEntity> entities;
+
+  @override
+  Widget build(BuildContext context) {
+    final folders = entities.whereType<Directory>().length;
+    final files = entities.length - folders;
+    final parts = [
+      if (folders > 0) '$folders ${folders == 1 ? 'folder' : 'folders'}',
+      if (files > 0) '$files ${files == 1 ? 'file' : 'files'}',
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Text(
+        parts.join(' · '),
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+}
+
+/// Placeholder rows while a folder loads.
+class _ListSkeleton extends StatelessWidget {
+  const _ListSkeleton({required this.top});
+
+  final double top;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    Widget bar(double width, double height) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: colors.muted,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        );
+    return ListView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.only(top: top),
+      itemCount: 12,
+      itemBuilder: (context, index) => SizedBox(
+        height: 62,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colors.muted,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  bar(120.0 + (index * 37) % 90, 12),
+                  const SizedBox(height: 8),
+                  bar(72.0 + (index * 23) % 40, 10),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows [child] only if it's still on screen after a short delay, so fast
+/// folder loads don't flash a placeholder.
+class _DelayedReveal extends StatefulWidget {
+  const _DelayedReveal({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_DelayedReveal> createState() => _DelayedRevealState();
+}
+
+class _DelayedRevealState extends State<_DelayedReveal> {
+  Timer? _timer;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(milliseconds: 180), () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: _visible ? 1 : 0,
+      duration: const Duration(milliseconds: 150),
+      child: widget.child,
+    );
+  }
+}
+
+/// Shown when storage access hasn't been granted.
 class _PermissionDeniedScreen extends StatelessWidget {
-  const _PermissionDeniedScreen();
+  const _PermissionDeniedScreen({required this.onRequest});
+
+  final VoidCallback onRequest;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Permission Required',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'To browse and manage your files, this app needs access to your device\'s storage. Please grant the permission in your device settings.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () async {
-                  await Permission.manageExternalStorage.request();
-                  // NOTE: The user will have to restart the app after granting permission
-                  // for the FutureBuilder to re-run. This is a simple approach.
-                },
-                child: const Text('Open Settings'),
-              ),
-            ],
-          ),
+      backgroundColor: context.colors.background,
+      body: SafeArea(
+        child: ExplorerEmptyState(
+          icon: LucideIcons.folderLock,
+          title: 'Allow access to your files',
+          description: 'Explorer needs the "All files access" permission to '
+              'browse, open and organise the files on this device. Nothing '
+              'leaves your device.',
+          actions: [
+            OutlinedButton(
+              onPressed: openAppSettings,
+              child: const Text('Open settings'),
+            ),
+            FilledButton(
+              onPressed: onRequest,
+              child: const Text('Allow access'),
+            ),
+          ],
         ),
       ),
     );

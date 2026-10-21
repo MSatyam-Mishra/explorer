@@ -3,10 +3,13 @@ import 'dart:io';
 
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/incoming_files.dart';
+import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
+import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 /// Opens a file another app sent to Explorer ("Open with").
 ///
@@ -151,7 +154,7 @@ class _IncomingFileScreenState extends State<IncomingFileScreen> {
           ],
         ),
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Discard'),
           ),
@@ -181,57 +184,68 @@ class _IncomingFileScreenState extends State<IncomingFileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
     final copied = _copied;
     final error = _error;
     return Scaffold(
+      backgroundColor: colors.background,
       body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: error != null
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.error_outline,
-                          size: 48, color: theme.colorScheme.error),
-                      const SizedBox(height: 16),
-                      Text(error, textAlign: TextAlign.center),
-                      const SizedBox(height: 24),
-                      FilledButton(onPressed: _close, child: const Text('Close')),
-                    ],
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 240,
-                        child: LinearProgressIndicator(
+        child: error != null
+            ? ExplorerEmptyState(
+                destructive: true,
+                icon: LucideIcons.fileX,
+                title: "Couldn't open this file",
+                description: error,
+                actions: [
+                  FilledButton(onPressed: _close, child: const Text('Close')),
+                ],
+              )
+            : Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          copied != null ? 'Preparing file' : _status,
+                          textAlign: TextAlign.center,
+                          style: text.titleMedium,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          copied != null
+                              ? 'Copying ${_formatSize(copied)}'
+                                  '${_total > 0 ? ' of ${_formatSize(_total)}' : ''}…'
+                              : 'This only takes a moment.',
+                          textAlign: TextAlign.center,
+                          style: text.bodySmall,
+                        ),
+                        const SizedBox(height: 16),
+                        LinearProgressIndicator(
+                          minHeight: 6,
                           value: copied != null && _total > 0
                               ? (copied / _total).clamp(0.0, 1.0)
                               : null,
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        copied != null
-                            ? 'Copying ${_formatSize(copied)}'
-                                '${_total > 0 ? ' of ${_formatSize(_total)}' : ''}…'
-                            : _status,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      if (copied != null) ...[
-                        const SizedBox(height: 16),
-                        TextButton(
-                          onPressed: () =>
-                              IncomingFiles.cancel(widget.incoming),
-                          child: const Text('Cancel'),
-                        ),
+                        if (copied != null) ...[
+                          const SizedBox(height: 16),
+                          Center(
+                            child: OutlinedButton(
+                              onPressed: () =>
+                                  IncomingFiles.cancel(widget.incoming),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-          ),
-        ),
+                ),
+              ),
       ),
     );
   }

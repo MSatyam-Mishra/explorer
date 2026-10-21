@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:explorer/core/services/bookmark_service.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/features/viewer_pdf/models/pdf_edit_models.dart';
 import 'package:explorer/features/viewer_pdf/screens/pdf_page_canvas_screen.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_document_ops.dart';
@@ -12,12 +13,9 @@ import 'package:explorer/features/viewer_pdf/widgets/pdf_dialogs.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_page_manager.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_search_bar.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_side_panel.dart';
-import 'package:explorer/shared/icons/app_icons.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
-import 'package:explorer/shared/widgets/clear_glass_panel.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
-import 'package:explorer/shared/widgets/glossy_drawer.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -25,6 +23,10 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// SfPdfViewer's theme lives in syncfusion_flutter_core, which the viewer
+// package depends on but doesn't re-export.
+// ignore: depend_on_referenced_packages
+import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart'
     show PdfDocument, PdfPageRotateAngle, TextSearchOption;
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
@@ -864,18 +866,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           'Insert ${probe.pageCount} page'
           '${probe.pageCount == 1 ? '' : 's'}',
         ),
+        contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 16),
         children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, current),
-            child: Text('After page $current'),
+          ViewerListTile(
+            leading: const Icon(LucideIcons.betweenHorizontalStart),
+            title: 'After page $current',
+            onTap: () => Navigator.pop(context, current),
           ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, _pageCount),
-            child: const Text('At the end'),
+          ViewerListTile(
+            leading: const Icon(LucideIcons.arrowDownToLine),
+            title: 'At the end',
+            onTap: () => Navigator.pop(context, _pageCount),
           ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, 0),
-            child: const Text('At the beginning'),
+          ViewerListTile(
+            leading: const Icon(LucideIcons.arrowUpToLine),
+            title: 'At the beginning',
+            onTap: () => Navigator.pop(context, 0),
           ),
         ],
       ),
@@ -1272,7 +1278,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           child: ExplorerScaffold(
             title: _dirty ? '$_fileName •' : _fileName,
             drawer: ready && !split
-                ? GlossyDrawer(
+                ? AppSidebar(
                     width: math.min(380, width * 0.9),
                     child: _buildSidePanel(docked: false),
                   )
@@ -1289,143 +1295,122 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Widget _buildTopActions(BuildContext context, bool split) {
-    final iconColor = ClearGlassForeground.icon(context);
     final hasPassword = _password != null && _password!.isNotEmpty;
     final bookmarked = _bookmarkOnCurrentPage != null;
-    return ExplorerTopBar.actions(context, [
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(Icons.search, color: iconColor),
-        tooltip: 'Search',
-        onPressed: _viewerReady
-            ? () => _searchOpen ? _closeSearch() : _openSearch()
-            : null,
-      ),
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(
-          split ? Icons.view_sidebar_outlined : Icons.toc,
-          color: iconColor,
+    final panelShown = split && (_panelOpen ?? true);
+    return ViewerActions(
+      children: [
+        ViewerAction(
+          icon: LucideIcons.search,
+          tooltip: 'Search',
+          selected: _searchOpen,
+          onPressed: _viewerReady
+              ? () => _searchOpen ? _closeSearch() : _openSearch()
+              : null,
         ),
-        tooltip: 'Outline, bookmarks and pages',
-        onPressed: _togglePanel,
-      ),
-      ExplorerTopBar.iconButton(
-        context: context,
-        icon: Icon(
-          _editMode ? Icons.check : Icons.edit_outlined,
-          color: iconColor,
+        ViewerAction(
+          icon: split
+              ? (panelShown ? LucideIcons.panelLeftClose : LucideIcons.panelLeft)
+              : LucideIcons.listTree,
+          tooltip: 'Outline, bookmarks and pages',
+          onPressed: _togglePanel,
         ),
-        tooltip: _editMode ? 'Done editing' : 'Edit and annotate',
-        onPressed: _viewerReady ? () => _setEditMode(!_editMode) : null,
-      ),
-      PopupMenuButton<_MenuAction>(
-        tooltip: 'More options',
-        enabled: !_busy,
-        icon: Badge(
-          isLabelVisible: _dirty,
-          smallSize: 8,
-          child: AppIcons.optionsMenu(color: iconColor),
+        ViewerAction(
+          icon: _editMode ? LucideIcons.check : LucideIcons.penLine,
+          tooltip: _editMode ? 'Done editing' : 'Edit and annotate',
+          selected: _editMode,
+          onPressed: _viewerReady ? () => _setEditMode(!_editMode) : null,
         ),
-        onSelected: _onMenu,
-        itemBuilder: (context) => [
-          _menuItem(
-            _MenuAction.save,
-            Icons.save_outlined,
-            'Save',
-            enabled: _dirty,
-          ),
-          _menuItem(
-            _MenuAction.saveCopy,
-            Icons.save_as_outlined,
-            'Save as copy',
-          ),
-          _menuItem(_MenuAction.share, Icons.share_outlined, 'Share'),
-          const PopupMenuDivider(),
-          _menuItem(
-            _MenuAction.goToPage,
-            Icons.find_in_page_outlined,
-            'Go to page…',
-            enabled: _viewerReady,
-          ),
-          _menuItem(
-            _MenuAction.toggleBookmark,
-            bookmarked
-                ? Icons.bookmark_remove_outlined
-                : Icons.bookmark_add_outlined,
-            bookmarked ? 'Remove bookmark' : 'Bookmark this page',
-            enabled: _viewerReady,
-          ),
-          _menuItem(
-            _MenuAction.pages,
-            Icons.auto_awesome_motion_outlined,
-            'Organise pages',
-            enabled: _viewerReady,
-          ),
-          _menuItem(
-            _MenuAction.insertPdf,
-            Icons.post_add_outlined,
-            'Insert PDF…',
-            enabled: _viewerReady,
-          ),
-          const PopupMenuDivider(),
-          _menuItem(
-            _MenuAction.layout,
-            _singlePage
-                ? Icons.view_day_outlined
-                : Icons.view_carousel_outlined,
-            _singlePage ? 'Continuous scroll' : 'Single page',
-          ),
-          _menuItem(
-            _MenuAction.nightMode,
-            _nightMode ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-            _nightMode ? 'Turn off night mode' : 'Night mode',
-          ),
-          _menuItem(
-            _MenuAction.zoomIn,
-            Icons.zoom_in,
-            'Zoom in',
-            enabled: _viewerReady,
-          ),
-          _menuItem(
-            _MenuAction.zoomOut,
-            Icons.zoom_out,
-            'Zoom out',
-            enabled: _viewerReady,
-          ),
-          const PopupMenuDivider(),
-          _menuItem(
-            _MenuAction.setPassword,
-            Icons.lock_outline,
-            hasPassword ? 'Change password…' : 'Set password…',
-          ),
-          if (hasPassword)
-            _menuItem(
-              _MenuAction.removePassword,
-              Icons.lock_open_outlined,
-              'Remove password',
+        ViewerMenuButton<_MenuAction>(
+          enabled: !_busy,
+          badge: _dirty,
+          onSelected: _onMenu,
+          itemBuilder: (context) => [
+            viewerMenuItem(
+              value: _MenuAction.save,
+              icon: LucideIcons.save,
+              label: 'Save',
+              hint: 'Ctrl+S',
+              enabled: _dirty,
             ),
-        ],
-      ),
-    ]);
-  }
-
-  PopupMenuItem<_MenuAction> _menuItem(
-    _MenuAction value,
-    IconData icon,
-    String label, {
-    bool enabled = true,
-  }) {
-    return PopupMenuItem(
-      value: value,
-      enabled: enabled,
-      child: Row(
-        children: [
-          Icon(icon, size: 20),
-          const SizedBox(width: 14),
-          Flexible(child: Text(label)),
-        ],
-      ),
+            viewerMenuItem(
+              value: _MenuAction.saveCopy,
+              icon: LucideIcons.copy,
+              label: 'Save as copy',
+            ),
+            viewerMenuItem(
+              value: _MenuAction.share,
+              icon: LucideIcons.share2,
+              label: 'Share',
+            ),
+            viewerMenuDivider(),
+            viewerMenuItem(
+              value: _MenuAction.goToPage,
+              icon: LucideIcons.fileSearch,
+              label: 'Go to page…',
+              enabled: _viewerReady,
+            ),
+            viewerMenuItem(
+              value: _MenuAction.toggleBookmark,
+              icon: bookmarked
+                  ? LucideIcons.bookmarkMinus
+                  : LucideIcons.bookmarkPlus,
+              label: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
+              enabled: _viewerReady,
+            ),
+            viewerMenuItem(
+              value: _MenuAction.pages,
+              icon: LucideIcons.layers,
+              label: 'Organise pages',
+              enabled: _viewerReady,
+            ),
+            viewerMenuItem(
+              value: _MenuAction.insertPdf,
+              icon: LucideIcons.filePlus,
+              label: 'Insert PDF…',
+              enabled: _viewerReady,
+            ),
+            viewerMenuDivider(),
+            viewerMenuItem(
+              value: _MenuAction.layout,
+              icon: LucideIcons.galleryVertical,
+              label: 'Continuous scroll',
+              checked: !_singlePage,
+            ),
+            viewerMenuItem(
+              value: _MenuAction.nightMode,
+              icon: LucideIcons.moon,
+              label: 'Night mode',
+              checked: _nightMode,
+            ),
+            viewerMenuItem(
+              value: _MenuAction.zoomIn,
+              icon: LucideIcons.zoomIn,
+              label: 'Zoom in',
+              enabled: _viewerReady,
+            ),
+            viewerMenuItem(
+              value: _MenuAction.zoomOut,
+              icon: LucideIcons.zoomOut,
+              label: 'Zoom out',
+              enabled: _viewerReady,
+            ),
+            viewerMenuDivider(),
+            viewerMenuItem(
+              value: _MenuAction.setPassword,
+              icon: LucideIcons.lock,
+              label: hasPassword ? 'Change password…' : 'Set password…',
+            ),
+            if (hasPassword)
+              viewerMenuItem(
+                value: _MenuAction.removePassword,
+                icon: LucideIcons.lockOpen,
+                label: 'Remove password',
+                destructive: true,
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -1440,24 +1425,37 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       case _LoadState.locked:
         return Padding(
           padding: EdgeInsets.only(top: top),
-          child: _StatusMessage(
-            icon: Icons.lock_outline,
+          child: ViewerMessage(
+            icon: LucideIcons.lock,
             title: 'This PDF is password protected',
-            actionLabel: 'Enter password',
-            onAction: _promptPassword,
+            message: 'Enter its password to open it.',
+            actions: [
+              FilledButton.icon(
+                onPressed: _promptPassword,
+                icon: const Icon(LucideIcons.keyRound, size: 16),
+                label: const Text('Enter password'),
+              ),
+            ],
           ),
         );
       case _LoadState.error:
         return Padding(
           padding: EdgeInsets.only(top: top),
-          child: _StatusMessage(
-            icon: Icons.picture_as_pdf_outlined,
-            title: _errorMessage ?? 'This PDF could not be opened.',
-            actionLabel: 'Try again',
-            onAction: () {
-              _sourceBytes = null;
-              _open();
-            },
+          child: ViewerMessage(
+            icon: LucideIcons.fileX,
+            destructive: true,
+            title: "Couldn't open this PDF",
+            message: _errorMessage ?? 'This PDF could not be opened.',
+            actions: [
+              FilledButton.icon(
+                onPressed: () {
+                  _sourceBytes = null;
+                  _open();
+                },
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Try again'),
+              ),
+            ],
           ),
         );
       case _LoadState.ready:
@@ -1484,12 +1482,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       builder: (context, page, _) => _buildSidePanelContent(docked, page),
     );
     if (!docked) return panel;
-    return ColoredBox(
-      color: Theme.of(
-        context,
-      ).colorScheme.surfaceContainerLow.withValues(alpha: 0.92),
-      child: panel,
-    );
+    return ColoredBox(color: context.colors.background, child: panel);
   }
 
   Widget _buildSidePanelContent(bool docked, int currentPage) {
@@ -1515,6 +1508,85 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         onInsertPdf: _insertPdf,
         onNeedData: _ensurePageData,
       ),
+    );
+  }
+
+  /// Colours for SfPdfViewer's own chrome (scroll head, page dialog, link
+  /// dialog) from the app tokens, so it reads well in light and dark mode.
+  SfPdfViewerThemeData _viewerTheme(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    // Night mode inverts the whole viewer, surround included: give it the
+    // colour that inverts to a dark surround.
+    final surround = _nightMode
+        ? _invert(context.isDarkMode ? colors.muted : const Color(0xFF27272A))
+        : ViewerSurface.canvas(context);
+    final title = text.titleLarge?.copyWith(fontSize: 18);
+    final body = text.bodyMedium?.copyWith(color: colors.foreground);
+    final muted = text.bodyMedium?.copyWith(color: colors.mutedForeground);
+    final action = text.labelLarge?.copyWith(color: colors.foreground);
+    final primary = text.labelLarge?.copyWith(color: colors.primary);
+    return SfPdfViewerThemeData(
+      backgroundColor: surround,
+      progressBarColor: colors.primary,
+      scrollHeadStyle: PdfScrollHeadStyle(
+        backgroundColor: colors.popover,
+        pageNumberTextStyle: text.labelMedium?.copyWith(
+          color: colors.popoverForeground,
+        ),
+      ),
+      scrollStatusStyle: PdfScrollStatusStyle(
+        backgroundColor: colors.foreground,
+        pageInfoTextStyle: text.labelMedium?.copyWith(color: colors.background),
+      ),
+      paginationDialogStyle: PdfPaginationDialogStyle(
+        backgroundColor: colors.background,
+        headerTextStyle: title,
+        inputFieldTextStyle: body,
+        hintTextStyle: muted,
+        pageInfoTextStyle: muted,
+        validationTextStyle: text.bodySmall?.copyWith(color: colors.destructive),
+        okTextStyle: primary,
+        cancelTextStyle: action,
+      ),
+      hyperlinkDialogStyle: PdfHyperlinkDialogStyle(
+        backgroundColor: colors.background,
+        headerTextStyle: title,
+        contentTextStyle: muted,
+        openTextStyle: primary,
+        cancelTextStyle: action,
+        closeIconColor: colors.mutedForeground,
+      ),
+      passwordDialogStyle: PdfPasswordDialogStyle(
+        backgroundColor: colors.background,
+        headerTextStyle: title,
+        contentTextStyle: muted,
+        inputFieldTextStyle: body,
+        inputFieldHintTextStyle: muted,
+        inputFieldLabelTextStyle: muted,
+        errorTextStyle: text.bodySmall?.copyWith(color: colors.destructive),
+        openTextStyle: primary,
+        cancelTextStyle: action,
+        closeIconColor: colors.mutedForeground,
+        visibleIconColor: colors.mutedForeground,
+      ),
+    );
+  }
+
+  /// [color] through the night-mode matrix (which is its own inverse).
+  static Color _invert(Color color) {
+    final r = color.r * 255, g = color.g * 255, b = color.b * 255;
+    double channel(int row) {
+      final m = _nightMatrix;
+      final i = row * 5;
+      return (m[i] * r + m[i + 1] * g + m[i + 2] * b + m[i + 4]).clamp(0, 255);
+    }
+
+    return Color.fromARGB(
+      255,
+      channel(0).round(),
+      channel(1).round(),
+      channel(2).round(),
     );
   }
 
@@ -1558,11 +1630,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   Widget _buildViewerArea(BuildContext context) {
     final media = MediaQuery.of(context);
     final bottom = media.padding.bottom;
-    final scheme = Theme.of(context).colorScheme;
     final hasHint =
         PdfAnnotationToolbar.hintFor(_annotationMode, _selectedAnnotation) !=
         null;
-    final toolbarSpace = !_editMode ? 0.0 : (hasHint ? 104.0 : 66.0);
+    final toolbarSpace = !_editMode ? 0.0 : (hasHint ? 100.0 : 60.0);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -1576,7 +1647,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               colorFilter: ColorFilter.matrix(
                 _nightMode ? _nightMatrix : _identityMatrix,
               ),
-              child: _buildViewer(),
+              child: SfPdfViewerTheme(
+                data: _viewerTheme(context),
+                child: _buildViewer(),
+              ),
             ),
           ),
           // Until the first document is shown (the viewer has its own
@@ -1621,29 +1695,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               bottom: bottom + 12 + toolbarSpace,
               child: ValueListenableBuilder<int>(
                 valueListenable: _currentPage,
-                builder: (context, page, _) => Material(
-                  color: scheme.inverseSurface.withValues(alpha: 0.82),
-                  borderRadius: BorderRadius.circular(16),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: _showGoToPage,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      child: Text(
-                        '$page / $_pageCount',
-                        semanticsLabel:
-                            'Page $page of $_pageCount. Tap to go to a page',
-                        style: TextStyle(
-                          color: scheme.onInverseSurface,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
+                builder: (context, page, _) => ViewerPill(
+                  text: '$page / $_pageCount',
+                  semanticsLabel:
+                      'Page $page of $_pageCount. Tap to go to a page',
+                  onTap: _showGoToPage,
                 ),
               ),
             ),
@@ -1680,37 +1736,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               ),
             ),
           if (_busy)
-            Positioned.fill(
-              child: AbsorbPointer(
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  child: Center(
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 18,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Text(_busyLabel!),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            Positioned.fill(child: ViewerBusyOverlay(label: _busyLabel!)),
         ],
       ),
     );
@@ -1726,77 +1752,39 @@ class _PageSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = math.max(0.0, math.min(constraints.maxWidth - 24, 760.0));
-        return ClipRect(
-          child: Stack(
-            children: [
-              Positioned(
-                top: 12,
-                left: (constraints.maxWidth - width) / 2,
-                width: width,
-                height: width * math.sqrt2,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(
-                      alpha: 0.6,
+    final colors = context.colors;
+    return ColoredBox(
+      color: ViewerSurface.canvas(context),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = math.max(0.0, math.min(constraints.maxWidth - 24, 760.0));
+          return ClipRect(
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 12,
+                  left: (constraints.maxWidth - width) / 2,
+                  width: width,
+                  height: width * math.sqrt2,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colors.background,
+                      border: Border.all(color: colors.border),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                    borderRadius: BorderRadius.circular(4),
                   ),
                 ),
-              ),
-              if (showProgress)
-                const Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: LinearProgressIndicator(minHeight: 2),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _StatusMessage extends StatelessWidget {
-  const _StatusMessage({
-    required this.icon,
-    required this.title,
-    required this.actionLabel,
-    required this.onAction,
-  });
-
-  final IconData icon;
-  final String title;
-  final String actionLabel;
-  final VoidCallback onAction;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = ClearGlassForeground.icon(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 56, color: color.withValues(alpha: 0.6)),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(color: color),
+                if (showProgress)
+                  const Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
             ),
-            const SizedBox(height: 20),
-            FilledButton(onPressed: onAction, child: Text(actionLabel)),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

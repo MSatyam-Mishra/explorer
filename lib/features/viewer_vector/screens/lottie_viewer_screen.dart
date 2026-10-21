@@ -1,9 +1,15 @@
 import 'dart:io';
+
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
+import 'package:explorer/features/viewer_vector/widgets/vector_canvas.dart';
+import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
 import 'package:lottie/lottie.dart';
+import 'package:path/path.dart' as p;
 
+/// Plays a Lottie animation; swipe for the other .json animations in its
+/// folder.
 class LottieViewerScreen extends StatefulWidget {
   final File file;
 
@@ -16,6 +22,7 @@ class LottieViewerScreen extends StatefulWidget {
 class _LottieViewerScreenState extends State<LottieViewerScreen> {
   late PageController _pageController;
   List<File> _files = [];
+  int _index = 0;
   bool _isLoading = true;
 
   @override
@@ -40,7 +47,8 @@ class _LottieViewerScreenState extends State<LottieViewerScreen> {
       final safeIndex = initialIndex != -1 ? initialIndex : 0;
 
       setState(() {
-        _files = files;
+        _files = files.isEmpty ? [widget.file] : files;
+        _index = safeIndex;
         _isLoading = false;
         _pageController = PageController(initialPage: safeIndex);
       });
@@ -56,28 +64,42 @@ class _LottieViewerScreenState extends State<LottieViewerScreen> {
 
   @override
   void dispose() {
-    _pageController.dispose();
+    if (!_isLoading) _pageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: PageView.builder(
-        controller: _pageController,
-        scrollDirection: Axis.horizontal,
-        itemCount: _files.length,
-        itemBuilder: (context, index) {
-          return LottiePlayerPage(file: _files[index]);
-        },
+    final current = _isLoading ? widget.file : _files[_index];
+    return ExplorerScaffold(
+      title: p.basename(current.path),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_files.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: CountPill('${_index + 1} / ${_files.length}'),
+            ),
+          const CanvasBackgroundButton(),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: Padding(
+        padding: EdgeInsets.only(
+          top: DockedGlossyTopBar.contentTopInset(context),
+        ),
+        child: _isLoading
+            ? const ViewerLoading()
+            : PageView.builder(
+                controller: _pageController,
+                scrollDirection: Axis.horizontal,
+                itemCount: _files.length,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (context, index) {
+                  return LottiePlayerPage(file: _files[index]);
+                },
+              ),
       ),
     );
   }
@@ -96,6 +118,7 @@ class _LottiePlayerPageState extends State<LottiePlayerPage>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   bool _isPlaying = true;
+  bool _loaded = false;
 
   @override
   void initState() {
@@ -109,74 +132,113 @@ class _LottiePlayerPageState extends State<LottiePlayerPage>
     super.dispose();
   }
 
+  void _togglePlay() {
+    setState(() {
+      _isPlaying = !_isPlaying;
+      if (_isPlaying) {
+        _controller.repeat();
+      } else {
+        _controller.stop();
+      }
+    });
+  }
+
+  static String _time(Duration d) {
+    final s = d.inMilliseconds / 1000;
+    return '${s.toStringAsFixed(1)} s';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ExplorerScaffold(
-      backgroundColor: Colors.black,
-      title: p.basename(widget.file.path),
-      body: Stack(
-        children: [
-          Center(
-            child: Lottie.file(
-              widget.file,
-              controller: _controller,
-              onLoaded: (composition) {
-                setState(() {
-                  _controller.duration = composition.duration;
-                  if (_isPlaying) {
-                    _controller.forward();
-                    _controller.repeat();
-                  }
-                });
-              },
-            ),
-          ),
-          Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: Container(
-            color: Colors.black54,
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_controller.duration != null)
-                  AnimatedBuilder(
-                    animation: _controller,
-                    builder: (context, child) {
-                      return Slider(
-                        value: _controller.value,
-                        onChanged: (value) {
-                          _controller.value = value;
-                        },
-                        activeColor: Colors.white,
-                        inactiveColor: Colors.grey,
-                      );
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return ValueListenableBuilder<CanvasBackground>(
+      valueListenable: canvasBackground,
+      builder: (context, background, _) => VectorCanvas(
+        background: background,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(24, 24, 24, 104 + bottom),
+                child: Center(
+                  child: Lottie.file(
+                    widget.file,
+                    controller: _controller,
+                    errorBuilder: (context, error, stack) => ViewerMessage(
+                      icon: LucideIcons.fileX2,
+                      title: "Couldn't play this animation",
+                      message: "It isn't a valid Lottie file.",
+                      details: '$error',
+                    ),
+                    onLoaded: (composition) {
+                      setState(() {
+                        _loaded = true;
+                        _controller.duration = composition.duration;
+                        if (_isPlaying) {
+                          _controller.forward();
+                          _controller.repeat();
+                        }
+                      });
                     },
                   ),
-                IconButton(
-                  icon: Icon(
-                    _isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
-                    size: 48,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isPlaying = !_isPlaying;
-                      if (_isPlaying) {
-                        _controller.repeat();
-                      } else {
-                        _controller.stop();
-                      }
-                    });
-                  },
                 ),
-              ],
+              ),
             ),
-          ),
+            if (_loaded)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16 + bottom,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: AppPanel(
+                      padding: const EdgeInsets.fromLTRB(6, 6, 16, 6),
+                      child: Row(
+                        children: [
+                          ToolButton(
+                            icon: _isPlaying
+                                ? LucideIcons.pause
+                                : LucideIcons.play,
+                            tooltip: _isPlaying ? 'Pause' : 'Play',
+                            size: 40,
+                            onPressed: _togglePlay,
+                          ),
+                          Expanded(
+                            child: AnimatedBuilder(
+                              animation: _controller,
+                              builder: (context, child) => Slider(
+                                value: _controller.value,
+                                onChanged: (value) {
+                                  if (_isPlaying) _togglePlay();
+                                  _controller.value = value;
+                                },
+                              ),
+                            ),
+                          ),
+                          AnimatedBuilder(
+                            animation: _controller,
+                            builder: (context, _) => Text(
+                              _time((_controller.duration ?? Duration.zero) *
+                                  _controller.value),
+                              style: text.labelMedium?.copyWith(
+                                color: colors.foreground,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
-        ],
       ),
     );
   }

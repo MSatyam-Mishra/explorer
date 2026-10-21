@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:chewie/chewie.dart';
+import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -36,6 +37,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       // released it; don't start playback behind the user's back.
       if (!mounted) return;
 
+      // The player always sits on black, so its controls use the dark
+      // palette of the current colour scheme.
+      final colors = immersiveShadTheme(context).colorScheme;
+      final progress = ChewieProgressColors(
+        playedColor: colors.primary,
+        handleColor: colors.foreground,
+        bufferedColor: colors.foreground.withValues(alpha: 0.35),
+        backgroundColor: colors.foreground.withValues(alpha: 0.18),
+      );
       _chewieController = ChewieController(
         videoPlayerController: controller,
         autoPlay: true,
@@ -44,14 +54,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         allowFullScreen: true,
         allowMuting: true,
         showControls: true,
-        errorBuilder: (context, errorMessage) {
-          return Center(
-            child: Text(
-              errorMessage,
-              style: const TextStyle(color: Colors.white),
-            ),
-          );
-        },
+        materialProgressColors: progress,
+        cupertinoProgressColors: progress,
+        errorBuilder: (context, errorMessage) => ViewerMessage(
+          icon: LucideIcons.videoOff,
+          title: "Can't play this video",
+          details: errorMessage,
+        ),
       );
 
       setState(() {});
@@ -73,6 +82,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return ImmersiveTheme(child: Builder(builder: _build));
+  }
+
+  Widget _build(BuildContext context) {
+    final chewie = _chewieController;
+    final Widget content;
+    if (_error != null) {
+      content = ViewerMessage(
+        icon: LucideIcons.videoOff,
+        title: "Can't play this video",
+        message: _error,
+        actions: [
+          FilledButton.icon(
+            icon: const Icon(LucideIcons.externalLink, size: 16),
+            label: const Text('Open with another app'),
+            onPressed: () => OpenFilex.open(widget.videoFile.path),
+          ),
+        ],
+      );
+    } else if (chewie != null &&
+        chewie.videoPlayerController.value.isInitialized) {
+      content = Chewie(controller: chewie);
+    } else {
+      content = const ViewerLoading();
+    }
     return ExplorerScaffold(
       backgroundColor: Colors.black,
       title: p.basename(widget.videoFile.path),
@@ -81,32 +115,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           top: DockedGlossyTopBar.contentTopInset(context),
           bottom: MediaQuery.paddingOf(context).bottom,
         ),
-        child: Center(
-          child: _error != null
-              ? Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _error!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text('Open with another app'),
-                        onPressed: () => OpenFilex.open(widget.videoFile.path),
-                      ),
-                    ],
-                  ),
-                )
-              : _chewieController != null &&
-                      _chewieController!.videoPlayerController.value.isInitialized
-                  ? Chewie(controller: _chewieController!)
-                  : const CircularProgressIndicator(),
-        ),
+        child: Center(child: content),
       ),
     );
   }
