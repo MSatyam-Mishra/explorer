@@ -475,16 +475,19 @@ class VideoDownloaderController extends ChangeNotifier {
 
   /// Updates yt-dlp to the latest stable release.
   Future<UpdateResult> updateYtDlp() async {
-    await ensureReady();
-    if (_updateRun != null) {
-      await _updateRun;
+    final running = _updateRun;
+    if (running != null) {
+      await running;
       return UpdateResult(updated: false, version: ytDlpVersion);
     }
+    // Set before the first await, so a fetch that starts meanwhile waits:
+    // yt-dlp fails if its file is replaced while it runs.
     final done = Completer<void>();
     _updateRun = done.future;
     updating = true;
     notifyListeners();
     try {
+      await ensureReady();
       final result = await backend.update();
       if (result.version != null) ytDlpVersion = result.version;
       await _setLastUpdateCheck(DateTime.now());

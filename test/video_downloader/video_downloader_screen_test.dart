@@ -75,8 +75,20 @@ class FakeBackend extends VideoDownloaderBackend {
   @override
   Future<String?> version() async => '2026.08.19';
 
+  /// Holds yt-dlp updates until completed.
+  Completer<void>? holdUpdate;
+  bool updateRunning = false;
+
+  /// For each fetch, whether an update was running.
+  final fetchedDuringUpdate = <bool>[];
+
   @override
-  Future<UpdateResult> update() async => const UpdateResult(updated: false, version: '2026.08.19');
+  Future<UpdateResult> update() async {
+    updateRunning = true;
+    await holdUpdate?.future;
+    updateRunning = false;
+    return const UpdateResult(updated: false, version: '2026.08.19');
+  }
 
   @override
   Future<BackendPaths> paths() async =>
@@ -86,8 +98,10 @@ class FakeBackend extends VideoDownloaderBackend {
   Future<bool> canWrite(String dir) async => true;
 
   @override
-  Future<String> fetchInfoJson(String url, {required String requestId}) async =>
-      url.contains('/pl') ? _playlist : _info;
+  Future<String> fetchInfoJson(String url, {required String requestId}) async {
+    fetchedDuringUpdate.add(updateRunning);
+    return url.contains('/pl') ? _playlist : _info;
+  }
 
   @override
   Future<void> cancelFetch(String requestId) async {}
@@ -311,6 +325,18 @@ void main() {
     expect(find.textContaining('Not downloaded'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'Download'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  test('the first fetch waits for the automatic yt-dlp update', () async {
+    // yt-dlp can't run while the update replaces its file.
+    backend.holdUpdate = Completer<void>();
+    final fetch = VideoDownloaderController.instance.fetchInfo('https://example.com/watch/abc');
+    await pumpEventQueue();
+    expect(backend.updateRunning, isTrue);
+    expect(backend.fetchedDuringUpdate, isEmpty);
+    backend.holdUpdate!.complete();
+    expect((await fetch).title, 'Test clip');
+    expect(backend.fetchedDuringUpdate, [false]);
   });
 
   testWidgets('settings screen builds', (tester) async {
