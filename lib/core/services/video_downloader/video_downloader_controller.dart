@@ -62,6 +62,7 @@ class VideoDownloaderController extends ChangeNotifier {
   bool updating = false;
   DateTime? lastUpdateCheck;
   bool rightsAccepted = false;
+  bool _engineAllowed = false;
 
   /// Each download that finished, once added to [history].
   Stream<HistoryEntry> get completed => _completed.stream;
@@ -73,6 +74,16 @@ class VideoDownloaderController extends ChangeNotifier {
   bool get hasFfmpeg => backendStatus?.hasFfmpeg ?? false;
 
   bool get needsSetup => backendStatus?.needsSetup ?? false;
+
+  /// The engine to download first (Android), if the backend has one.
+  EngineInfo? get engine => backendStatus?.engine;
+
+  /// Nothing can be downloaded until the engine is: ask the user, then
+  /// call [installEngine].
+  bool get engineMissing => engine != null && !engine!.installed;
+
+  /// The user agreed to download the engine in this session.
+  bool get engineAllowed => _engineAllowed;
 
   /// Where downloads are saved.
   String get outputDir => settings.outputDir ?? backendPaths?.defaultOutputDir ?? '';
@@ -130,13 +141,37 @@ class VideoDownloaderController extends ChangeNotifier {
   }
 
   /// Sets up yt-dlp if needed (the first time: unpack or download it).
+  /// Throws [EngineMissingException] while the engine is missing and the
+  /// user hasn't agreed to download it ([installEngine]).
   Future<void> ensureReady() async {
     await start();
     if (engineState == EngineState.ready) return;
     if (engineState == EngineState.unsupported) {
       throw DownloaderException(unsupportedReason ?? 'Not supported');
     }
+    if (engineMissing && !_engineAllowed) throw const EngineMissingException();
     await (_preparing ??= _prepare().whenComplete(() => _preparing = null));
+  }
+
+  /// Downloads the engine (the user agreed) and sets the downloader up.
+  Future<void> installEngine() async {
+    _engineAllowed = true;
+    await ensureReady();
+  }
+
+  /// Stops the engine download; the next [installEngine] continues it.
+  Future<void> cancelEngineInstall() => backend.cancelPrepare();
+
+  /// Deletes the engine to free its storage; it must be downloaded again
+  /// before the next download.
+  Future<void> removeEngine() async {
+    await backend.removeEngine();
+    _engineAllowed = false;
+    engineState = EngineState.idle;
+    engineError = null;
+    ytDlpVersion = null;
+    backendStatus = await backend.status();
+    notifyListeners();
   }
 
   Future<void> _prepare() async {
@@ -144,7 +179,11 @@ class VideoDownloaderController extends ChangeNotifier {
     engineState = EngineState.preparing;
     engineError = null;
     engineProgress = null;
-    engineMessage = firstTime ? 'Preparing downloader…' : 'Starting downloader…';
+    engineMessage = engineMissing
+        ? 'Downloading the video engine…'
+        : firstTime
+        ? 'Preparing downloader…'
+        : 'Starting downloader…';
     notifyListeners();
     try {
       await backend.prepare(onProgress: (progress, message) {
@@ -163,9 +202,13 @@ class VideoDownloaderController extends ChangeNotifier {
       unawaited(refreshVersion());
       unawaited(_maybeAutoUpdate());
     } catch (e) {
-      engineState = EngineState.failed;
-      engineError = e is DownloaderException ? e.message : '$e';
+      final cancelled = e is DownloaderException && e.cancelled;
+      // Cancelled: back to asking before the next download.
+      if (cancelled) _engineAllowed = false;
+      engineState = cancelled ? EngineState.idle : EngineState.failed;
+      engineError = cancelled ? null : (e is DownloaderException ? e.message : '$e');
       engineMessage = null;
+      engineProgress = null;
       notifyListeners();
       rethrow;
     }
@@ -352,6 +395,8 @@ class VideoDownloaderController extends ChangeNotifier {
         if (job.status == JobStatus.done) unawaited(_complete(job));
       case JobRemoved(:final id):
         _jobs.remove(id);
+      case SetupProgress():
+        return; // [_prepare] gets it through prepare's onProgress.
     }
     notifyListeners();
   }

@@ -47,7 +47,7 @@ Download videos or audio from the [many sites yt-dlp supports](https://github.co
 - Choose a quality (up to 4K where available) or audio only (M4A or MP3), or pick an exact format. Playlists are supported.
 - Downloads continue in the background with a notification and are saved to `Download/Explorer Videos`.
 - yt-dlp keeps itself up to date (Settings in the downloader).
-- **On Android**, the first use unpacks the bundled Python, yt-dlp and FFmpeg, about 200 MB.
+- **On Android**, the first use asks to download the video engine (Python for yt-dlp, and FFmpeg): about 50 MB, 120 MB once installed. It isn't in the APK, to keep the app small, and can be removed in the downloader settings.
 - **On desktop**, the official yt-dlp is downloaded on first use. Install [FFmpeg](https://ffmpeg.org/) to merge high-quality video and audio.
 
 Only download content you have the right to download, and respect each site's terms.
@@ -61,7 +61,7 @@ flutter pub get
 flutter run
 ```
 
-Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are built into `build/release/v<version>/`. The video downloader adds about 54 MB per APK; add `--without-video-downloader` for a smaller build without it:
+Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are built into `build/release/v<version>/`. The video downloader adds about 4 MB per APK (its engine is downloaded on first use); add `--without-video-downloader` for a build without it:
 
 ```sh
 python tool/build_release.py

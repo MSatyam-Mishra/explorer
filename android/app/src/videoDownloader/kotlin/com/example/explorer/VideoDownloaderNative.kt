@@ -18,7 +18,8 @@ import java.util.concurrent.Executors
  *
  * Methods on "explorer/video_downloader"; job updates are streamed on
  * "explorer/video_downloader/events" as {event: "job", job: {...}} and
- * {event: "removed", id}. Jobs live in [VideoDownloadJobs] (process-wide), so
+ * {event: "removed", id}, and the engine download's progress as
+ * {event: "engine", phase, done, total}. Jobs live in [VideoDownloadJobs] (process-wide), so
  * a new engine re-attaches with "jobs" and keeps receiving their updates.
  */
 class VideoDownloaderNative(activity: Activity, messenger: BinaryMessenger) :
@@ -29,19 +30,38 @@ class VideoDownloaderNative(activity: Activity, messenger: BinaryMessenger) :
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newCachedThreadPool()
     private var sink: EventChannel.EventSink? = null
+    private val engineListener: (Map<String, Any?>) -> Unit = { progress ->
+        main.post { sink?.success(progress + ("event" to "engine")) }
+    }
 
     init {
         VideoDownloadJobs.init(context)
+        VideoEngineInstaller.listener = engineListener
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
-                "status" -> result.success(
+                "status" -> background(result) {
+                    val sizes = VideoEngineInstaller.sizes(context)
                     mapOf(
                         "ready" to VideoDownloadEngine.isReady,
-                        "unpacked" to VideoDownloadEngine.isUnpacked(context),
+                        "engineInstalled" to VideoEngineInstaller.isInstalled(context),
+                        "engineDownloadBytes" to sizes?.first,
+                        "engineDiskBytes" to sizes?.second,
                         "maxConcurrent" to VideoDownloadJobs.MAX_CONCURRENT,
                         "notificationsEnabled" to notificationsEnabled(),
                     )
-                )
+                }
+                "installEngine" -> background(result) {
+                    VideoEngineInstaller.install(context)
+                    null
+                }
+                "cancelEngine" -> {
+                    VideoEngineInstaller.cancel()
+                    result.success(null)
+                }
+                "removeEngine" -> background(result) {
+                    VideoDownloadEngine.removeEngine(context)
+                    null
+                }
                 "prepare" -> background(result) {
                     VideoDownloadEngine.ensureReady(context)
                     null
@@ -137,6 +157,10 @@ class VideoDownloaderNative(activity: Activity, messenger: BinaryMessenger) :
                 main.post { result.success(value) }
             } catch (e: YoutubeDL.CanceledException) {
                 main.post { result.error("CANCELLED", "Cancelled", null) }
+            } catch (e: VideoEngineInstaller.Cancelled) {
+                main.post { result.error("CANCELLED", "Cancelled", null) }
+            } catch (e: VideoDownloadEngine.EngineMissing) {
+                main.post { result.error("ENGINE_MISSING", e.message, null) }
             } catch (e: Throwable) {
                 main.post { result.error("FAILED", e.message ?: e.javaClass.simpleName, null) }
             }
@@ -144,6 +168,7 @@ class VideoDownloaderNative(activity: Activity, messenger: BinaryMessenger) :
     }
 
     fun dispose() {
+        if (VideoEngineInstaller.listener === engineListener) VideoEngineInstaller.listener = null
         channel.setMethodCallHandler(null)
         events.setStreamHandler(null)
         VideoDownloadJobs.removeListener(this)

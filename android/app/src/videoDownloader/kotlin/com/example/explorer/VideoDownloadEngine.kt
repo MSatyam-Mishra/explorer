@@ -16,8 +16,9 @@ import java.security.MessageDigest
  * yt-dlp runtime on Android, from youtubedl-android: a Python interpreter,
  * the yt-dlp zipapp, FFmpeg and QuickJS, all run as child processes.
  *
- * The first [ensureReady] unpacks Python (~65 MB) and FFmpeg (~140 MB) into
- * no-backup app storage; later calls only check that they are there.
+ * Python and FFmpeg aren't in the APK: [VideoEngineInstaller] downloads
+ * them once, when the user agrees. Until then [ensureReady] throws
+ * [EngineMissing].
  */
 object VideoDownloadEngine {
     const val PREFS = "explorer_video_downloader"
@@ -32,12 +33,7 @@ object VideoDownloadEngine {
     private val initLock = Any()
     private val updateLock = Any()
 
-    /** Whether Python and FFmpeg were unpacked before, so init will be quick. */
-    fun isUnpacked(context: Context): Boolean {
-        val packages = File(context.noBackupFilesDir, "$BASE_DIR/packages")
-        return File(packages, "python").isDirectory && File(packages, "ffmpeg").isDirectory &&
-            ytDlpFile(context).isFile
-    }
+    class EngineMissing : Exception("Download the video engine first.")
 
     @Throws(Exception::class)
     fun ensureReady(context: Context) {
@@ -45,9 +41,21 @@ object VideoDownloadEngine {
         synchronized(initLock) {
             if (isReady) return
             val app = context.applicationContext
+            if (!VideoEngineInstaller.isInstalled(app)) throw EngineMissing()
             YoutubeDL.getInstance().init(app)
             FFmpeg.getInstance().init(app)
             isReady = true
+        }
+    }
+
+    /** Deletes the engine; refused while downloads run. */
+    fun removeEngine(context: Context) {
+        synchronized(initLock) {
+            if (VideoDownloadJobs.hasActive()) {
+                throw IllegalStateException("Wait for the downloads to finish, then remove the video engine.")
+            }
+            isReady = false
+            VideoEngineInstaller.remove(context)
         }
     }
 

@@ -6,7 +6,8 @@ import 'ytdlp_output.dart';
 
 /// Android: youtubedl-android (Python + yt-dlp + FFmpeg) through
 /// VideoDownloaderNative.kt; jobs run in a foreground service and outlive
-/// this Flutter engine.
+/// this Flutter engine. Python and FFmpeg, the engine, aren't in the APK:
+/// the first [prepare] downloads them (VideoEngineInstaller.kt).
 class AndroidDownloaderBackend extends VideoDownloaderBackend {
   AndroidDownloaderBackend();
 
@@ -31,22 +32,58 @@ class AndroidDownloaderBackend extends VideoDownloaderBackend {
   @override
   Future<BackendStatus> status() async {
     final m = await _call<Map<dynamic, dynamic>>('status') ?? const {};
-    final ready = m['ready'] == true;
+    final installed = m['engineInstalled'] == true;
+    final download = m['engineDownloadBytes'];
+    final disk = m['engineDiskBytes'];
     return BackendStatus(
-      ready: ready,
-      needsSetup: !ready && m['unpacked'] != true,
+      ready: m['ready'] == true,
+      needsSetup: !installed,
       hasFfmpeg: true,
-      ffmpegNote: 'FFmpeg is built in.',
-      setupNote: 'The first time, Explorer unpacks Python and FFmpeg '
-          '(about 200 MB of app storage). This takes a little while.',
+      ffmpegNote: 'FFmpeg is part of the video engine.',
+      setupNote: "A one-time download. Keep Explorer open until it's done.",
+      engine: download is int && disk is int
+          ? EngineInfo(installed: installed, downloadBytes: download, diskBytes: disk)
+          : null,
     );
   }
 
   @override
   Future<void> prepare({void Function(double? progress, String message)? onProgress}) async {
-    onProgress?.call(null, 'Preparing downloader…');
+    final m = await _call<Map<dynamic, dynamic>>('status') ?? const {};
+    if (m['engineInstalled'] != true) {
+      final total = m['engineDownloadBytes'];
+      onProgress?.call(0, _downloading(0, total is int ? total : 0));
+      final progress = events.listen((e) {
+        if (e is SetupProgress) onProgress?.call(e.progress, e.message);
+      });
+      try {
+        await _call<void>('installEngine');
+      } finally {
+        await progress.cancel();
+      }
+    }
+    onProgress?.call(null, 'Starting the downloader…');
     await _call<void>('prepare');
   }
+
+  @override
+  Future<void> cancelPrepare() => _call<void>('cancelEngine');
+
+  @override
+  Future<void> removeEngine() => _call<void>('removeEngine');
+
+  static SetupProgress _engineProgress(Map<dynamic, dynamic> event) {
+    if (event['phase'] == 'unpack') {
+      return const SetupProgress(null, 'Installing the video engine…');
+    }
+    final done = (event['done'] as num?)?.toInt() ?? 0;
+    final total = (event['total'] as num?)?.toInt() ?? 0;
+    return SetupProgress(total > 0 ? done / total : null, _downloading(done, total));
+  }
+
+  static String _downloading(int done, int total) =>
+      'Downloading the video engine: ${(done / 1e6).toStringAsFixed(0)} of '
+      '${(total / 1e6).toStringAsFixed(0)} MB';
 
   @override
   Future<String?> version() => _call<String>('version');
@@ -89,6 +126,7 @@ class AndroidDownloaderBackend extends VideoDownloaderBackend {
         return switch (event['event']) {
           'job' => JobChanged(DownloadJob.fromMap(event['job'] as Map)),
           'removed' => JobRemoved('${event['id']}'),
+          'engine' => _engineProgress(event),
           _ => null,
         };
       })

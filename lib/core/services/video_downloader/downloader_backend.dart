@@ -15,6 +15,30 @@ class DownloaderException implements Exception {
   String toString() => message;
 }
 
+/// The engine has to be downloaded first, and the user hasn't agreed to
+/// that yet (see [VideoDownloaderBackend.prepare]).
+class EngineMissingException extends DownloaderException {
+  const EngineMissingException() : super('Download the video engine first.');
+}
+
+/// An engine that is downloaded separately, once the user agrees (Android:
+/// Python and FFmpeg for yt-dlp, ~50 MB, left out of the APK).
+class EngineInfo {
+  const EngineInfo({
+    required this.installed,
+    required this.downloadBytes,
+    required this.diskBytes,
+  });
+
+  final bool installed;
+
+  /// Size of the download.
+  final int downloadBytes;
+
+  /// Storage it takes once installed.
+  final int diskBytes;
+}
+
 /// What the backend can do right now.
 class BackendStatus {
   const BackendStatus({
@@ -23,6 +47,7 @@ class BackendStatus {
     required this.hasFfmpeg,
     this.ffmpegNote,
     this.setupNote,
+    this.engine,
   });
 
   /// yt-dlp can run without further setup.
@@ -38,6 +63,10 @@ class BackendStatus {
 
   /// What the first-time setup will do.
   final String? setupNote;
+
+  /// The engine to download before the first [VideoDownloaderBackend.prepare];
+  /// null when there is none (desktop) or none for this device.
+  final EngineInfo? engine;
 }
 
 class BackendPaths {
@@ -73,6 +102,15 @@ class JobRemoved extends BackendEvent {
   final String id;
 }
 
+/// Progress of [VideoDownloaderBackend.prepare] (the engine download), 0–1
+/// when it can be measured.
+class SetupProgress extends BackendEvent {
+  const SetupProgress(this.progress, this.message);
+
+  final double? progress;
+  final String message;
+}
+
 /// Runs yt-dlp on one platform: Android through youtubedl-android in a
 /// foreground service, desktop with the official yt-dlp binary.
 abstract class VideoDownloaderBackend {
@@ -94,9 +132,17 @@ abstract class VideoDownloaderBackend {
 
   Future<BackendStatus> status();
 
-  /// Sets yt-dlp up; slow the first time. [onProgress] gets 0–1 when the
-  /// work can be measured, else null.
+  /// Sets yt-dlp up; slow the first time, which downloads the [EngineInfo]
+  /// engine if there is one. [onProgress] gets 0–1 when the work can be
+  /// measured, else null.
   Future<void> prepare({void Function(double? progress, String message)? onProgress});
+
+  /// Stops [prepare]'s download; it fails with a cancelled
+  /// [DownloaderException]. A later [prepare] continues where it stopped.
+  Future<void> cancelPrepare() async {}
+
+  /// Deletes the downloaded engine to free its storage.
+  Future<void> removeEngine() async {}
 
   Future<String?> version();
 

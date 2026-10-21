@@ -3,9 +3,9 @@
 Run from the project root:
     python tool/build_release.py [--without-video-downloader]
 
---without-video-downloader leaves out the video downloader (its GPL-3.0
-youtubedl-android/FFmpeg/Python payload, ~54 MB per APK) and its menu entry
-and share target.
+--without-video-downloader leaves out the video downloader (GPL-3.0
+youtubedl-android, ~4 MB per APK; its Python and FFmpeg engine is never in
+the APK but downloaded on first use) and its menu entry and share target.
 
 Output: build/release/v<version>/explorer-v<version>-<abi>.apk, the universal
 APK and SHA256SUMS.txt. Dart code is obfuscated; the symbols needed to decode

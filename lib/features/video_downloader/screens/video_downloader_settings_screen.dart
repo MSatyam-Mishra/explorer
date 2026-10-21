@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/core/services/video_downloader/downloader_backend.dart';
 import 'package:explorer/core/services/video_downloader/downloader_settings.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
@@ -12,6 +13,7 @@ import 'package:explorer/core/app_licenses.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../widgets/downloader_text.dart';
 import '../widgets/rights_notice.dart';
 
 /// Download folder, defaults, file names, extras and yt-dlp updates.
@@ -89,6 +91,57 @@ class _VideoDownloaderSettingsScreenState
       );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Update failed: $e')));
+    }
+  }
+
+  Future<void> _installEngine() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _c.installEngine();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('The video engine is installed')),
+      );
+    } catch (e) {
+      if (e is DownloaderException && e.cancelled) return;
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _removeEngine(EngineInfo engine) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove the video engine?'),
+        content: Text(
+          'This frees ${DownloaderText.bytes(engine.diskBytes)}. The video '
+          "downloader won't work until you download the engine again "
+          '(${DownloaderText.bytes(engine.downloadBytes)}).',
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.colors.destructive,
+              foregroundColor: context.colors.destructiveForeground,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _c.removeEngine();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('The video engine was removed')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -329,7 +382,9 @@ class _VideoDownloaderSettingsScreenState
   List<Widget> _engineTiles(BuildContext context) {
     final last = _c.lastUpdateCheck;
     final version = _c.ytDlpVersion;
+    final engine = _c.engine;
     return [
+      if (engine != null) _videoEngineTile(engine),
       ListTile(
         leading: const Icon(LucideIcons.refreshCw),
         title: Text(
@@ -373,6 +428,43 @@ class _VideoDownloaderSettingsScreenState
         subtitle: Text(_c.backendStatus?.ffmpegNote ?? ''),
       ),
     ];
+  }
+
+  /// Android: the downloaded Python and FFmpeg.
+  Widget _videoEngineTile(EngineInfo engine) {
+    final busy = _c.engineState == EngineState.preparing;
+    final buttonStyle = OutlinedButton.styleFrom(
+      minimumSize: const Size(0, 36),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+    );
+    return ListTile(
+      leading: const Icon(LucideIcons.package),
+      title: const Text('Video engine'),
+      subtitle: Text(
+        busy
+            ? _c.engineMessage ?? 'Installing…'
+            : engine.installed
+            ? 'Python and FFmpeg, ${DownloaderText.bytes(engine.diskBytes)}'
+            : 'Not downloaded. Needed to download videos '
+                  '(${DownloaderText.bytes(engine.downloadBytes)}).',
+      ),
+      trailing: busy
+          ? const SizedBox.square(
+              dimension: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            )
+          : engine.installed
+          ? OutlinedButton(
+              onPressed: _c.activeCount > 0 ? null : () => _removeEngine(engine),
+              style: buttonStyle,
+              child: const Text('Remove'),
+            )
+          : OutlinedButton(
+              onPressed: _installEngine,
+              style: buttonStyle,
+              child: const Text('Download'),
+            ),
+    );
   }
 
   Widget _section(BuildContext context, String title) =>

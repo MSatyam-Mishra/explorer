@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../widgets/download_panel.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/engine_download_dialog.dart';
 import '../widgets/history_list.dart';
 import '../widgets/queue_list.dart';
 import '../widgets/rights_notice.dart';
@@ -42,6 +43,7 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
   _Tab _sideTab = _Tab.queue;
   StreamSubscription<HistoryEntry>? _completed;
   Future<bool>? _rightsPrompt;
+  Future<bool>? _enginePrompt;
 
   @override
   void initState() {
@@ -59,15 +61,19 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
   Future<void> _init() async {
     await _controller.start();
     if (!mounted || !_controller.isSupported) return;
-    if (!await _ensureRights()) return;
+    if (!await _beforeUse()) return;
     final url = widget.initialUrl?.trim();
     if (url != null && url.isNotEmpty) {
       await _panelKey.currentState?.fetch();
     } else if (Platform.isAndroid) {
-      // Unpack Python/FFmpeg now (first use) so the first fetch is quick.
+      // Start yt-dlp now so the first fetch is quick.
       unawaited(_controller.ensureReady().catchError((Object _) {}));
     }
   }
+
+  /// The rights notice, then the engine download; false if the user
+  /// declined either.
+  Future<bool> _beforeUse() async => await _ensureRights() && await _ensureEngine();
 
   /// Shows the first-use notice once; false if the user declined it.
   Future<bool> _ensureRights() async {
@@ -76,6 +82,18 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
     final accepted = await (_rightsPrompt ??= showRightsNotice(context)
         .whenComplete(() => _rightsPrompt = null));
     if (accepted) await _controller.acceptRights();
+    return accepted;
+  }
+
+  /// Asks to download the engine on first use (Android) and starts the
+  /// download; false if the user declined. Nothing downloads without it.
+  Future<bool> _ensureEngine() async {
+    final engine = _controller.engine;
+    if (engine == null || engine.installed || _controller.engineAllowed) return true;
+    if (!mounted) return false;
+    final accepted = await (_enginePrompt ??= showEngineDownloadDialog(context, engine)
+        .whenComplete(() => _enginePrompt = null));
+    if (accepted) unawaited(_controller.installEngine().catchError((Object _) {}));
     return accepted;
   }
 
@@ -148,7 +166,7 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
           initialUrl: widget.initialUrl,
           onQueued: (n) => _onQueued(n, wide),
           onOpenSettings: _openSettings,
-          ensureRights: _ensureRights,
+          beforeUse: _beforeUse,
           padding: EdgeInsets.fromLTRB(16, wide ? 16 : 4, 16, bottom),
         );
         final listPadding = EdgeInsets.fromLTRB(16, 4, 16, 24 + bottom);

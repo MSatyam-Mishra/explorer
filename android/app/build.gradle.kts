@@ -16,8 +16,9 @@ if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
 
-// The video downloader bundles GPL-3.0 components (youtubedl-android with
-// Python and FFmpeg) and adds ~54 MB to each APK. Build without it with
+// The video downloader uses GPL-3.0 components (youtubedl-android with
+// Python and FFmpeg). Its ~50 MB engine is downloaded on first use (see
+// packaging below); the rest adds ~4 MB to each APK. Build without it with
 // -Pexplorer.videoDownloader=false (tool/build_release.py
 // --without-video-downloader, together with --dart-define=VIDEO_DOWNLOADER=false).
 val withVideoDownloader = project.findProperty("explorer.videoDownloader")?.toString() != "false"
@@ -81,6 +82,12 @@ android {
         // extracting them on install. Right for APKs downloaded from GitHub.
         jniLibs {
             useLegacyPackaging = true
+            // youtubedl-android's Python and FFmpeg (~50 MB per ABI) aren't
+            // packaged: VideoEngineInstaller.kt downloads the same files when
+            // the user first opens the downloader. The small executables
+            // (libpython.so, libffmpeg.so, libqjs.so) stay, as Android only
+            // runs programs from the APK.
+            excludes += setOf("**/libpython.zip.so", "**/libffmpeg.zip.so")
         }
     }
 }
@@ -109,5 +116,8 @@ dependencies {
     if (withVideoDownloader) {
         implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
         implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+        // Its unzip and settings helpers, used by VideoEngineInstaller.kt.
+        // Keep the version in step with VideoEngineInstaller.VERSION.
+        implementation("io.github.junkfood02.youtubedl-android:common:0.18.1")
     }
 }

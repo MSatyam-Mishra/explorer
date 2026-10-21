@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:explorer/core/services/localsend/localsend.dart';
+import 'package:explorer/core/services/video_downloader/downloader_backend.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/features/localsend/localsend_controller.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
@@ -146,5 +148,23 @@ void main() {
     ));
     await settle(tester);
     await shot.shot('downloader_settings');
+  });
+
+  viewerShots('video downloader engine', (tester, shot) async {
+    final backend = FakeBackend()
+      ..engine = const EngineInfo(installed: false, downloadBytes: 49930835, diskBytes: 119773698)
+      ..holdDownload = Completer<void>();
+    VideoDownloaderController.instance = VideoDownloaderController(backend);
+    await shot.open(const VideoDownloaderScreen());
+    await settle(tester);
+    await tester.tap(find.text('I understand'));
+    await settle(tester);
+    await shot.shot('downloader_engine_ask');
+    await tester.tap(find.text('Not now'));
+    await settle(tester);
+    await shot.shot('downloader_engine_needed');
+    await tester.tap(find.text('Download (50 MB)'));
+    await settle(tester);
+    await shot.shot('downloader_engine_progress');
   });
 }

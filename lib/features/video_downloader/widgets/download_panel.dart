@@ -17,7 +17,7 @@ class DownloadPanel extends StatefulWidget {
     required this.controller,
     required this.onQueued,
     required this.onOpenSettings,
-    required this.ensureRights,
+    required this.beforeUse,
     this.initialUrl,
     this.padding = EdgeInsets.zero,
   });
@@ -29,8 +29,9 @@ class DownloadPanel extends StatefulWidget {
   final void Function(int count) onQueued;
   final VoidCallback onOpenSettings;
 
-  /// Shows the rights notice if needed; false when the user declined.
-  final Future<bool> Function() ensureRights;
+  /// Shows the rights notice and asks to download the engine, as needed;
+  /// false when the user declined.
+  final Future<bool> Function() beforeUse;
   final EdgeInsets padding;
 
   @override
@@ -77,7 +78,7 @@ class DownloadPanelState extends State<DownloadPanel> {
     }
     if (url != null) _url.text = url;
     FocusManager.instance.primaryFocus?.unfocus();
-    if (!await widget.ensureRights()) return;
+    if (!await widget.beforeUse()) return;
     if (_fetching) await _c.cancelFetch();
     final token = ++_fetchToken;
     setState(() {
@@ -102,7 +103,10 @@ class DownloadPanelState extends State<DownloadPanel> {
       final cancelled = e is DownloaderException && e.cancelled;
       setState(() {
         _fetching = false;
-        _error = cancelled ? null : (e is DownloaderException ? e.message : '$e');
+        // Without the engine, its card says why.
+        _error = cancelled || _c.engineMissing
+            ? null
+            : (e is DownloaderException ? e.message : '$e');
       });
     }
   }
@@ -139,7 +143,7 @@ class DownloadPanelState extends State<DownloadPanel> {
 
   Future<void> _download() async {
     final info = _info;
-    if (info == null || !await widget.ensureRights()) return;
+    if (info == null || !await widget.beforeUse()) return;
     setState(() => _queuing = true);
     try {
       final entries = info.isPlaylist
@@ -155,7 +159,7 @@ class DownloadPanelState extends State<DownloadPanel> {
   }
 
   Future<void> _downloadAll(List<String> urls) async {
-    if (!await widget.ensureRights()) return;
+    if (!await widget.beforeUse()) return;
     setState(() => _queuing = true);
     try {
       final count = await _c.downloadUrls(urls);
@@ -297,13 +301,31 @@ class DownloadPanelState extends State<DownloadPanel> {
     );
   }
 
+  Future<void> _installEngine() async {
+    try {
+      await _c.installEngine();
+    } catch (_) {
+      // Shown by the engine card.
+    }
+  }
+
   List<Widget> _statusCards(BuildContext context) {
     final cards = <Widget>[];
+    final engine = _c.engine;
     if (_c.engineState == EngineState.preparing) {
       cards.add(_StatusCard(
         progress: _c.engineProgress,
         title: _c.engineMessage ?? 'Preparing downloader…',
         subtitle: _c.needsSetup ? _c.backendStatus?.setupNote : null,
+        action: _c.engineMissing
+            ? TextButton(onPressed: _c.cancelEngineInstall, child: const Text('Cancel'))
+            : null,
+      ));
+    } else if (engine != null && !engine.installed) {
+      cards.add(_EngineCard(
+        engine: engine,
+        error: _c.engineState == EngineState.failed ? _c.engineError : null,
+        onDownload: _installEngine,
       ));
     } else if (_c.engineState == EngineState.failed && _c.engineError != null) {
       cards.add(_StatusCard(
@@ -723,6 +745,68 @@ class _StatusCard extends StatelessWidget {
                 backgroundColor: colors.muted,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The engine isn't downloaded: why it's needed and a button to get it.
+class _EngineCard extends StatelessWidget {
+  const _EngineCard({required this.engine, required this.error, required this.onDownload});
+
+  final EngineInfo engine;
+
+  /// Why the last download failed.
+  final String? error;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final size = DownloaderText.bytes(engine.downloadBytes);
+    final failed = error != null;
+    final accent = failed ? context.toneColor(Tone.destructive) : context.colors.primary;
+    return SurfaceCard(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                failed ? LucideIcons.circleAlert : LucideIcons.cloudDownload,
+                size: 18,
+                color: accent,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  failed
+                      ? "The video engine couldn't be downloaded"
+                      : 'Download the video engine to start',
+                  style: text.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            failed
+                ? error!
+                : 'Videos can only be downloaded with the engine: Python for '
+                    "yt-dlp, and FFmpeg. It's a one-time $size download.",
+            style: text.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: onDownload,
+              icon: Icon(failed ? LucideIcons.refreshCw : LucideIcons.download, size: 16),
+              label: Text(failed ? 'Try again' : 'Download ($size)'),
+            ),
+          ),
         ],
       ),
     );

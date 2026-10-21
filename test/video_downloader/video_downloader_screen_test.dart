@@ -37,12 +37,40 @@ class FakeBackend extends VideoDownloaderBackend {
   final jobsById = <String, DownloadJob>{};
   final specs = <JobSpec>[];
 
-  @override
-  Future<BackendStatus> status() async =>
-      const BackendStatus(ready: true, needsSetup: false, hasFfmpeg: true);
+  /// Android's downloaded engine; null like desktop.
+  EngineInfo? engine;
+  int engineDownloads = 0;
+
+  /// Holds the engine download until completed (or cancelled).
+  Completer<void>? holdDownload;
 
   @override
-  Future<void> prepare({void Function(double? progress, String message)? onProgress}) async {}
+  Future<BackendStatus> status() async => BackendStatus(
+        ready: engine?.installed ?? true,
+        needsSetup: !(engine?.installed ?? true),
+        hasFfmpeg: true,
+        engine: engine,
+      );
+
+  @override
+  Future<void> prepare({void Function(double? progress, String message)? onProgress}) async {
+    final e = engine;
+    if (e == null || e.installed) return;
+    engineDownloads++;
+    onProgress?.call(0.25, 'Downloading the video engine: 12 of 50 MB');
+    await holdDownload?.future;
+    engine = EngineInfo(installed: true, downloadBytes: e.downloadBytes, diskBytes: e.diskBytes);
+  }
+
+  @override
+  Future<void> cancelPrepare() async =>
+      holdDownload?.completeError(const DownloaderException('Cancelled', cancelled: true));
+
+  @override
+  Future<void> removeEngine() async {
+    final e = engine!;
+    engine = EngineInfo(installed: false, downloadBytes: e.downloadBytes, diskBytes: e.diskBytes);
+  }
 
   @override
   Future<String?> version() async => '2026.08.19';
@@ -199,6 +227,89 @@ void main() {
     expect(backend.specs.single.outputDir, p.join('/downloads/Explorer Videos', 'A playlist'));
     // The queue is visible beside the panel.
     expect(find.textContaining('42%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  const missingEngine = EngineInfo(installed: false, downloadBytes: 49930835, diskBytes: 119773698);
+
+  testWidgets('engine: asks before downloading it; nothing works without it', (tester) async {
+    backend.engine = missingEngine;
+    await pumpScreen(tester, const Size(390, 844));
+    await tester.tap(find.text('I understand'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Download the video engine?'), findsOneWidget);
+    expect(find.textContaining('50 MB, Wi-Fi recommended'), findsOneWidget);
+    expect(find.text('120 MB'), findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(backend.engineDownloads, 0);
+    expect(find.text('Download the video engine to start'), findsOneWidget);
+
+    // Fetching asks again; agreeing downloads it, then the fetch goes on.
+    await tester.enterText(find.byType(TextField), 'https://example.com/watch/abc');
+    await tester.pump();
+    await tester.tap(find.text('Fetch'));
+    await tester.pumpAndSettle();
+    expect(find.text('Download the video engine?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Download'));
+    await tester.pumpAndSettle();
+    expect(backend.engineDownloads, 1);
+    expect(find.text('Download the video engine to start'), findsNothing);
+    expect(find.text('Test clip'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('engine: the download can be cancelled', (tester) async {
+    backend.engine = missingEngine;
+    backend.holdDownload = Completer<void>();
+    await pumpScreen(tester, const Size(390, 844));
+    await tester.tap(find.text('I understand'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Download'));
+    // A spinner runs while downloading, so no pumpAndSettle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Downloading the video engine: 12 of 50 MB'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Download the video engine to start'), findsOneWidget);
+    expect(find.textContaining("couldn't"), findsNothing, reason: 'cancelling is no error');
+
+    // The card's button downloads without asking again.
+    backend.holdDownload = null;
+    await tester.ensureVisible(find.text('Download (50 MB)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Download (50 MB)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Download the video engine?'), findsNothing);
+    expect(find.text('Download the video engine to start'), findsNothing);
+    expect(backend.engine!.installed, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('settings: the engine can be removed', (tester) async {
+    backend.engine = const EngineInfo(installed: true, downloadBytes: 49930835, diskBytes: 119773698);
+    final controller = VideoDownloaderController.instance;
+    await controller.start();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_app(VideoDownloaderSettingsScreen(controller: controller)));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Video engine'), 300,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('Python and FFmpeg, 120 MB'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Remove'));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove the video engine?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
+    await tester.pumpAndSettle();
+    expect(backend.engine!.installed, isFalse);
+    expect(find.textContaining('Not downloaded'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Download'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
