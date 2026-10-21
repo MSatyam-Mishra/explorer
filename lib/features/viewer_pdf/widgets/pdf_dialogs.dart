@@ -375,7 +375,9 @@ Future<UnsavedChoice?> showUnsavedPdfDialog(BuildContext context) {
       content: const Text('This PDF has changes that have not been saved.'),
       actions: [
         TextButton(
-          style: TextButton.styleFrom(foregroundColor: context.colors.destructive),
+          style: TextButton.styleFrom(
+            foregroundColor: context.colors.destructive,
+          ),
           onPressed: () => Navigator.pop(context, UnsavedChoice.discard),
           child: const Text('Discard'),
         ),

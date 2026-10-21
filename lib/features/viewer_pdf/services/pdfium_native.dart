@@ -33,10 +33,10 @@ pdfium_bindings.PDFium get pdfium =>
 /// them and never answer).
 Future<R> onPdfiumWorker<M, R>(R Function(M message) task, M message) async {
   await PdfrxEntryFunctions.instance.init();
-  final result = await PdfrxEntryFunctions.instance.compute(
-    _guarded<M, R>,
-    (task: task, message: message),
-  );
+  final result = await PdfrxEntryFunctions.instance.compute(_guarded<M, R>, (
+    task: task,
+    message: message,
+  ));
   final error = result.error;
   if (error != null) {
     Error.throwWithStackTrace(error, StackTrace.fromString(result.stack ?? ''));

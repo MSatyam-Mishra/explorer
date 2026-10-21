@@ -23,8 +23,10 @@ Uint8List buildPdf(List<String> objects) {
   for (final o in offsets) {
     out.write('${o.toString().padLeft(10, '0')} 00000 n \n');
   }
-  out.write('trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\n'
-      'startxref\n$xref\n%%EOF\n');
+  out.write(
+    'trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\n'
+    'startxref\n$xref\n%%EOF\n',
+  );
   return latin1.encode(out.toString());
 }
 
@@ -91,54 +93,98 @@ Future<Color> averageColor(Uint8List pdf, PdfRect rect) async {
 void main() {
   setUpAll(() => pdfrxInitialize());
 
-  test('adds, finds, recolours and removes markup and notes in place', () async {
-    var pdf = await onPdfiumWorker(_blankPdf, 0);
-    pdf = await PdfDocumentOps.drawOnPage(pdf, 0, const [
-      TextMark(position: Offset(40, 40), text: 'Highlight me please', fontSize: 20, color: Color(0xFF000000)),
-    ]);
+  test(
+    'adds, finds, recolours and removes markup and notes in place',
+    () async {
+      var pdf = await onPdfiumWorker(_blankPdf, 0);
+      pdf = await PdfDocumentOps.drawOnPage(pdf, 0, const [
+        TextMark(
+          position: Offset(40, 40),
+          text: 'Highlight me please',
+          fontSize: 20,
+          color: Color(0xFF000000),
+        ),
+      ]);
 
-    final doc = await PdfDocument.openData(pdf);
-    final text = await doc.pages.first.loadStructuredText();
-    final start = text.fullText.indexOf('Highlight');
-    final range = PdfPageTextRange(pageText: text, start: start, end: start + 9);
-    final line = range.bounds;
+      final doc = await PdfDocument.openData(pdf);
+      final text = await doc.pages.first.loadStructuredText();
+      final start = text.fullText.indexOf('Highlight');
+      final range = PdfPageTextRange(
+        pageText: text,
+        start: start,
+        end: start + 9,
+      );
+      final line = range.bounds;
 
-    await PdfAnnotationOps.addMarkup(doc, 0, PdfMarkupKind.highlight, [line], const Color(0xFFFFEB3B));
-    final center = PdfPoint((line.left + line.right) / 2, (line.top + line.bottom) / 2);
-    final hit = await PdfAnnotationOps.hitTest(doc, 0, center);
-    expect(hit, isNotNull);
-    expect(hit!.subtype, PdfMarkupKind.highlight.subtype);
-    expect(hit.color.r, 1.0);
+      await PdfAnnotationOps.addMarkup(doc, 0, PdfMarkupKind.highlight, [
+        line,
+      ], const Color(0xFFFFEB3B));
+      final center = PdfPoint(
+        (line.left + line.right) / 2,
+        (line.top + line.bottom) / 2,
+      );
+      final hit = await PdfAnnotationOps.hitTest(doc, 0, center);
+      expect(hit, isNotNull);
+      expect(hit!.subtype, PdfMarkupKind.highlight.subtype);
+      expect(hit.color.r, 1.0);
 
-    var saved = await doc.encodePdf();
-    var color = await averageColor(saved, line);
-    expect(color.b < color.r * 0.8, isTrue, reason: 'yellow highlight: $color');
+      var saved = await doc.encodePdf();
+      var color = await averageColor(saved, line);
+      expect(
+        color.b < color.r * 0.8,
+        isTrue,
+        reason: 'yellow highlight: $color',
+      );
 
-    await PdfAnnotationOps.setColor(doc, hit, const Color(0xFF00BFFF));
-    saved = await doc.encodePdf();
-    color = await averageColor(saved, line);
-    expect(color.b > color.r, isTrue, reason: 'recoloured to blue: $color');
+      await PdfAnnotationOps.setColor(doc, hit, const Color(0xFF00BFFF));
+      saved = await doc.encodePdf();
+      color = await averageColor(saved, line);
+      expect(color.b > color.r, isTrue, reason: 'recoloured to blue: $color');
 
-    await PdfAnnotationOps.addNote(doc, 0, const PdfPoint(300, 380), 'Check this', const Color(0xFFFFEB3B));
-    final note = await PdfAnnotationOps.hitTest(doc, 0, const PdfPoint(305, 375));
-    expect(note?.isNote, isTrue);
-    expect(note?.contents, 'Check this');
-    await PdfAnnotationOps.setContents(doc, note!, 'Checked ✓');
-    expect((await PdfAnnotationOps.hitTest(doc, 0, const PdfPoint(305, 375)))?.contents, 'Checked ✓');
+      await PdfAnnotationOps.addNote(
+        doc,
+        0,
+        const PdfPoint(300, 380),
+        'Check this',
+        const Color(0xFFFFEB3B),
+      );
+      final note = await PdfAnnotationOps.hitTest(
+        doc,
+        0,
+        const PdfPoint(305, 375),
+      );
+      expect(note?.isNote, isTrue);
+      expect(note?.contents, 'Check this');
+      await PdfAnnotationOps.setContents(doc, note!, 'Checked ✓');
+      expect(
+        (await PdfAnnotationOps.hitTest(
+          doc,
+          0,
+          const PdfPoint(305, 375),
+        ))?.contents,
+        'Checked ✓',
+      );
 
-    await PdfAnnotationOps.remove(doc, (await PdfAnnotationOps.hitTest(doc, 0, center))!);
-    expect(await PdfAnnotationOps.hitTest(doc, 0, center), isNull);
-    await doc.dispose();
-  });
+      await PdfAnnotationOps.remove(
+        doc,
+        (await PdfAnnotationOps.hitTest(doc, 0, center))!,
+      );
+      expect(await PdfAnnotationOps.hitTest(doc, 0, center), isNull);
+      await doc.dispose();
+    },
+  );
 
   test('reads and fills text fields, checkboxes and combo boxes', () async {
     var pdf = formPdf();
     var fields = await PdfFormOps.fields(pdf);
-    expect([for (final f in fields) f.type], [
-      PdfFormFieldType.text,
-      PdfFormFieldType.checkbox,
-      PdfFormFieldType.combo,
-    ]);
+    expect(
+      [for (final f in fields) f.type],
+      [
+        PdfFormFieldType.text,
+        PdfFormFieldType.checkbox,
+        PdfFormFieldType.combo,
+      ],
+    );
     final name = fields[0];
     expect((name.name, name.value), ('name', 'Ada'));
     expect(name.bounds.left, 50);

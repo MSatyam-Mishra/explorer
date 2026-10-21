@@ -113,7 +113,11 @@ void main() {
       await settle(tester, rounds: 3);
       await saveScreenshot(tester, 'pdf_dialog_goto_$tag');
       await dismissTop(tester);
-      showPdfPasswordDialog(ctx, fileName: 'Quarterly report.pdf', wrongPassword: true);
+      showPdfPasswordDialog(
+        ctx,
+        fileName: 'Quarterly report.pdf',
+        wrongPassword: true,
+      );
       await settle(tester, rounds: 3);
       await saveScreenshot(tester, 'pdf_dialog_password_$tag');
       await dismissTop(tester);
@@ -135,9 +139,17 @@ void main() {
       await settle(tester, rounds: 3);
       await saveScreenshot(tester, 'pdf_dialog_confirm_$tag');
       await dismissTop(tester);
-      showPdfTextInputDialog(ctx, title: 'Add text', hint: 'Type the text to place on the page', multiline: true);
+      showPdfTextInputDialog(
+        ctx,
+        title: 'Add text',
+        hint: 'Type the text to place on the page',
+        multiline: true,
+      );
       await settle(tester, rounds: 3);
-      await tester.enterText(find.byType(TextField).last, 'Approved — J. Smith');
+      await tester.enterText(
+        find.byType(TextField).last,
+        'Approved — J. Smith',
+      );
       await settle(tester, rounds: 2);
       await saveScreenshot(tester, 'pdf_dialog_text_$tag');
       await dismissTop(tester);
@@ -182,7 +194,12 @@ void main() {
     for (final mode in [ThemeMode.light, ThemeMode.dark]) {
       final encrypted = File(p.join(dir.path, 'Locked.pdf'));
       await tester.runAsync(() => encrypted.writeAsBytes([1, 2, 3]));
-      await pumpViewer(tester, PdfViewerScreen(pdfFile: encrypted), mode: mode, size: const Size(390, 844));
+      await pumpViewer(
+        tester,
+        PdfViewerScreen(pdfFile: encrypted),
+        mode: mode,
+        size: const Size(390, 844),
+      );
       await settle(tester, rounds: 8);
       await saveScreenshot(tester, 'pdf_error_${mode.name}_phone');
     }
@@ -197,7 +214,12 @@ Uint8List _blankPages(int count) {
   try {
     for (var i = 0; i < count; i++) {
       pdfium.FPDF_ClosePage(
-        pdfium.FPDFPage_New(doc.handle, i, samplePageSize.width, samplePageSize.height),
+        pdfium.FPDFPage_New(
+          doc.handle,
+          i,
+          samplePageSize.width,
+          samplePageSize.height,
+        ),
       );
     }
     return doc.save();

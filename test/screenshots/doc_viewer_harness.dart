@@ -128,11 +128,20 @@ final List<List<SampleLine>> samplePages = [
       ),
       for (var p = 0; p < 4; p++)
         for (var l = 0; l < _body.length; l++)
-          SampleLine(_body[(l + p + page) % _body.length], y: 160.0 + p * 92 + l * 18),
+          SampleLine(
+            _body[(l + p + page) % _body.length],
+            y: 160.0 + p * 92 + l * 18,
+          ),
       SampleLine('Highlights', y: 560, size: 15, bold: true),
       for (var l = 0; l < 3; l++)
         SampleLine('•  ${_body[(l + page) % _body.length]}', y: 590.0 + l * 20),
-      SampleLine('${page + 1}', x: 290, y: 800, size: 10, color: const Color(0xFF8C959F)),
+      SampleLine(
+        '${page + 1}',
+        x: 290,
+        y: 800,
+        size: 10,
+        color: const Color(0xFF8C959F),
+      ),
     ],
 ];
 
@@ -145,10 +154,24 @@ Future<void> loadDocumentFontAliases() async {
   final geist = rootBundle.load('packages/shadcn_ui/fonts/Geist[wght].ttf');
   final mono = rootBundle.load('packages/shadcn_ui/fonts/GeistMono[wght].ttf');
   for (final family in const [
-    'Calibri', 'Cambria', 'Arial', 'Helvetica', 'Times New Roman', 'Georgia',
-    'Verdana', 'Segoe UI', 'Aptos', 'Roboto', 'Liberation Sans',
-    'Liberation Serif', 'DejaVu Sans', 'Noto Sans', 'Open Sans', 'serif',
-    'sans-serif', 'Calibri Light',
+    'Calibri',
+    'Cambria',
+    'Arial',
+    'Helvetica',
+    'Times New Roman',
+    'Georgia',
+    'Verdana',
+    'Segoe UI',
+    'Aptos',
+    'Roboto',
+    'Liberation Sans',
+    'Liberation Serif',
+    'DejaVu Sans',
+    'Noto Sans',
+    'Open Sans',
+    'serif',
+    'sans-serif',
+    'Calibri Light',
   ]) {
     await (FontLoader(family)..addFont(geist)).load();
   }

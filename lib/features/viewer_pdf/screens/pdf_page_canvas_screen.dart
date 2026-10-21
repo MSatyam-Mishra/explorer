@@ -992,7 +992,9 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
         for (final size in sizeOptions)
           viewerMenuItem(
             value: size,
-            label: textTool ? '${sizeLabel(size)} text' : '${sizeLabel(size)} line',
+            label: textTool
+                ? '${sizeLabel(size)} text'
+                : '${sizeLabel(size)} line',
             checked: size == currentSize,
           ),
       ],
@@ -1006,7 +1008,9 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                textTool ? LucideIcons.aLargeSmall : LucideIcons.slidersHorizontal,
+                textTool
+                    ? LucideIcons.aLargeSmall
+                    : LucideIcons.slidersHorizontal,
                 size: compact ? iconSize : 16,
                 color: colors.foreground,
               ),
@@ -1015,11 +1019,15 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                 const SizedBox(width: 6),
                 Text(
                   sizeLabel(currentSize),
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colors.foreground,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: colors.foreground),
                 ),
-                Icon(LucideIcons.chevronDown, size: 14, color: colors.mutedForeground),
+                Icon(
+                  LucideIcons.chevronDown,
+                  size: 14,
+                  color: colors.mutedForeground,
+                ),
               ],
             ],
           ),
@@ -1061,7 +1069,11 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    tool(PageCanvasTool.hand, LucideIcons.hand, 'Move and zoom'),
+                    tool(
+                      PageCanvasTool.hand,
+                      LucideIcons.hand,
+                      'Move and zoom',
+                    ),
                     tool(
                       PageCanvasTool.select,
                       LucideIcons.mousePointer2,
@@ -1079,8 +1091,16 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                     if (compact)
                       addMenu
                     else ...[
-                      action(LucideIcons.imagePlus, 'Add image or stamp', _addImage),
-                      action(LucideIcons.signature, 'Add signature', _addSignature),
+                      action(
+                        LucideIcons.imagePlus,
+                        'Add image or stamp',
+                        _addImage,
+                      ),
+                      action(
+                        LucideIcons.signature,
+                        'Add signature',
+                        _addSignature,
+                      ),
                     ],
                     ViewerToolDivider(spacing: gap),
                     IconButton(
@@ -1106,7 +1126,11 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
             ),
             ViewerToolDivider(spacing: gap),
             if (selected is _TextItem)
-              action(LucideIcons.squarePen, 'Edit text', () => _editText(_selected!)),
+              action(
+                LucideIcons.squarePen,
+                'Edit text',
+                () => _editText(_selected!),
+              ),
             if (selected != null)
               action(
                 LucideIcons.trash2,
@@ -1121,6 +1145,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
     );
   }
 }
+
 class _CanvasPainter extends CustomPainter {
   _CanvasPainter({
     required this.items,
@@ -1234,7 +1259,11 @@ class _CanvasPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5,
         );
-        canvas.drawCircle(rect.bottomRight, 8, Paint()..color = const Color(0xFFFFFFFF));
+        canvas.drawCircle(
+          rect.bottomRight,
+          8,
+          Paint()..color = const Color(0xFFFFFFFF),
+        );
         canvas.drawCircle(
           rect.bottomRight,
           8,

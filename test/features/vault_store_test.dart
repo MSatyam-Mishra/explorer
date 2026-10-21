@@ -43,23 +43,25 @@ void main() {
     expect((await store.list()).single.file.readAsStringSync(), 'keep');
   });
 
-  test('restores without overwriting, falling back when the folder is gone',
-      () async {
-    final a = file('a.txt', 'vaulted');
-    final item = await store.add(a);
-    file('a.txt', 'new file with the same name');
+  test(
+    'restores without overwriting, falling back when the folder is gone',
+    () async {
+      final a = file('a.txt', 'vaulted');
+      final item = await store.add(a);
+      file('a.txt', 'new file with the same name');
 
-    final restored = await store.restore(item, fallbackDir: temp.path);
-    expect(p.basename(restored), 'a (1).txt');
-    expect(File(restored).readAsStringSync(), 'vaulted');
-    expect(await store.list(), isEmpty);
+      final restored = await store.restore(item, fallbackDir: temp.path);
+      expect(p.basename(restored), 'a (1).txt');
+      expect(File(restored).readAsStringSync(), 'vaulted');
+      expect(await store.list(), isEmpty);
 
-    final b = file('b.txt', 'b');
-    final itemB = await store.add(b);
-    Directory(p.join(temp.path, 'docs')).deleteSync(recursive: true);
-    final restoredB = await store.restore(itemB, fallbackDir: temp.path);
-    expect(p.dirname(restoredB), temp.path);
-  });
+      final b = file('b.txt', 'b');
+      final itemB = await store.add(b);
+      Directory(p.join(temp.path, 'docs')).deleteSync(recursive: true);
+      final restoredB = await store.restore(itemB, fallbackDir: temp.path);
+      expect(p.dirname(restoredB), temp.path);
+    },
+  );
 
   test('deletes for good', () async {
     final item = await store.add(file('a.txt', 'x'));

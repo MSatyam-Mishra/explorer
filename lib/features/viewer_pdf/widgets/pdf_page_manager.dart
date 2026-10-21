@@ -228,8 +228,12 @@ class _PdfPageManagerState extends State<PdfPageManager> {
     );
     final allSelected = hasSelection && _selected.length == _items.length;
 
-    Widget tool(IconData icon, String tooltip, VoidCallback? onPressed,
-        {bool destructive = false}) {
+    Widget tool(
+      IconData icon,
+      String tooltip,
+      VoidCallback? onPressed, {
+      bool destructive = false,
+    }) {
       return ViewerAction(
         icon: icon,
         tooltip: tooltip,

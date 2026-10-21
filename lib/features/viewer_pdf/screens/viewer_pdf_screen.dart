@@ -239,7 +239,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _fail('The file could not be read.', e);
       return;
     }
-    debugPrint('DBG open read ${_sourceBytes?.length}');
     final PdfProbeResult probe;
     try {
       probe = await PdfDocumentOps.probe(_sourceBytes!);
@@ -247,7 +246,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _fail('This file could not be opened as a PDF.', e);
       return;
     }
-    debugPrint('DBG probe ${probe.status} ${probe.message}');
     if (!mounted) return;
     switch (probe.status) {
       case PdfOpenStatus.needsPassword:
@@ -343,7 +341,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   // ---------------------------------------------------------------------------
 
   void _onViewerReady(PdfDocument document, PdfViewerController controller) {
-    debugPrint("DBG onViewerReady same=${identical(controller, _controller)}");
     if (!identical(controller, _controller)) return;
     final searcher = PdfTextSearcher(controller)..addListener(_onSearchChanged);
     final restore = _restoreMatrix;
@@ -1757,6 +1754,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       params: PdfViewerParams(
         backgroundColor: surround,
         margin: 12,
+        pageDropShadow: const BoxShadow(
+          color: Color(0x29000000),
+          blurRadius: 6,
+          offset: Offset(0, 1),
+        ),
         layoutPages: _singlePage ? _sideBySide : null,
         onViewerReady: _onViewerReady,
         onPageChanged: _onPageChanged,
