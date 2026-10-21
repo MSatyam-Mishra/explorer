@@ -1,6 +1,25 @@
 import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:explorer/features/viewer_pdf/services/pdf_annotation_ops.dart';
+
+/// What a tap or text selection on the page does in edit mode.
+enum PdfAnnotationMode {
+  none,
+  highlight,
+  underline,
+  strikethrough,
+  squiggly,
+  stickyNote;
+
+  /// The markup annotation the mode creates, if it is one.
+  PdfMarkupKind? get markup => switch (this) {
+    highlight => PdfMarkupKind.highlight,
+    underline => PdfMarkupKind.underline,
+    strikethrough => PdfMarkupKind.strikeout,
+    squiggly => PdfMarkupKind.squiggly,
+    _ => null,
+  };
+}
 
 /// Compact toolbar shown in edit mode.
 ///
@@ -39,22 +58,20 @@ class PdfAnnotationToolbar extends StatelessWidget {
   final bool canRedo;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
-  final Annotation? selected;
+  final PdfAnnotationInfo? selected;
   final VoidCallback onDeleteSelected;
   final VoidCallback onEditNote;
   final bool enabled;
 
-  static String? hintFor(PdfAnnotationMode mode, Annotation? selected) {
+  static String? hintFor(PdfAnnotationMode mode, PdfAnnotationInfo? selected) {
     if (selected != null) {
-      return selected.isLocked
-          ? 'This annotation is locked'
-          : 'Annotation selected: change its colour or delete it';
+      return 'Annotation selected: change its colour or delete it';
     }
     return switch (mode) {
-      PdfAnnotationMode.highlight => 'Drag across text to highlight it',
-      PdfAnnotationMode.underline => 'Drag across text to underline it',
-      PdfAnnotationMode.strikethrough => 'Drag across text to strike it out',
-      PdfAnnotationMode.squiggly => 'Drag across text to add a squiggly line',
+      PdfAnnotationMode.highlight => 'Select text to highlight it',
+      PdfAnnotationMode.underline => 'Select text to underline it',
+      PdfAnnotationMode.strikethrough => 'Select text to strike it out',
+      PdfAnnotationMode.squiggly => 'Select text to add a squiggly line',
       PdfAnnotationMode.stickyNote => 'Tap the page where the note goes',
       PdfAnnotationMode.none => null,
     };
@@ -109,13 +126,15 @@ class PdfAnnotationToolbar extends StatelessWidget {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
-      onPressed: enabled && (selection == null || !selection.isLocked)
-          ? onPickColor
-          : null,
+      onPressed: enabled ? onPickColor : null,
       icon: ViewerSwatch(color: color, size: iconSize),
     );
     final children = <Widget>[
-      tool(PdfAnnotationMode.none, LucideIcons.mousePointer2, 'Select / scroll'),
+      tool(
+        PdfAnnotationMode.none,
+        LucideIcons.mousePointer2,
+        'Select / scroll',
+      ),
       tool(PdfAnnotationMode.highlight, LucideIcons.highlighter, 'Highlight'),
       tool(PdfAnnotationMode.underline, LucideIcons.underline, 'Underline'),
       tool(
@@ -123,7 +142,11 @@ class PdfAnnotationToolbar extends StatelessWidget {
         LucideIcons.strikethrough,
         'Strikethrough',
       ),
-      tool(PdfAnnotationMode.squiggly, LucideIcons.spline, 'Squiggly underline'),
+      tool(
+        PdfAnnotationMode.squiggly,
+        LucideIcons.spline,
+        'Squiggly underline',
+      ),
       tool(PdfAnnotationMode.stickyNote, LucideIcons.stickyNote, 'Sticky note'),
       ViewerToolDivider(spacing: compact ? 2 : 4),
       ViewerMenuButton<VoidCallback>(
@@ -139,7 +162,11 @@ class PdfAnnotationToolbar extends StatelessWidget {
             icon: LucideIcons.penTool,
             label: 'Draw on page',
           ),
-          viewerMenuItem(value: onText, icon: LucideIcons.type, label: 'Add text'),
+          viewerMenuItem(
+            value: onText,
+            icon: LucideIcons.type,
+            label: 'Add text',
+          ),
           viewerMenuItem(
             value: onImage,
             icon: LucideIcons.imagePlus,
@@ -158,17 +185,13 @@ class PdfAnnotationToolbar extends StatelessWidget {
     // Always visible on the right, even when the tools scroll.
     final pinned = <Widget>[
       if (selection != null) colorButton,
-      if (selection is StickyNoteAnnotation)
-        action(
-          LucideIcons.squarePen,
-          'Edit note',
-          selection.isLocked ? null : onEditNote,
-        ),
+      if (selection != null && selection.isNote)
+        action(LucideIcons.squarePen, 'Edit note', onEditNote),
       if (selection != null)
         action(
           LucideIcons.trash2,
           'Delete annotation',
-          selection.isLocked ? null : onDeleteSelected,
+          onDeleteSelected,
           destructive: true,
         ),
       action(LucideIcons.undo2, 'Undo', canUndo ? onUndo : null),

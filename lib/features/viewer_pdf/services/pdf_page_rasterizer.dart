@@ -1,99 +1,72 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:path/path.dart' as p;
-// The renderer that backs SfPdfViewer (PdfRenderer/PDFKit/PDFium). Using it
-// directly gives page bitmaps for thumbnails and the page canvas editor
-// without adding another PDF engine to the app.
-import 'package:syncfusion_pdfviewer_platform_interface/pdfviewer_platform_interface.dart';
+import 'package:pdfrx/pdfrx.dart';
 
-/// Renders pages of one PDF to [ui.Image]s.
-///
-/// Requests are serialised (Android's renderer can only open one page at a
-/// time) and recent results are kept in a small cache. Call [close] when done.
+/// Renders pages of one PDF to [ui.Image]s (thumbnails, the page canvas
+/// editor), with a small cache of recent results. Call [close] when done.
 class PdfPageRasterizer {
-  PdfPageRasterizer._(this._documentId, this._tempDir);
+  PdfPageRasterizer._(this._document);
 
-  static int _counter = 0;
   static const _cacheSize = 48;
 
-  final String _documentId;
-  final Directory _tempDir;
+  final PdfDocument _document;
   final LinkedHashMap<String, ui.Image> _cache = LinkedHashMap();
-  Future<void> _queue = Future<void>.value();
   bool _closed = false;
 
   bool get isClosed => _closed;
 
   static Future<PdfPageRasterizer> open(Uint8List bytes) async {
-    final id =
-        'explorer_pdf_${DateTime.now().microsecondsSinceEpoch}_'
-        '${_counter++}';
-    final dir = await Directory.systemTemp.createTemp('pdf_pages_');
-    final file = File(p.join(dir.path, '$id.pdf'));
-    String? pageCount;
-    try {
-      await file.writeAsBytes(bytes, flush: true);
-      pageCount = await PdfViewerPlatform.instance.loadPdfFromFile(
-        file.path,
-        id,
-      );
-    } catch (_) {
-      await _deleteQuietly(dir);
-      rethrow;
+    await pdfrxFlutterInitialize();
+    final document = await PdfDocument.openData(bytes);
+    if (document.pages.isEmpty) {
+      await document.dispose();
+      throw const FormatException('The PDF has no pages');
     }
-    if (pageCount == null || (int.tryParse(pageCount) ?? 0) <= 0) {
-      await _deleteQuietly(dir);
-      throw const FileSystemException(
-        'The page renderer could not open the PDF',
-      );
-    }
-    // Android's PdfRenderer keeps its own file descriptor, so the copy can go
-    // now and isn't left behind if the app is killed. Other platforms may
-    // read the file lazily; their copy is removed in [close].
-    if (Platform.isAndroid) await _deleteQuietly(dir);
-    return PdfPageRasterizer._(id, dir);
+    return PdfPageRasterizer._(document);
   }
 
   /// Renders [pageNumber] (1-based) at [width] x [height] pixels. The caller
   /// owns the returned image and must dispose it. Returns null on failure.
-  Future<ui.Image?> render(int pageNumber, int width, int height) {
+  Future<ui.Image?> render(int pageNumber, int width, int height) async {
     final key = '$pageNumber@${width}x$height';
     final cached = _cache.remove(key);
     if (cached != null) {
       _cache[key] = cached;
-      return Future.value(cached.clone());
+      return cached.clone();
     }
-
-    final completer = Completer<ui.Image?>();
-    _queue = _queue.then((_) async {
-      if (_closed) return completer.complete(null);
+    if (_closed || pageNumber < 1 || pageNumber > _document.pages.length) {
+      return null;
+    }
+    try {
+      final rendered = await _document.pages[pageNumber - 1].render(
+        width: width,
+        height: height,
+        fullWidth: width.toDouble(),
+        fullHeight: height.toDouble(),
+        backgroundColor: 0xFFFFFFFF,
+      );
+      if (rendered == null) return null;
+      final ui.Image image;
       try {
-        final pixels = await PdfViewerPlatform.instance.getPage(
-          pageNumber,
-          width,
-          height,
-          _documentId,
-        );
-        if (pixels == null || _closed) return completer.complete(null);
-        final image = await _decode(pixels, width, height);
-        if (_closed) {
-          image.dispose();
-          return completer.complete(null);
-        }
-        _cache[key] = image;
-        while (_cache.length > _cacheSize) {
-          _cache.remove(_cache.keys.first)?.dispose();
-        }
-        completer.complete(image.clone());
-      } catch (_) {
-        completer.complete(null);
+        image = await rendered.createImage();
+      } finally {
+        rendered.dispose();
       }
-    });
-    return completer.future;
+      if (_closed) {
+        image.dispose();
+        return null;
+      }
+      _cache[key] = image;
+      while (_cache.length > _cacheSize) {
+        _cache.remove(_cache.keys.first)?.dispose();
+      }
+      return image.clone();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> close() async {
@@ -103,30 +76,6 @@ class PdfPageRasterizer {
       image.dispose();
     }
     _cache.clear();
-    try {
-      await _queue;
-      await PdfViewerPlatform.instance.closeDocument(_documentId);
-    } catch (_) {
-      // The renderer may already have released the document.
-    }
-    await _deleteQuietly(_tempDir);
-  }
-
-  static Future<ui.Image> _decode(Uint8List pixels, int width, int height) {
-    final completer = Completer<ui.Image>();
-    ui.decodeImageFromPixels(
-      pixels,
-      width,
-      height,
-      ui.PixelFormat.rgba8888,
-      completer.complete,
-    );
-    return completer.future;
-  }
-
-  static Future<void> _deleteQuietly(Directory dir) async {
-    try {
-      if (await dir.exists()) await dir.delete(recursive: true);
-    } catch (_) {}
+    await _document.dispose();
   }
 }

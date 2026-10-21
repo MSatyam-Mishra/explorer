@@ -60,17 +60,17 @@ dependencies:
   installed_apps: ^2.1.0
   qr_flutter: ^4.1.0
   xml: ^6.5.0
-  syncfusion_flutter_pdfviewer: ^33.2.13
-  syncfusion_flutter_pdf: ^33.2.13
   image: ^4.2.0
   markdown: ^7.3.1
   two_dimensional_scrollables: ^0.5.5
   path: ^1.9.1
-  syncfusion_pdfviewer_platform_interface: ^33.2.15
   pointycastle: ^4.0.0
   device_info_plus: ^12.4.0
   shadcn_ui: ^0.57.2
-  syncfusion_flutter_core: 33.2.15
+  pdfrx: ^2.4.5
+  pdfium_dart: ^0.2.5
+  ffi: ^2.2.0
+  url_launcher: ^6.3.3
   # quick_usb: ^0.4.0
 
 dev_dependencies:

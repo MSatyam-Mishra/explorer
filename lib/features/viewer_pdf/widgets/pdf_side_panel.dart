@@ -1,48 +1,35 @@
 import 'package:explorer/core/services/bookmark_service.dart';
 import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 /// One entry of the document outline (the PDF's own bookmarks).
-class PdfOutlineNode {
-  PdfOutlineNode(this.title, this.bookmark, this.children);
+class PdfOutlineEntry {
+  PdfOutlineEntry(this.title, this.dest, this.children);
 
   final String title;
-  final PdfBookmark bookmark;
-  final List<PdfOutlineNode> children;
+
+  /// Where the entry points; null when it has no target.
+  final pdfrx.PdfDest? dest;
+  final List<PdfOutlineEntry> children;
 
   /// Reads the outline of [document]. Malformed entries are skipped.
-  static List<PdfOutlineNode> read(PdfDocument document) {
-    var budget = 5000;
-    List<PdfOutlineNode> walk(PdfBookmarkBase parent, int depth) {
-      final nodes = <PdfOutlineNode>[];
-      int count;
-      try {
-        count = parent.count;
-      } catch (_) {
-        return nodes;
-      }
-      for (var i = 0; i < count && budget > 0; i++) {
-        try {
-          final bookmark = parent[i];
-          budget--;
-          final title = bookmark.title.trim();
-          nodes.add(
-            PdfOutlineNode(
-              title.isEmpty ? 'Untitled' : title,
-              bookmark,
-              depth < 24 ? walk(bookmark, depth + 1) : const [],
-            ),
-          );
-        } catch (_) {
-          // Skip entries that can't be parsed.
-        }
-      }
-      return nodes;
-    }
-
+  static Future<List<PdfOutlineEntry>> read(pdfrx.PdfDocument document) async {
     try {
-      return walk(document.bookmarks, 0);
+      var budget = 5000;
+      List<PdfOutlineEntry> convert(
+        List<pdfrx.PdfOutlineNode> nodes,
+        int depth,
+      ) => [
+        for (final node in nodes)
+          if (budget-- > 0)
+            PdfOutlineEntry(
+              node.title.trim().isEmpty ? 'Untitled' : node.title.trim(),
+              node.dest,
+              depth < 24 ? convert(node.children, depth + 1) : const [],
+            ),
+      ];
+      return convert(await document.loadOutline(), 0);
     } catch (_) {
       return const [];
     }
@@ -71,8 +58,8 @@ class PdfSidePanel extends StatefulWidget {
   final ValueChanged<int> onTabChanged;
 
   /// Null while the document is loading.
-  final List<PdfOutlineNode>? outline;
-  final ValueChanged<PdfOutlineNode> onOutlineSelected;
+  final List<PdfOutlineEntry>? outline;
+  final ValueChanged<PdfOutlineEntry> onOutlineSelected;
   final List<Bookmark> bookmarks;
   final int currentPage;
 
@@ -186,8 +173,8 @@ class _PdfSidePanelState extends State<PdfSidePanel> {
         message: "This PDF doesn't include a table of contents.",
       );
     }
-    final rows = <(PdfOutlineNode, int, String)>[];
-    void add(List<PdfOutlineNode> nodes, int depth, String prefix) {
+    final rows = <(PdfOutlineEntry, int, String)>[];
+    void add(List<PdfOutlineEntry> nodes, int depth, String prefix) {
       for (var i = 0; i < nodes.length; i++) {
         final key = '$prefix/$i';
         rows.add((nodes[i], depth, key));

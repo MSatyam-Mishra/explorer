@@ -1,11 +1,9 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:syncfusion_pdfviewer_platform_interface/pdfviewer_platform_interface.dart';
 
 import '../support/screenshots.dart';
 import '../support/themed_app.dart';
@@ -139,134 +137,6 @@ final List<List<SampleLine>> samplePages = [
 ];
 
 const samplePageSize = Size(595, 842);
-
-/// RGBA bitmaps of [samplePages] at 2x, keyed by page number (1-based).
-Future<Map<int, (Uint8List, int, int)>> renderSamplePages() async {
-  final out = <int, (Uint8List, int, int)>{};
-  const scale = 2.0;
-  final w = (samplePageSize.width * scale).round();
-  final h = (samplePageSize.height * scale).round();
-  for (var i = 0; i < samplePages.length; i++) {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder)..scale(scale);
-    canvas.drawRect(Offset.zero & samplePageSize, Paint()..color = Colors.white);
-    // A chart-like block so pages aren't text only.
-    if (i.isEven) {
-      final colors = [
-        const Color(0xFF3B82F6),
-        const Color(0xFF22C55E),
-        const Color(0xFFF59E0B),
-        const Color(0xFFEF4444),
-      ];
-      for (var b = 0; b < 4; b++) {
-        final bh = 40.0 + ((b * 37 + i * 13) % 70);
-        canvas.drawRect(
-          Rect.fromLTWH(380.0 + b * 30, 540 - bh + 60, 20, bh),
-          Paint()..color = colors[b],
-        );
-      }
-    }
-    for (final line in samplePages[i]) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: line.text,
-          style: TextStyle(
-            fontFamily: 'packages/shadcn_ui/Geist',
-            fontSize: line.size,
-            fontWeight: line.bold ? FontWeight.w700 : FontWeight.w400,
-            color: line.color,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, Offset(line.x, line.y));
-      tp.dispose();
-    }
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(w, h);
-    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-    out[i + 1] = (data!.buffer.asUint8List(), w, h);
-    image.dispose();
-    picture.dispose();
-  }
-  return out;
-}
-
-/// Nearest-neighbour resize of an RGBA bitmap.
-Uint8List resizeRgba(Uint8List src, int sw, int sh, int dw, int dh) {
-  final out = Uint8List(dw * dh * 4);
-  final src32 = src.buffer.asUint32List(src.offsetInBytes, sw * sh);
-  final out32 = out.buffer.asUint32List();
-  for (var y = 0; y < dh; y++) {
-    final sy = (y * sh ~/ dh) * sw;
-    final row = y * dw;
-    for (var x = 0; x < dw; x++) {
-      out32[row + x] = src32[sy + x * sw ~/ dw];
-    }
-  }
-  return out;
-}
-
-/// Stands in for the native PDF renderer behind SfPdfViewer and
-/// PdfPageRasterizer: every document has the sample pages.
-class FakePdfRenderer extends PdfViewerPlatform {
-  FakePdfRenderer(this.pages);
-
-  final Map<int, (Uint8List, int, int)> pages;
-
-  int get _count => pages.length;
-
-  @override
-  Future<String?> initializePdfRenderer(
-    Uint8List documentBytes,
-    String documentID, [
-    String? password,
-  ]) async => '$_count';
-
-  @override
-  Future<String?> loadPdfFromFile(
-    String path,
-    String documentID, [
-    String? password,
-  ]) async => '$_count';
-
-  @override
-  Future<List?> getPagesHeight(String documentID) async =>
-      List<double>.filled(_count, samplePageSize.height);
-
-  @override
-  Future<List?> getPagesWidth(String documentID) async =>
-      List<double>.filled(_count, samplePageSize.width);
-
-  @override
-  Future<Uint8List?> getPage(
-    int pageNumber,
-    int width,
-    int height,
-    String documentID,
-  ) async {
-    final page = pages[pageNumber] ?? pages[1]!;
-    return resizeRgba(page.$1, page.$2, page.$3, width, height);
-  }
-
-  @override
-  Future<Uint8List?> getTileImage(
-    int pageNumber,
-    double currentScale,
-    double x,
-    double y,
-    double width,
-    double height,
-    String documentID,
-  ) async {
-    final w = (width * currentScale).round();
-    final h = (height * currentScale).round();
-    return Uint8List(w * h * 4)..fillRange(0, w * h * 4, 255);
-  }
-
-  @override
-  Future<void> closeDocument(String documentID) async {}
-}
 
 /// Registers the app's Geist font under the family names documents ask for
 /// (Calibri, Arial, …): the test engine has no system fonts, and unknown

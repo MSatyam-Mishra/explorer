@@ -6,7 +6,9 @@ import 'package:explorer/core/services/bookmark_service.dart';
 import 'package:explorer/features/viewer_office/common/viewer_ui.dart';
 import 'package:explorer/features/viewer_pdf/models/pdf_edit_models.dart';
 import 'package:explorer/features/viewer_pdf/screens/pdf_page_canvas_screen.dart';
+import 'package:explorer/features/viewer_pdf/services/pdf_annotation_ops.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_document_ops.dart';
+import 'package:explorer/features/viewer_pdf/services/pdf_form_ops.dart';
 import 'package:explorer/features/viewer_pdf/services/pdf_page_rasterizer.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_annotation_toolbar.dart';
 import 'package:explorer/features/viewer_pdf/widgets/pdf_dialogs.dart';
@@ -22,13 +24,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// SfPdfViewer's theme lives in syncfusion_flutter_core, which the viewer
-// package depends on but doesn't re-export.
-import 'package:syncfusion_flutter_core/theme.dart';
-import 'package:syncfusion_flutter_pdf/pdf.dart'
-    show PdfDocument, PdfPageRotateAngle, TextSearchOption;
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// PDF viewer and editor: reading, search, outline, bookmarks, annotations,
 /// form filling, drawing/stamps and page organisation.
@@ -80,7 +78,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   ];
 
   final BookmarkService _bookmarkService = BookmarkService();
-  final UndoHistoryController _undoController = UndoHistoryController();
   final GlobalKey _bodyKey = GlobalKey();
   final ValueNotifier<int> _currentPage = ValueNotifier(1);
   final TextEditingController _searchText = TextEditingController();
@@ -100,15 +97,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   String? _password;
   bool _unlocking = false;
   PdfViewerController _controller = PdfViewerController();
-  GlobalKey<SfPdfViewerState> _viewerKey = GlobalKey();
   int _docVersion = 0;
   int _initialPage = 1;
   bool _viewerReady = false;
   int _pageCount = 0;
   PdfDocument? _viewerDocument;
-  List<PdfOutlineNode>? _outline;
+  List<PdfOutlineEntry>? _outline;
+  bool _outlineLoading = false;
 
-  /// Annotation or form edits inside the viewer not yet in [_latestBytes].
+  /// Zoom and scroll position to restore after the viewer reloads.
+  Matrix4? _restoreMatrix;
+
+  /// Interactive form fields of the shown document, by page index.
+  Map<int, List<PdfFormField>> _formFields = const {};
+
+  /// Annotation edits made in the open document not yet in [_latestBytes].
   bool _viewerHasChanges = false;
   bool _dirty = false;
   bool _folderChanged = false;
@@ -133,9 +136,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _searching = false;
   bool _matchCase = false;
   bool _wholeWords = false;
-  PdfTextSearchResult? _searchResult;
+  PdfTextSearcher? _searcher;
   PdfAnnotationMode _annotationMode = PdfAnnotationMode.none;
-  Annotation? _selectedAnnotation;
+  PdfAnnotationInfo? _selectedAnnotation;
+  bool _hasTextSelection = false;
   Color _canvasColor = const Color(0xFFF44336);
   final Map<PdfAnnotationMode, Color> _markupColors = {
     PdfAnnotationMode.highlight: const Color(0xFFFFEB3B),
@@ -153,8 +157,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _undoController.addListener(_onUndoChanged);
-    _configureController(_controller);
     _loadPreferences();
     _loadBookmarks();
     _open();
@@ -169,18 +171,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         _currentPage.value - 1,
       );
     }
-    _undoController.removeListener(_onUndoChanged);
     _rasterizer?.close();
+    _searcher?.dispose();
     _searchText.dispose();
     _searchFocus.dispose();
     _currentPage.dispose();
-    final controller = _controller;
-    final undo = _undoController;
-    // The viewer detaches from these during its own dispose.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.dispose();
-      undo.dispose();
-    });
     super.dispose();
   }
 
@@ -198,8 +193,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       setState(change);
     }
   }
-
-  void _onUndoChanged() => _post(() {});
 
   // ---------------------------------------------------------------------------
   // Loading
@@ -230,10 +223,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     } catch (_) {}
   }
 
-  /// Reads the file and hands it straight to the viewer. The viewer parses
-  /// the document itself; parsing it here first (to check for a password or
-  /// count pages) doubled the work before anything showed. Password-protected
-  /// files are detected from the viewer's load failure instead.
+  /// Reads the file and shows it; password-protected files are unlocked
+  /// first, so the viewer always works on a plain copy.
   Future<void> _open() async {
     if (_loadState != _LoadState.loading) {
       setState(() {
@@ -248,9 +239,25 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _fail('The file could not be read.', e);
       return;
     }
-    final page = await initialPage;
+    debugPrint('DBG open read ${_sourceBytes?.length}');
+    final PdfProbeResult probe;
+    try {
+      probe = await PdfDocumentOps.probe(_sourceBytes!);
+    } catch (e) {
+      _fail('This file could not be opened as a PDF.', e);
+      return;
+    }
+    debugPrint('DBG probe ${probe.status} ${probe.message}');
     if (!mounted) return;
-    _reloadViewer(_sourceBytes!, page: page);
+    switch (probe.status) {
+      case PdfOpenStatus.needsPassword:
+        await _promptPassword();
+      case PdfOpenStatus.invalid:
+        _fail('This file could not be opened as a PDF.', probe.message);
+      case PdfOpenStatus.ok:
+        final page = await initialPage;
+        if (mounted) _reloadViewer(_sourceBytes!, page: page);
+    }
   }
 
   Future<int> _lastReadPage() async {
@@ -331,62 +338,69 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     });
   }
 
-  void _configureController(PdfViewerController controller) {
-    final settings = controller.annotationSettings;
-    settings.highlight.color = _markupColors[PdfAnnotationMode.highlight]!;
-    settings.underline.color = _markupColors[PdfAnnotationMode.underline]!;
-    settings.strikethrough.color =
-        _markupColors[PdfAnnotationMode.strikethrough]!;
-    settings.squiggly.color = _markupColors[PdfAnnotationMode.squiggly]!;
-    settings.stickyNote.color = _markupColors[PdfAnnotationMode.stickyNote]!;
-    settings.isLocked = !_editMode;
-    controller.annotationMode = _editMode
-        ? _annotationMode
-        : PdfAnnotationMode.none;
-  }
-
   // ---------------------------------------------------------------------------
   // Viewer callbacks
   // ---------------------------------------------------------------------------
 
-  void _onDocumentLoaded(PdfDocumentLoadedDetails details) {
+  void _onViewerReady(PdfDocument document, PdfViewerController controller) {
+    debugPrint("DBG onViewerReady same=${identical(controller, _controller)}");
+    if (!identical(controller, _controller)) return;
+    final searcher = PdfTextSearcher(controller)..addListener(_onSearchChanged);
+    final restore = _restoreMatrix;
+    _restoreMatrix = null;
     _post(() {
-      _viewerDocument = details.document;
+      _viewerDocument = document;
       _viewerReady = true;
-      _pageCount = _controller.pageCount;
-      if (_controller.pageNumber > 0) {
-        _currentPage.value = _controller.pageNumber;
-      }
+      _pageCount = document.pages.length;
+      _searcher = searcher;
+      final page = controller.pageNumber;
+      if (page != null) _currentPage.value = page;
     });
+    if (restore != null) {
+      unawaited(controller.goTo(restore, duration: Duration.zero));
+    }
+    _loadFormFields();
     _sweepTempFilesOnce();
   }
 
+  void _onSearchChanged() => _post(() {});
+
+  Future<void> _loadFormFields() async {
+    final bytes = _viewerBytes;
+    final version = _docVersion;
+    if (bytes == null) return;
+    try {
+      final fields = await PdfFormOps.fields(bytes);
+      if (!mounted || version != _docVersion) return;
+      final byPage = <int, List<PdfFormField>>{};
+      for (final field in fields) {
+        if (field.isEditable) (byPage[field.pageIndex] ??= []).add(field);
+      }
+      setState(() => _formFields = byPage);
+    } catch (_) {
+      // No form, or one PDFium can't read: the document still shows.
+    }
+  }
+
   /// The outline is read the first time the side panel is built rather than
-  /// when the document loads; walking a long outline is UI-thread work.
-  List<PdfOutlineNode>? get _outlineIfLoaded {
+  /// when the document loads.
+  List<PdfOutlineEntry>? get _outlineIfLoaded {
     final document = _viewerDocument;
     if (document == null) return null;
-    return _outline ??= PdfOutlineNode.read(document);
-  }
-
-  void _onDocumentLoadFailed(PdfDocumentLoadFailedDetails details) {
-    // 'Empty Password Error' / 'Invalid Password Error': the source file is
-    // encrypted (the viewer is never given a password).
-    if (details.error.endsWith('Password Error') &&
-        identical(_viewerBytes, _sourceBytes)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _promptPassword());
-      return;
+    if (_outline == null && !_outlineLoading) {
+      _outlineLoading = true;
+      final version = _docVersion;
+      PdfOutlineEntry.read(document).then((outline) {
+        if (version != _docVersion) return;
+        _outlineLoading = false;
+        _post(() => _outline = outline);
+      });
     }
-    _post(() {
-      _loadState = _LoadState.error;
-      _errorMessage = details.description.isNotEmpty
-          ? details.description
-          : 'This PDF could not be displayed.';
-    });
+    return _outline;
   }
 
-  void _onPageChanged(PdfPageChangedDetails details) {
-    final page = details.newPageNumber;
+  void _onPageChanged(int? page) {
+    if (page == null) return;
     final phase = SchedulerBinding.instance.schedulerPhase;
     if (phase == SchedulerPhase.persistentCallbacks ||
         phase == SchedulerPhase.midFrameMicrotasks) {
@@ -398,17 +412,32 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
     _lastReadTimer?.cancel();
     _lastReadTimer = Timer(const Duration(milliseconds: 600), () {
-      _bookmarkService.saveLastReadPosition(
-        _bookmarkKey,
-        details.newPageNumber - 1,
-      );
+      _bookmarkService.saveLastReadPosition(_bookmarkKey, page - 1);
     });
   }
 
-  void _markViewerChange([Object? _]) {
-    _viewerHasChanges = true;
-    _redoHistory.clear();
-    if (!_dirty) _post(() => _dirty = true);
+  Future<void> _onLinkTap(PdfLink link) async {
+    final dest = link.dest;
+    if (dest != null) {
+      await _controller.goToDest(dest);
+      return;
+    }
+    final url = link.url;
+    if (url == null || !mounted) return;
+    final open = await showPdfConfirmDialog(
+      context,
+      title: 'Open link?',
+      message: url.toString(),
+      confirmLabel: 'Open',
+    );
+    if (!open) return;
+    try {
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        _showError('No app can open this link');
+      }
+    } catch (e) {
+      _showError('Could not open the link', e);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -417,8 +446,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   /// Current document including annotation/form edits made in the viewer.
   Future<Uint8List> _currentBytes() async {
-    if (_viewerReady && _viewerHasChanges) {
-      final saved = Uint8List.fromList(await _controller.saveDocument());
+    final document = _viewerDocument;
+    if (_viewerReady && _viewerHasChanges && document != null) {
+      final saved = await document.encodePdf();
       _latestBytes = saved;
       _viewerHasChanges = false;
       return saved;
@@ -436,11 +466,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   /// Shows [bytes] in a fresh viewer, keeping the reading position.
-  void _reloadViewer(Uint8List bytes, {int? page}) {
-    final oldController = _controller;
+  void _reloadViewer(Uint8List bytes, {int? page, bool keepPosition = false}) {
     final oldRasterizer = _rasterizer;
     final controller = PdfViewerController();
-    _configureController(controller);
+    _restoreMatrix = keepPosition && _controller.isReady
+        ? _controller.value.clone()
+        : null;
+    _searcher?.dispose();
     setState(() {
       _loadState = _LoadState.ready;
       _errorMessage = null;
@@ -448,23 +480,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _latestBytes = bytes;
       _viewerHasChanges = false;
       _docVersion++;
-      _viewerKey = GlobalKey();
       _controller = controller;
       _initialPage = math.max(1, page ?? _currentPage.value);
       _currentPage.value = _initialPage;
       _viewerReady = false;
       _viewerDocument = null;
       _outline = null;
+      _outlineLoading = false;
+      _formFields = const {};
       _selectedAnnotation = null;
-      _searchResult = null;
+      _hasTextSelection = false;
+      _searcher = null;
       _searching = false;
       _pageMetas = null;
       _rasterizer = null;
     });
     oldRasterizer?.close();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => oldController.dispose(),
-    );
   }
 
   /// Runs a structural edit on the current bytes and reloads the viewer.
@@ -472,6 +503,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     String label,
     Future<Uint8List> Function(Uint8List current) edit, {
     int? targetPage,
+    bool keepPosition = false,
   }) async {
     if (_busy || _latestBytes == null) return false;
     _setBusy(label);
@@ -482,7 +514,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _pushHistory(_history, current);
       _redoHistory.clear();
       _dirty = true;
-      _reloadViewer(next, page: targetPage);
+      _reloadViewer(next, page: targetPage, keepPosition: keepPosition);
       return true;
     } catch (e) {
       _showError('$label failed', e);
@@ -496,17 +528,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     if (mounted) setState(() => _busyLabel = label);
   }
 
-  bool get _canUndo => _undoController.value.canUndo || _history.isNotEmpty;
-  bool get _canRedo => _undoController.value.canRedo || _redoHistory.isNotEmpty;
+  bool get _canUndo => _history.isNotEmpty;
+  bool get _canRedo => _redoHistory.isNotEmpty;
 
   Future<void> _undo() async {
     if (_busy) return;
-    if (_undoController.value.canUndo) {
-      _undoController.undo();
-      _viewerHasChanges = true;
-      setState(() => _dirty = true);
-      return;
-    }
     if (_history.isEmpty) return;
     _setBusy('Undoing…');
     try {
@@ -515,7 +541,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       final previous = _history.removeLast();
       if (!mounted) return;
       _dirty = true;
-      _reloadViewer(previous);
+      _reloadViewer(previous, keepPosition: true);
     } catch (e) {
       _showError('Undo failed', e);
     } finally {
@@ -525,12 +551,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   Future<void> _redo() async {
     if (_busy) return;
-    if (_undoController.value.canRedo) {
-      _undoController.redo();
-      _viewerHasChanges = true;
-      setState(() => _dirty = true);
-      return;
-    }
     if (_redoHistory.isEmpty) return;
     _setBusy('Redoing…');
     try {
@@ -539,7 +559,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       final next = _redoHistory.removeLast();
       if (!mounted) return;
       _dirty = true;
-      _reloadViewer(next);
+      _reloadViewer(next, keepPosition: true);
     } catch (e) {
       _showError('Redo failed', e);
     } finally {
@@ -686,8 +706,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         await for (final entity in Directory.systemTemp.list()) {
           if (entity is! Directory) continue;
           final name = p.basename(entity.path);
-          final ours = name.startsWith('pdf_share') ||
-              name.startsWith('pdf_pages_');
+          final ours =
+              name.startsWith('pdf_share') || name.startsWith('pdf_pages_');
           if (ours && (await entity.stat()).modified.isBefore(cutoff)) {
             await _deleteQuietly(entity);
           }
@@ -902,23 +922,16 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   PdfPageMeta? _metaForPage(int pageIndex) {
     final document = _viewerDocument;
     if (document == null || pageIndex < 0) return null;
-    try {
-      if (pageIndex >= document.pages.count) return null;
-      final page = document.pages[pageIndex];
-      final rotation = switch (page.rotation) {
-        PdfPageRotateAngle.rotateAngle90 => 90,
-        PdfPageRotateAngle.rotateAngle180 => 180,
-        PdfPageRotateAngle.rotateAngle270 => 270,
-        _ => 0,
-      };
-      return PdfPageMeta(
-        width: page.size.width,
-        height: page.size.height,
-        rotation: rotation,
-      );
-    } catch (_) {
-      return null;
-    }
+    if (pageIndex >= document.pages.length) return null;
+    final page = document.pages[pageIndex];
+    final rotation = page.rotation.index * 90;
+    final sideways = rotation == 90 || rotation == 270;
+    // pdfrx reports the displayed (rotated) size.
+    return PdfPageMeta(
+      width: sideways ? page.height : page.width,
+      height: sideways ? page.width : page.height,
+      rotation: rotation,
+    );
   }
 
   Future<void> _openCanvas(PageCanvasTool tool, PageCanvasStart start) async {
@@ -964,26 +977,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   // ---------------------------------------------------------------------------
 
   void _setEditMode(bool on) {
-    final selected = _selectedAnnotation;
-    if (!on && selected != null) _controller.deselectAnnotation(selected);
     setState(() {
       _editMode = on;
       if (!on) {
         _annotationMode = PdfAnnotationMode.none;
         _selectedAnnotation = null;
       }
-      _configureController(_controller);
     });
+    _controller.invalidate();
   }
 
   void _setAnnotationMode(PdfAnnotationMode mode) {
-    final selected = _selectedAnnotation;
-    if (selected != null) _controller.deselectAnnotation(selected);
     setState(() {
       _annotationMode = mode;
       _selectedAnnotation = null;
-      _controller.annotationMode = mode;
     });
+    _controller.invalidate();
   }
 
   Color get _toolbarColor {
@@ -992,47 +1001,259 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     return _markupColors[_annotationMode] ?? _canvasColor;
   }
 
+  /// Runs an in-place change to the open document's annotations, with an
+  /// undo step, and redraws the pages.
+  Future<bool> _changeAnnotations(
+    String failure,
+    Future<void> Function(PdfDocument document) change,
+  ) async {
+    final document = _viewerDocument;
+    if (document == null || _busy) return false;
+    try {
+      final before = await _currentBytes();
+      await change(document);
+      _pushHistory(_history, before);
+      _redoHistory.clear();
+      _viewerHasChanges = true;
+      _controller.forceRepaintAllPageImages();
+      if (mounted) setState(() => _dirty = true);
+      return true;
+    } catch (e) {
+      _showError(failure, e);
+      return false;
+    }
+  }
+
+  /// Marks up the selected text; [kind] defaults to the active tool.
+  Future<void> _markUpSelection([PdfMarkupKind? kind]) async {
+    final markup = kind ?? _annotationMode.markup;
+    if (markup == null || !_viewerReady) return;
+    final mode = switch (markup) {
+      PdfMarkupKind.highlight => PdfAnnotationMode.highlight,
+      PdfMarkupKind.underline => PdfAnnotationMode.underline,
+      PdfMarkupKind.strikeout => PdfAnnotationMode.strikethrough,
+      PdfMarkupKind.squiggly => PdfAnnotationMode.squiggly,
+    };
+    final selection = _controller.textSelectionDelegate;
+    final ranges = await selection.getSelectedTextRanges();
+    if (ranges.isEmpty) return;
+    final ok = await _changeAnnotations('Could not mark up the text', (
+      doc,
+    ) async {
+      for (final range in ranges) {
+        final lines = _lineRects(range);
+        if (lines.isEmpty) continue;
+        await PdfAnnotationOps.addMarkup(
+          doc,
+          range.pageNumber - 1,
+          markup,
+          lines,
+          _markupColors[mode]!,
+        );
+      }
+    });
+    if (ok) await selection.clearTextSelection();
+  }
+
+  /// One rect per line of the characters in [range].
+  static List<PdfRect> _lineRects(PdfPageTextRange range) {
+    final rects = range.pageText.charRects;
+    final lines = <PdfRect>[];
+    PdfRect? line;
+    for (var i = range.start; i < range.end && i < rects.length; i++) {
+      final r = rects[i];
+      if (r.width <= 0 || r.height <= 0) continue;
+      final current = line;
+      final centre = (r.top + r.bottom) / 2;
+      if (current != null &&
+          centre <= current.top &&
+          centre >= current.bottom &&
+          r.left >= current.left - 1) {
+        line = current.merge(r);
+      } else {
+        if (current != null) lines.add(current);
+        line = r;
+      }
+    }
+    if (line != null) lines.add(line);
+    return lines;
+  }
+
+  /// Taps in edit mode: place a note, or select the annotation tapped.
+  bool _onGeneralTap(
+    BuildContext context,
+    PdfViewerController controller,
+    PdfViewerGeneralTapHandlerDetails details,
+  ) {
+    if (!_editMode || details.type != PdfViewerGeneralTapType.tap) {
+      return false;
+    }
+    final hit = controller.getPdfPageHitTestResult(
+      details.documentPosition,
+      useDocumentLayoutCoordinates: true,
+    );
+    if (hit == null) return false;
+    final pageIndex = hit.page.pageNumber - 1;
+    if (_annotationMode == PdfAnnotationMode.stickyNote) {
+      _addNote(pageIndex, hit.offset);
+      return true;
+    }
+    if (_annotationMode == PdfAnnotationMode.none) {
+      _selectAnnotationAt(pageIndex, hit.offset);
+    }
+    return false;
+  }
+
+  Future<void> _addNote(int pageIndex, PdfPoint at) async {
+    final text = await showPdfTextInputDialog(
+      context,
+      title: 'Add note',
+      hint: 'Your note',
+      confirmLabel: 'Add',
+      multiline: true,
+    );
+    if (text == null || text.trim().isEmpty || !mounted) return;
+    await _changeAnnotations(
+      'Could not add the note',
+      (doc) => PdfAnnotationOps.addNote(
+        doc,
+        pageIndex,
+        at,
+        text,
+        _markupColors[PdfAnnotationMode.stickyNote]!,
+      ),
+    );
+  }
+
+  Future<void> _selectAnnotationAt(int pageIndex, PdfPoint at) async {
+    final document = _viewerDocument;
+    if (document == null) return;
+    try {
+      final hit = await PdfAnnotationOps.hitTest(document, pageIndex, at);
+      if (!mounted) return;
+      setState(() => _selectedAnnotation = hit);
+      _controller.invalidate();
+    } catch (_) {}
+  }
+
   Future<void> _pickColor() async {
     final color = await showPdfColorPicker(context, _toolbarColor);
     if (color == null || !mounted) return;
     final selected = _selectedAnnotation;
     if (selected != null) {
-      // Goes through the viewer's undo history and onAnnotationEdited.
-      selected.color = color;
-      setState(() {});
+      final ok = await _changeAnnotations(
+        'Could not change the colour',
+        (doc) => PdfAnnotationOps.setColor(doc, selected, color),
+      );
+      if (ok && mounted) {
+        setState(
+          () => _selectedAnnotation = PdfAnnotationInfo(
+            pageIndex: selected.pageIndex,
+            index: selected.index,
+            subtype: selected.subtype,
+            bounds: selected.bounds,
+            color: color,
+            contents: selected.contents,
+          ),
+        );
+      }
       return;
     }
     setState(() {
       if (_markupColors.containsKey(_annotationMode)) {
         _markupColors[_annotationMode] = color;
-        _configureController(_controller);
       } else {
         _canvasColor = color;
       }
     });
   }
 
-  void _deleteSelectedAnnotation() {
+  Future<void> _deleteSelectedAnnotation() async {
     final selected = _selectedAnnotation;
     if (selected == null) return;
-    _controller.removeAnnotation(selected);
-    setState(() => _selectedAnnotation = null);
+    final ok = await _changeAnnotations(
+      'Could not delete the annotation',
+      (doc) => PdfAnnotationOps.remove(doc, selected),
+    );
+    if (ok && mounted) setState(() => _selectedAnnotation = null);
   }
 
   Future<void> _editSelectedNote() async {
     final note = _selectedAnnotation;
-    if (note is! StickyNoteAnnotation) return;
+    if (note == null || !note.isNote) return;
     final text = await showPdfTextInputDialog(
       context,
       title: 'Edit note',
-      initialText: note.text,
+      initialText: note.contents,
       confirmLabel: 'Save',
       multiline: true,
     );
     if (text == null || !mounted) return;
-    note.text = text;
-    _markViewerChange();
+    await _changeAnnotations(
+      'Could not change the note',
+      (doc) => PdfAnnotationOps.setContents(doc, note, text),
+    );
   }
+
+  // ---------------------------------------------------------------------------
+  // Forms
+  // ---------------------------------------------------------------------------
+
+  Future<void> _editField(PdfFormField field) async {
+    if (_busy) return;
+    Future<Uint8List> Function(Uint8List) edit;
+    switch (field.type) {
+      case PdfFormFieldType.text:
+        final text = await showPdfTextInputDialog(
+          context,
+          title: field.name.isEmpty ? 'Fill in' : _fieldLabel(field.name),
+          initialText: field.value,
+          confirmLabel: 'Done',
+          multiline: field.multiline,
+        );
+        if (text == null || text == field.value) return;
+        edit = (bytes) => PdfFormOps.setText(bytes, field, text);
+      case PdfFormFieldType.checkbox || PdfFormFieldType.radio:
+        edit = (bytes) => PdfFormOps.toggle(bytes, field);
+      case PdfFormFieldType.combo || PdfFormFieldType.list:
+        if (field.options.isEmpty) return;
+        final picked = await showDialog<int>(
+          context: context,
+          builder: (context) => SimpleDialog(
+            title: Text(
+              field.name.isEmpty ? 'Choose' : _fieldLabel(field.name),
+            ),
+            children: [
+              for (var i = 0; i < field.options.length; i++)
+                ViewerListTile(
+                  leading: Icon(
+                    field.selected.contains(i)
+                        ? LucideIcons.circleCheck
+                        : LucideIcons.circle,
+                  ),
+                  title: field.options[i],
+                  onTap: () => Navigator.pop(context, i),
+                ),
+            ],
+          ),
+        );
+        if (picked == null) return;
+        edit = (bytes) => PdfFormOps.select(bytes, field, picked);
+      default:
+        return;
+    }
+    if (!mounted) return;
+    await _runDocumentEdit(
+      'Filling in the form',
+      edit,
+      targetPage: field.pageIndex + 1,
+      keepPosition: true,
+    );
+  }
+
+  /// "invoice.billing_name" → "billing name".
+  static String _fieldLabel(String name) =>
+      name.split('.').last.replaceAll(RegExp(r'[_-]+'), ' ').trim();
 
   // ---------------------------------------------------------------------------
   // Navigation, search, bookmarks
@@ -1050,24 +1271,18 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   void _goToPageIndex(int index) {
     if (!_viewerReady) return;
-    _controller.jumpToPage((index + 1).clamp(1, math.max(1, _pageCount)));
+    _controller.goToPage(
+      pageNumber: (index + 1).clamp(1, math.max(1, _pageCount)),
+    );
     _closeDrawerIfOpen();
   }
 
-  void _openOutlineNode(PdfOutlineNode node) {
+  Future<void> _openOutlineNode(PdfOutlineEntry node) async {
     if (!_viewerReady) return;
-    try {
-      final bookmark = node.bookmark;
-      final hasTarget =
-          bookmark.destination != null ||
-          bookmark.namedDestination?.destination != null;
-      if (hasTarget) {
-        _controller.jumpToBookmark(bookmark);
-        _closeDrawerIfOpen();
-        return;
-      }
-    } catch (_) {
-      // Fall through to the message below.
+    final dest = node.dest;
+    if (dest != null && await _controller.goToDest(dest)) {
+      _closeDrawerIfOpen();
+      return;
     }
     _showMessage('This outline entry has no page to go to');
   }
@@ -1079,7 +1294,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       pageCount: _pageCount,
       currentPage: _currentPage.value,
     );
-    if (page != null && mounted) _controller.jumpToPage(page);
+    if (page != null && mounted) _controller.goToPage(pageNumber: page);
   }
 
   Bookmark? get _bookmarkOnCurrentPage {
@@ -1124,36 +1339,32 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   void _closeSearch() {
-    _searchResult?.clear();
+    _searcher?.resetTextSearch();
     setState(() {
       _searchOpen = false;
-      _searchResult = null;
       _searching = false;
     });
   }
 
   void _submitSearch(String text) {
     final query = text.trim();
-    _searchResult?.clear();
-    if (query.isEmpty || !_viewerReady) {
-      setState(() {
-        _searchResult = null;
-        _searching = false;
-      });
+    final searcher = _searcher;
+    searcher?.resetTextSearch();
+    if (query.isEmpty || !_viewerReady || searcher == null) {
+      setState(() => _searching = false);
       return;
     }
-    final option = _matchCase && _wholeWords
-        ? TextSearchOption.both
-        : _matchCase
-        ? TextSearchOption.caseSensitive
-        : _wholeWords
-        ? TextSearchOption.wholeWords
-        : null;
-    final result = _controller.searchText(query, searchOption: option);
-    setState(() {
-      _searchResult = result;
-      _searching = true;
-    });
+    final escaped = RegExp.escape(query);
+    searcher.startTextSearch(
+      RegExp(
+        _wholeWords ? '\\b$escaped\\b' : escaped,
+        caseSensitive: _matchCase,
+        unicode: true,
+      ),
+      caseInsensitive: !_matchCase,
+      searchImmediately: true,
+    );
+    setState(() => _searching = true);
   }
 
   void _openPanel(int tab) {
@@ -1200,9 +1411,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         setState(() => _nightMode = !_nightMode);
         _savePreference(_prefNightMode, _nightMode);
       case _MenuAction.zoomIn:
-        _controller.zoomLevel = math.min(5, _controller.zoomLevel + 0.5);
+        await _controller.zoomUp();
       case _MenuAction.zoomOut:
-        _controller.zoomLevel = math.max(1, _controller.zoomLevel - 0.5);
+        await _controller.zoomDown();
       case _MenuAction.setPassword:
         final password = await showSetPdfPasswordDialog(context);
         if (password == null || !mounted) return;
@@ -1309,7 +1520,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         ),
         ViewerAction(
           icon: split
-              ? (panelShown ? LucideIcons.panelLeftClose : LucideIcons.panelLeft)
+              ? (panelShown
+                    ? LucideIcons.panelLeftClose
+                    : LucideIcons.panelLeft)
               : LucideIcons.listTree,
           tooltip: 'Outline, bookmarks and pages',
           onPressed: _togglePanel,
@@ -1510,68 +1723,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
-  /// Colours for SfPdfViewer's own chrome (scroll head, page dialog, link
-  /// dialog) from the app tokens, so it reads well in light and dark mode.
-  SfPdfViewerThemeData _viewerTheme(BuildContext context) {
-    final colors = context.colors;
-    final text = Theme.of(context).textTheme;
-    // Night mode inverts the whole viewer, surround included: give it the
-    // colour that inverts to a dark surround.
-    final surround = _nightMode
-        ? _invert(context.isDarkMode ? colors.muted : const Color(0xFF27272A))
-        : ViewerSurface.canvas(context);
-    final title = text.titleLarge?.copyWith(fontSize: 18);
-    final body = text.bodyMedium?.copyWith(color: colors.foreground);
-    final muted = text.bodyMedium?.copyWith(color: colors.mutedForeground);
-    final action = text.labelLarge?.copyWith(color: colors.foreground);
-    final primary = text.labelLarge?.copyWith(color: colors.primary);
-    return SfPdfViewerThemeData(
-      backgroundColor: surround,
-      progressBarColor: colors.primary,
-      scrollHeadStyle: PdfScrollHeadStyle(
-        backgroundColor: colors.popover,
-        pageNumberTextStyle: text.labelMedium?.copyWith(
-          color: colors.popoverForeground,
-        ),
-      ),
-      scrollStatusStyle: PdfScrollStatusStyle(
-        backgroundColor: colors.foreground,
-        pageInfoTextStyle: text.labelMedium?.copyWith(color: colors.background),
-      ),
-      paginationDialogStyle: PdfPaginationDialogStyle(
-        backgroundColor: colors.background,
-        headerTextStyle: title,
-        inputFieldTextStyle: body,
-        hintTextStyle: muted,
-        pageInfoTextStyle: muted,
-        validationTextStyle: text.bodySmall?.copyWith(color: colors.destructive),
-        okTextStyle: primary,
-        cancelTextStyle: action,
-      ),
-      hyperlinkDialogStyle: PdfHyperlinkDialogStyle(
-        backgroundColor: colors.background,
-        headerTextStyle: title,
-        contentTextStyle: muted,
-        openTextStyle: primary,
-        cancelTextStyle: action,
-        closeIconColor: colors.mutedForeground,
-      ),
-      passwordDialogStyle: PdfPasswordDialogStyle(
-        backgroundColor: colors.background,
-        headerTextStyle: title,
-        contentTextStyle: muted,
-        inputFieldTextStyle: body,
-        inputFieldHintTextStyle: muted,
-        inputFieldLabelTextStyle: muted,
-        errorTextStyle: text.bodySmall?.copyWith(color: colors.destructive),
-        openTextStyle: primary,
-        cancelTextStyle: action,
-        closeIconColor: colors.mutedForeground,
-        visibleIconColor: colors.mutedForeground,
-      ),
-    );
-  }
-
   /// [color] through the night-mode matrix (which is its own inverse).
   static Color _invert(Color color) {
     final r = color.r * 255, g = color.g * 255, b = color.b * 255;
@@ -1589,41 +1740,162 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
-  Widget _buildViewer() {
-    return SfPdfViewer.memory(
+  Widget _buildViewer(BuildContext context) {
+    final colors = context.colors;
+    // Night mode inverts the whole viewer, surround included: give it the
+    // colour that inverts to a dark surround.
+    final surround = _nightMode
+        ? _invert(context.isDarkMode ? colors.muted : const Color(0xFF27272A))
+        : ViewerSurface.canvas(context);
+    final selected = _selectedAnnotation;
+    return PdfViewer.data(
       _viewerBytes!,
-      key: _viewerKey,
+      key: ValueKey(_docVersion),
+      sourceName: '${_file.path}#$_docVersion',
       controller: _controller,
-      undoController: _undoController,
       initialPageNumber: _initialPage,
-      pageLayoutMode: _singlePage
-          ? PdfPageLayoutMode.single
-          : PdfPageLayoutMode.continuous,
-      maxZoomLevel: 5,
-      enableDoubleTapZooming: true,
-      enableTextSelection: true,
-      canShowPasswordDialog: false,
-      canShowScrollHead: true,
-      canShowScrollStatus: true,
-      canShowPaginationDialog: true,
-      canShowHyperlinkDialog: true,
-      enableHyperlinkNavigation: true,
-      enableDocumentLinkAnnotation: true,
-      onDocumentLoaded: _onDocumentLoaded,
-      onDocumentLoadFailed: _onDocumentLoadFailed,
-      onPageChanged: _onPageChanged,
-      onAnnotationAdded: _markViewerChange,
-      onAnnotationRemoved: _markViewerChange,
-      onAnnotationEdited: _markViewerChange,
-      onAnnotationSelected: (annotation) =>
-          _post(() => _selectedAnnotation = annotation),
-      onAnnotationDeselected: (annotation) => _post(() {
-        if (identical(_selectedAnnotation, annotation)) {
-          _selectedAnnotation = null;
-        }
-      }),
-      onFormFieldValueChanged: _markViewerChange,
+      params: PdfViewerParams(
+        backgroundColor: surround,
+        margin: 12,
+        layoutPages: _singlePage ? _sideBySide : null,
+        onViewerReady: _onViewerReady,
+        onPageChanged: _onPageChanged,
+        linkHandlerParams: PdfLinkHandlerParams(onLinkTap: _onLinkTap),
+        onGeneralTap: _onGeneralTap,
+        textSelectionParams: PdfTextSelectionParams(
+          onTextSelectionChange: (selection) {
+            final has = selection.hasSelectedText;
+            if (has != _hasTextSelection) _post(() => _hasTextSelection = has);
+          },
+        ),
+        customizeContextMenuItems: (params, items) {
+          if (!params.textSelectionDelegate.hasSelectedText) return;
+          void add(String label, PdfMarkupKind kind) => items.add(
+            ContextMenuButtonItem(
+              label: label,
+              onPressed: () {
+                params.dismissContextMenu();
+                _markUpSelection(kind);
+              },
+            ),
+          );
+          add('Highlight', PdfMarkupKind.highlight);
+          add('Underline', PdfMarkupKind.underline);
+          add('Strike out', PdfMarkupKind.strikeout);
+        },
+        pagePaintCallbacks: [
+          if (_searcher != null) _searcher!.pageTextMatchPaintCallback,
+          if (selected != null)
+            (canvas, pageRect, page) {
+              if (page.pageNumber != selected.pageIndex + 1) return;
+              final rect = selected.bounds
+                  .toRectInDocument(page: page, pageRect: pageRect)
+                  .inflate(3);
+              canvas.drawRRect(
+                RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+                Paint()
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 2
+                  ..color = colors.primary,
+              );
+            },
+        ],
+        pageOverlaysBuilder: _formFields.isEmpty ? null : _formOverlays,
+        viewerOverlayBuilder: (context, size, handleLinkTap) => [
+          // Double tap zooms in (and back out at the largest zoom).
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onDoubleTap: () => _controller.zoomUp(loop: true),
+            child: IgnorePointer(
+              child: SizedBox(width: size.width, height: size.height),
+            ),
+          ),
+          PdfViewerScrollThumb(
+            controller: _controller,
+            orientation: _singlePage
+                ? ScrollbarOrientation.bottom
+                : ScrollbarOrientation.right,
+            thumbSize: const Size(44, 26),
+            thumbBuilder: (context, thumbSize, pageNumber, controller) =>
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colors.popover,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: colors.border),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x22000000), blurRadius: 6),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${pageNumber ?? ''}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: colors.popoverForeground,
+                      ),
+                    ),
+                  ),
+                ),
+          ),
+        ],
+        loadingBannerBuilder: (context, bytesDownloaded, totalBytes) =>
+            const _PageSkeleton(),
+        errorBannerBuilder: (context, error, stackTrace, documentRef) =>
+            ViewerMessage(
+              icon: LucideIcons.fileX,
+              destructive: true,
+              title: "Couldn't show this PDF",
+              message: '$error',
+            ),
+      ),
     );
+  }
+
+  /// Pages side by side (the "continuous scroll" setting off).
+  static PdfPageLayout _sideBySide(
+    List<PdfPage> pages,
+    PdfViewerParams params,
+  ) {
+    final height =
+        pages.fold(0.0, (h, page) => math.max(h, page.height)) +
+        params.margin * 2;
+    final layouts = <Rect>[];
+    var x = params.margin;
+    for (final page in pages) {
+      layouts.add(
+        Rect.fromLTWH(x, (height - page.height) / 2, page.width, page.height),
+      );
+      x += page.width + params.margin;
+    }
+    return PdfPageLayout(pageLayouts: layouts, documentSize: Size(x, height));
+  }
+
+  /// Tappable boxes over the form fields of [page].
+  List<Widget> _formOverlays(
+    BuildContext context,
+    Rect pageRect,
+    PdfPage page,
+  ) {
+    final fields = _formFields[page.pageNumber - 1];
+    if (fields == null) return const [];
+    final highlight = context.colors.primary.withValues(alpha: 0.08);
+    return [
+      for (final field in fields)
+        Positioned.fromRect(
+          rect: field.bounds.toRect(page: page, scaledPageSize: pageRect.size),
+          child: Material(
+            color: highlight,
+            child: InkWell(
+              onTap: _busy ? null : () => _editField(field),
+              child: Tooltip(
+                message: field.name.isEmpty
+                    ? 'Form field'
+                    : _fieldLabel(field.name),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+        ),
+    ];
   }
 
   Widget _buildViewerArea(BuildContext context) {
@@ -1646,10 +1918,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               colorFilter: ColorFilter.matrix(
                 _nightMode ? _nightMatrix : _identityMatrix,
               ),
-              child: SfPdfViewerTheme(
-                data: _viewerTheme(context),
-                child: _buildViewer(),
-              ),
+              child: _buildViewer(context),
             ),
           ),
           // Until the first document is shown (the viewer has its own
@@ -1669,7 +1938,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   child: PdfSearchBar(
                     controller: _searchText,
                     focusNode: _searchFocus,
-                    result: _searchResult,
+                    result: _searcher,
                     searching: _searching,
                     matchCase: _matchCase,
                     wholeWords: _wholeWords,
@@ -1679,9 +1948,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                         _matchCase = matchCase ?? _matchCase;
                         _wholeWords = wholeWords ?? _wholeWords;
                       });
-                      if (_searchResult != null) {
-                        _submitSearch(_searchText.text);
-                      }
+                      if (_searching) _submitSearch(_searchText.text);
                     },
                     onClose: _closeSearch,
                   ),
@@ -1699,6 +1966,25 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   semanticsLabel:
                       'Page $page of $_pageCount. Tap to go to a page',
                   onTap: _showGoToPage,
+                ),
+              ),
+            ),
+          if (_editMode && _hasTextSelection && _annotationMode.markup != null)
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: bottom + 8 + toolbarSpace,
+              child: Center(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : () => _markUpSelection(),
+                  icon: const Icon(LucideIcons.check, size: 16),
+                  label: Text(switch (_annotationMode) {
+                    PdfAnnotationMode.underline => 'Underline selection',
+                    PdfAnnotationMode.strikethrough => 'Strike out selection',
+                    PdfAnnotationMode.squiggly =>
+                      'Squiggly-underline selection',
+                    _ => 'Highlight selection',
+                  }),
                 ),
               ),
             ),
@@ -1756,7 +2042,10 @@ class _PageSkeleton extends StatelessWidget {
       color: ViewerSurface.canvas(context),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final width = math.max(0.0, math.min(constraints.maxWidth - 24, 760.0));
+          final width = math.max(
+            0.0,
+            math.min(constraints.maxWidth - 24, 760.0),
+          );
           return ClipRect(
             child: Stack(
               children: [
