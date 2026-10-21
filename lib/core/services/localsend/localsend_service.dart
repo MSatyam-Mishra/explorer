@@ -114,6 +114,7 @@ class LsService {
   String? serverError;
   List<String> localAddresses = const [];
   Timer? _networkTimer;
+  int _ticks = 0;
   bool _running = false;
 
   Stream<void> get changes => _changes.stream;
@@ -148,9 +149,10 @@ class LsService {
     _discoverySub = discovery.changes.listen((_) => _emit());
     await discovery.start();
     localAddresses = await lsLocalAddresses();
+    _ticks = 0;
     _networkTimer = Timer.periodic(
       const Duration(seconds: 5),
-      (_) => unawaited(onNetworkChanged()),
+      (_) => unawaited(_tick()),
     );
     _emit();
     unawaited(discovery.refresh(clearList: false));
@@ -226,6 +228,20 @@ class LsService {
     await server.stop();
     await _startServer();
     unawaited(discovery.announce());
+  }
+
+  /// Every 5 s: watch the network. While nothing has been found, announce
+  /// again every 15 s (the other device may have started after us and
+  /// missed our announcement) and rescan the subnet every 60 s.
+  Future<void> _tick() async {
+    _ticks++;
+    await onNetworkChanged();
+    if (!_running || discovery.devices.isNotEmpty) return;
+    if (_ticks % 12 == 0) {
+      unawaited(discovery.scan());
+    } else if (_ticks % 3 == 0) {
+      unawaited(discovery.announce());
+    }
   }
 
   Future<void> onNetworkChanged() async {

@@ -231,6 +231,18 @@ class _DevicesSection extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    "Can't see it? "
+                    '${controller.localAddresses.isEmpty ? '' : 'This device is ${controller.localAddresses.first}. '}'
+                    'On Windows, allow LocalSend through the firewall for '
+                    'private networks (Windows Security → Firewall → Allow an '
+                    'app). Guest Wi-Fi often blocks devices from seeing each '
+                    'other. You can also add a device by its IP.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
