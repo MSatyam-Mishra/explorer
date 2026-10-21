@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 // The renderer that backs SfPdfViewer (PdfRenderer/PDFKit/PDFium). Using it
 // directly gives page bitmaps for thumbnails and the page canvas editor
 // without adding another PDF engine to the app.
-// ignore: depend_on_referenced_packages
 import 'package:syncfusion_pdfviewer_platform_interface/pdfviewer_platform_interface.dart';
 
 /// Renders pages of one PDF to [ui.Image]s.

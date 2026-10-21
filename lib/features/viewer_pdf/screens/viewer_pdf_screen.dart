@@ -25,7 +25,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // SfPdfViewer's theme lives in syncfusion_flutter_core, which the viewer
 // package depends on but doesn't re-export.
-// ignore: depend_on_referenced_packages
 import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart'
     show PdfDocument, PdfPageRotateAngle, TextSearchOption;

@@ -89,27 +89,35 @@ abstract final class AppTheme {
             fontWeight: FontWeight.w600,
             color: c.foreground,
           ),
+          // Geist is set tight; Material's default tracking (up to 0.5)
+          // would also leak into every TextField.
           bodyLarge: base.textTheme.bodyLarge?.copyWith(
             fontSize: 16,
+            letterSpacing: 0,
             color: c.foreground,
           ),
           bodyMedium: base.textTheme.bodyMedium?.copyWith(
             fontSize: 14,
+            letterSpacing: 0,
             color: c.foreground,
           ),
           bodySmall: base.textTheme.bodySmall?.copyWith(
             fontSize: 12,
+            letterSpacing: 0,
             color: c.mutedForeground,
           ),
           labelLarge: base.textTheme.labelLarge?.copyWith(
             fontSize: 14,
+            letterSpacing: 0,
             fontWeight: FontWeight.w500,
           ),
           labelMedium: base.textTheme.labelMedium?.copyWith(
             fontSize: 12,
+            letterSpacing: 0,
             fontWeight: FontWeight.w500,
             color: c.mutedForeground,
           ),
+          labelSmall: base.textTheme.labelSmall?.copyWith(letterSpacing: 0),
         );
 
     ButtonStyle buttonStyle({
@@ -144,10 +152,23 @@ abstract final class AppTheme {
           textStyle: WidgetStatePropertyAll(text.labelLarge),
         );
 
-    final outlined = OutlineInputBorder(
-      borderRadius: control,
-      borderSide: BorderSide(color: c.input),
-    );
+    // One state-aware border (no enabled/focused overrides), so fields that
+    // ask for no border, e.g. InputDecoration.collapsed, really get none.
+    final fieldBorder = WidgetStateInputBorder.resolveWith((states) {
+      final error = states.contains(WidgetState.error);
+      final focused = states.contains(WidgetState.focused);
+      final color = error
+          ? c.destructive
+          : focused
+              ? c.ring
+              : states.contains(WidgetState.disabled)
+                  ? c.input.withValues(alpha: 0.5)
+                  : c.input;
+      return OutlineInputBorder(
+        borderRadius: control,
+        borderSide: BorderSide(color: color, width: focused ? 2 : 1),
+      );
+    });
 
     return base.copyWith(
       colorScheme: scheme,
@@ -225,7 +246,6 @@ abstract final class AppTheme {
       ),
       listTileTheme: ListTileThemeData(
         iconColor: c.foreground,
-        textColor: c.foreground,
         selectedColor: c.accentForeground,
         selectedTileColor: c.accent,
         titleTextStyle: text.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
@@ -248,20 +268,7 @@ abstract final class AppTheme {
         helperStyle: text.bodySmall,
         prefixIconColor: c.mutedForeground,
         suffixIconColor: c.mutedForeground,
-        border: outlined,
-        enabledBorder: outlined,
-        disabledBorder: outlined.copyWith(
-          borderSide: BorderSide(color: c.input.withValues(alpha: 0.5)),
-        ),
-        focusedBorder: outlined.copyWith(
-          borderSide: BorderSide(color: c.ring, width: 2),
-        ),
-        errorBorder: outlined.copyWith(
-          borderSide: BorderSide(color: c.destructive),
-        ),
-        focusedErrorBorder: outlined.copyWith(
-          borderSide: BorderSide(color: c.destructive, width: 2),
-        ),
+        border: fieldBorder,
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: buttonStyle(background: c.primary, foreground: c.primaryForeground),
@@ -354,11 +361,15 @@ abstract final class AppTheme {
       popupMenuTheme: PopupMenuThemeData(
         color: c.popover,
         surfaceTintColor: Colors.transparent,
-        elevation: 6,
-        shadowColor: Colors.black.withValues(alpha: dark ? 0.5 : 0.12),
+        elevation: 3,
+        shadowColor: Colors.black.withValues(alpha: dark ? 0.4 : 0.08),
         textStyle: text.bodyMedium?.copyWith(color: c.popoverForeground),
-        labelTextStyle: WidgetStatePropertyAll(
-          text.bodyMedium?.copyWith(color: c.popoverForeground),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (s) => text.bodyMedium?.copyWith(
+            color: s.contains(WidgetState.disabled)
+                ? c.mutedForeground.withValues(alpha: 0.6)
+                : c.popoverForeground,
+          ),
         ),
         shape: RoundedRectangleBorder(
           borderRadius: control,
@@ -369,7 +380,10 @@ abstract final class AppTheme {
         style: MenuStyle(
           backgroundColor: WidgetStatePropertyAll(c.popover),
           surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-          elevation: const WidgetStatePropertyAll(6),
+          elevation: const WidgetStatePropertyAll(3),
+          shadowColor: WidgetStatePropertyAll(
+            Colors.black.withValues(alpha: dark ? 0.4 : 0.08),
+          ),
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(
               borderRadius: control,
@@ -412,7 +426,11 @@ abstract final class AppTheme {
         waitDuration: const Duration(milliseconds: 400),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStatePropertyAll(c.background),
+        thumbColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) || !dark
+              ? c.background
+              : c.mutedForeground,
+        ),
         trackColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected) ? c.primary : c.input,
         ),
@@ -436,6 +454,7 @@ abstract final class AppTheme {
         activeTrackColor: c.primary,
         inactiveTrackColor: c.secondary,
         thumbColor: c.background,
+        thumbShape: _RingThumbShape(ring: c.primary),
         overlayColor: c.primary.withValues(alpha: 0.12),
         trackHeight: 6,
         valueIndicatorColor: c.primary,
@@ -498,6 +517,49 @@ abstract final class AppTheme {
         shape: const Border(),
         collapsedShape: const Border(),
       ),
+    );
+  }
+}
+
+/// shadcn slider thumb: a background-coloured disc with a primary ring.
+class _RingThumbShape extends SliderComponentShape {
+  const _RingThumbShape({required this.ring});
+
+  final Color ring;
+  static const double _radius = 10;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size.fromRadius(_radius);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final canvas = context.canvas;
+    canvas.drawCircle(
+      center,
+      _radius,
+      Paint()..color = sliderTheme.thumbColor ?? Colors.white,
+    );
+    canvas.drawCircle(
+      center,
+      _radius - 1,
+      Paint()
+        ..color = ring.withValues(alpha: enableAnimation.value < 1 ? 0.5 : 1)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
     );
   }
 }

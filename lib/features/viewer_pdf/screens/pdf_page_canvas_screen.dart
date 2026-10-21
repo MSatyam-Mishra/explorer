@@ -927,8 +927,9 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
   Widget _buildToolbar(BuildContext context) {
     final colors = context.colors;
     final compact = MediaQuery.sizeOf(context).width < 480;
-    final size = compact ? 36.0 : 40.0;
+    final size = compact ? 34.0 : 40.0;
     final iconSize = compact ? 18.0 : 20.0;
+    final gap = compact ? 2.0 : 4.0;
     final selected = _selected != null && _selected! < _items.length
         ? _items[_selected!]
         : null;
@@ -997,28 +998,53 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
       ],
       child: SizedBox(
         height: size,
+        width: compact ? size : null,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 0 : 8),
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 textTool ? LucideIcons.aLargeSmall : LucideIcons.slidersHorizontal,
-                size: 16,
+                size: compact ? iconSize : 16,
                 color: colors.foreground,
               ),
-              const SizedBox(width: 6),
-              Text(
-                sizeLabel(currentSize),
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.foreground,
+              // Phones: the size shows in the menu.
+              if (!compact) ...[
+                const SizedBox(width: 6),
+                Text(
+                  sizeLabel(currentSize),
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colors.foreground,
+                  ),
                 ),
-              ),
-              Icon(LucideIcons.chevronDown, size: 14, color: colors.mutedForeground),
+                Icon(LucideIcons.chevronDown, size: 14, color: colors.mutedForeground),
+              ],
             ],
           ),
         ),
       ),
+    );
+
+    final addMenu = ViewerMenuButton<VoidCallback>(
+      tooltip: 'Add to page',
+      icon: LucideIcons.plus,
+      size: size,
+      minMenuWidth: 200,
+      onSelected: (action) => action(),
+      itemBuilder: (context) => [
+        viewerMenuItem(
+          value: _addImage,
+          icon: LucideIcons.imagePlus,
+          label: 'Add image or stamp',
+        ),
+        viewerMenuItem(
+          value: _addSignature,
+          icon: LucideIcons.signature,
+          label: 'Add signature',
+        ),
+      ],
     );
 
     return AppPanel(
@@ -1049,10 +1075,14 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                     ),
                     tool(PageCanvasTool.eraser, LucideIcons.eraser, 'Eraser'),
                     tool(PageCanvasTool.text, LucideIcons.type, 'Text'),
-                    const ViewerToolDivider(),
-                    action(LucideIcons.imagePlus, 'Add image or stamp', _addImage),
-                    action(LucideIcons.signature, 'Add signature', _addSignature),
-                    const ViewerToolDivider(),
+                    ViewerToolDivider(spacing: gap),
+                    if (compact)
+                      addMenu
+                    else ...[
+                      action(LucideIcons.imagePlus, 'Add image or stamp', _addImage),
+                      action(LucideIcons.signature, 'Add signature', _addSignature),
+                    ],
+                    ViewerToolDivider(spacing: gap),
                     IconButton(
                       tooltip: 'Colour',
                       constraints: BoxConstraints.tightFor(
@@ -1061,6 +1091,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                       ),
                       padding: EdgeInsets.zero,
                       style: IconButton.styleFrom(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -1073,7 +1104,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
                 ),
               ),
             ),
-            const ViewerToolDivider(),
+            ViewerToolDivider(spacing: gap),
             if (selected is _TextItem)
               action(LucideIcons.squarePen, 'Edit text', () => _editText(_selected!)),
             if (selected != null)

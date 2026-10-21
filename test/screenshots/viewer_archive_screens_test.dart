@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:explorer/features/viewer_archive/screens/archive_viewer_screen.dart';
 import 'package:explorer/features/viewer_comic/screens/comic_viewer.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
@@ -89,6 +90,14 @@ void main() {
     await tester.tap(find.byTooltip('Extract all'));
     await settle(tester, rounds: 10);
     await shot.shot('archive_extract_sheet');
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+
+    await tester.tap(find.byTooltip('Search in archive'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'dart');
+    await settle(tester);
+    await shot.shot('archive_search');
   });
 
   viewerShots('comic viewer', (tester, shot) async {

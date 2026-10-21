@@ -329,8 +329,16 @@ class _HexViewerScreenState extends State<HexViewerScreen> {
               ),
               const SizedBox(width: 8),
               const StatusBadge('Read-only', icon: LucideIcons.lock),
-              const Spacer(),
-              Text('$hexLength · $rows rows', style: style),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '$hexLength · $rows rows',
+                  style: style,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                ),
+              ),
             ],
           ),
         ),

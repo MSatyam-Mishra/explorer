@@ -106,6 +106,7 @@ class PdfAnnotationToolbar extends StatelessWidget {
       constraints: BoxConstraints.tightFor(width: size, height: size),
       padding: EdgeInsets.zero,
       style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       onPressed: enabled && (selection == null || !selection.isLocked)
