@@ -1,6 +1,7 @@
 // FILE PATH: lib/main.dart
 
 import 'package:explorer/core/app/app_bloc_observer.dart';
+import 'package:explorer/core/app_licenses.dart';
 import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/services/incoming_files.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_licenses.dart';
@@ -21,6 +22,7 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   Bloc.observer = const AppBlocObserver();
+  registerAppLicenses();
   if (kVideoDownloaderEnabled) registerVideoDownloaderLicenses();
 
   // Launched from another app ("Open with" a file, or "Share" a link): go

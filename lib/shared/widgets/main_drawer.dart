@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/core/app_licenses.dart';
 import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/platform/windows_locations.dart';
@@ -126,6 +127,18 @@ class MainDrawerContent extends StatelessWidget {
                 icon: LucideIcons.usb,
                 label: 'USB boot',
                 onTap: () => _push(context, const UsbBootScreen()),
+              ),
+              AppSidebarItem(
+                icon: LucideIcons.info,
+                label: 'About and licences',
+                onTap: () {
+                  dismissDrawer(context);
+                  showLicensePage(
+                    context: context,
+                    applicationName: 'Explorer',
+                    applicationLegalese: appLegalese,
+                  );
+                },
               ),
             ],
           ),

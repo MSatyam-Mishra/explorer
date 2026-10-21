@@ -221,4 +221,21 @@ void main() {
       }
     },
   );
+
+  test('embeds a system font once for non-Western text', () async {
+    final pdf = await makePdf([300]);
+    if (!PdfDocumentOps.canEmbedText('Привет')) return; // No system font.
+    final out = await PdfDocumentOps.drawOnPage(pdf, 0, const [
+      TextMark(position: Offset(20, 20), text: 'Привет, мир', fontSize: 14, color: Color(0xFF000000)),
+      TextMark(position: Offset(20, 60), text: 'Ελληνικά', fontSize: 14, color: Color(0xFF000000)),
+      TextMark(position: Offset(20, 100), text: '“Quotes” – fine • ok', fontSize: 14, color: Color(0xFF000000)),
+    ]);
+    final text = await pageText(out, 0);
+    expect(text, contains('Привет'));
+    expect(text, contains('Ελληνικά'));
+    expect(text, contains('“Quotes” – fine'));
+    // One copy of the font, not one per text box.
+    final fontSize = 2 * 1024 * 1024;
+    expect(out.length, lessThan(fontSize));
+  });
 }

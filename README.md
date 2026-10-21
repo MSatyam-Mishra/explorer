@@ -41,8 +41,6 @@ This is an independent implementation of the protocol written from its specifica
 
 ## Video downloader (yt-dlp)
 
-> **Not in the release APKs yet.** The downloader bundles GPL-3.0 components (youtubedl-android and FFmpeg) and adds about 54 MB per APK, so published builds are made without it (`python tool/build_release.py --without-video-downloader`). Build from source to try it.
-
 Download videos or audio from the [many sites yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md). It is the same engine that [VidBee](https://github.com/nexmoe/VidBee) uses on the desktop.
 
 - In a browser or video app, tap **Share → Download video**. Or open **Menu → Tools → Video downloader** and paste a link.
@@ -63,7 +61,7 @@ flutter pub get
 flutter run
 ```
 
-Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are built into `build/release/v<version>/`. Add `--without-video-downloader` to leave the downloader out:
+Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are built into `build/release/v<version>/`. The video downloader adds about 54 MB per APK; add `--without-video-downloader` for a smaller build without it:
 
 ```sh
 python tool/build_release.py
@@ -97,6 +95,14 @@ python tool/generate_file_icon_catalog.py
 | [Python](https://www.python.org/) (bundled on Android) | Runs yt-dlp | PSF-2.0 |
 | [koni_archive](https://github.com/zenbaku/koni_archive) | RAR and 7z decoding (patched copy in `third_party/koni_rar`) | MIT |
 | [three.js](https://threejs.org/) | 3D model viewer | MIT |
-| [Syncfusion Flutter PDF](https://pub.dev/packages/syncfusion_flutter_pdfviewer) | PDF viewer and editor | Syncfusion license |
+| [pdfrx](https://github.com/espresso3389/pdfrx) | PDF viewer | MIT |
+| [PDFium](https://pdfium.googlesource.com/pdfium/) | PDF rendering, editing, forms and annotations | BSD-3-Clause |
 
-The full list, with every Dart package's license, is under Licenses inside the app.
+The full list, with every Dart package's license, is under **Menu → About and licences** in the app.
+
+## License
+
+Explorer is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License](LICENSE), version 3 or (at your option) any later version. It is distributed in the hope that it will be useful, but without any warranty; see the license for details.
+
+Third-party components keep their own licenses (listed above, and under **Menu → About and licences** in the app).
+

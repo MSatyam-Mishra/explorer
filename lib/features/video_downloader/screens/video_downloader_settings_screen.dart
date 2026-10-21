@@ -8,6 +8,7 @@ import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:explorer/core/app_licenses.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -20,11 +21,15 @@ class VideoDownloaderSettingsScreen extends StatefulWidget {
   final VideoDownloaderController controller;
 
   @override
-  State<VideoDownloaderSettingsScreen> createState() => _VideoDownloaderSettingsScreenState();
+  State<VideoDownloaderSettingsScreen> createState() =>
+      _VideoDownloaderSettingsScreenState();
 }
 
-class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsScreen> {
-  late final _template = TextEditingController(text: _c.settings.filenameTemplate);
+class _VideoDownloaderSettingsScreenState
+    extends State<VideoDownloaderSettingsScreen> {
+  late final _template = TextEditingController(
+    text: _c.settings.filenameTemplate,
+  );
   late final _langs = TextEditingController(text: _c.settings.subtitleLangs);
 
   VideoDownloaderController get _c => widget.controller;
@@ -36,7 +41,8 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
   @override
   void initState() {
     super.initState();
-    if (_c.engineState == EngineState.ready && _c.ytDlpVersion == null) _c.refreshVersion();
+    if (_c.engineState == EngineState.ready && _c.ytDlpVersion == null)
+      _c.refreshVersion();
   }
 
   @override
@@ -54,11 +60,15 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
     if (path == null || !mounted) return;
     if (!await _c.backend.canWrite(path)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(Platform.isAndroid
-            ? "Explorer can't write to that folder. Allow Explorer to manage all files, or pick another folder."
-            : "Explorer can't write to that folder."),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            Platform.isAndroid
+                ? "Explorer can't write to that folder. Allow Explorer to manage all files, or pick another folder."
+                : "Explorer can't write to that folder.",
+          ),
+        ),
+      );
       return;
     }
     _set(_s.copyWith(outputDir: path));
@@ -68,11 +78,15 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
     final messenger = ScaffoldMessenger.of(context);
     try {
       final r = await _c.updateYtDlp();
-      messenger.showSnackBar(SnackBar(
-        content: Text(r.updated
-            ? 'yt-dlp updated to ${r.version}'
-            : 'yt-dlp is up to date (${r.version ?? 'unknown version'})'),
-      ));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            r.updated
+                ? 'yt-dlp updated to ${r.version}'
+                : 'yt-dlp is up to date (${r.version ?? 'unknown version'})',
+          ),
+        ),
+      );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Update failed: $e')));
     }
@@ -98,8 +112,12 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
               _card([
                 ListTile(
                   leading: const Icon(LucideIcons.folderDown),
-                  title: Text(_c.outputDir.isEmpty ? 'Default folder' : _c.outputDir),
-                  subtitle: Text(_s.outputDir == null ? 'Default folder' : 'Custom folder'),
+                  title: Text(
+                    _c.outputDir.isEmpty ? 'Default folder' : _c.outputDir,
+                  ),
+                  subtitle: Text(
+                    _s.outputDir == null ? 'Default folder' : 'Custom folder',
+                  ),
                   trailing: OutlinedButton(
                     onPressed: _pickFolder,
                     style: OutlinedButton.styleFrom(
@@ -115,7 +133,8 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                     child: Padding(
                       padding: const EdgeInsets.only(right: 8, bottom: 4),
                       child: TextButton(
-                        onPressed: () => _set(_s.copyWith(resetOutputDir: true)),
+                        onPressed: () =>
+                            _set(_s.copyWith(resetOutputDir: true)),
                         child: const Text('Use the default folder'),
                       ),
                     ),
@@ -134,13 +153,22 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                   child: SegmentedButton<DownloadKind>(
                     showSelectedIcon: false,
                     segments: const [
-                      ButtonSegment(value: DownloadKind.video, label: Text('Video')),
-                      ButtonSegment(value: DownloadKind.audio, label: Text('Audio only')),
+                      ButtonSegment(
+                        value: DownloadKind.video,
+                        label: Text('Video'),
+                      ),
+                      ButtonSegment(
+                        value: DownloadKind.audio,
+                        label: Text('Audio only'),
+                      ),
                     ],
                     selected: {
-                      _s.defaultKind == DownloadKind.audio ? DownloadKind.audio : DownloadKind.video,
+                      _s.defaultKind == DownloadKind.audio
+                          ? DownloadKind.audio
+                          : DownloadKind.video,
                     },
-                    onSelectionChanged: (v) => _set(_s.copyWith(defaultKind: v.first)),
+                    onSelectionChanged: (v) =>
+                        _set(_s.copyWith(defaultKind: v.first)),
                   ),
                 ),
                 _dropdown<VideoQuality>(
@@ -164,7 +192,8 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                 SwitchListTile(
                   title: const Text('Prefer compatible formats'),
                   subtitle: const Text(
-                      'H.264 video and AAC audio, which play on almost any device'),
+                    'H.264 video and AAC audio, which play on almost any device',
+                  ),
                   value: _s.preferCompatible,
                   onChanged: (v) => _set(_s.copyWith(preferCompatible: v)),
                 ),
@@ -182,15 +211,21 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                     ),
                     decoration: InputDecoration(
                       labelText: 'Name template',
-                      helperText: 'yt-dlp output template, e.g. %(uploader)s/%(title)s.%(ext)s',
+                      helperText:
+                          'yt-dlp output template, e.g. %(uploader)s/%(title)s.%(ext)s',
                       helperMaxLines: 2,
                       suffixIcon: IconButton(
                         tooltip: 'Reset',
                         icon: const Icon(LucideIcons.rotateCcw, size: 16),
                         onPressed: () {
-                          _template.text = DownloaderSettings.defaultFilenameTemplate;
-                          _set(_s.copyWith(
-                              filenameTemplate: DownloaderSettings.defaultFilenameTemplate));
+                          _template.text =
+                              DownloaderSettings.defaultFilenameTemplate;
+                          _set(
+                            _s.copyWith(
+                              filenameTemplate:
+                                  DownloaderSettings.defaultFilenameTemplate,
+                            ),
+                          );
                         },
                       ),
                     ),
@@ -205,30 +240,39 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                     leading: Icon(LucideIcons.info),
                     title: Text('Needs FFmpeg'),
                     subtitle: Text(
-                        'Embedding thumbnails, metadata, chapters and subtitles needs FFmpeg.'),
+                      'Embedding thumbnails, metadata, chapters and subtitles needs FFmpeg.',
+                    ),
                   ),
                 SwitchListTile(
                   title: const Text('Embed thumbnail'),
                   subtitle: const Text('As cover art'),
                   value: _s.embedThumbnail,
-                  onChanged: _c.hasFfmpeg ? (v) => _set(_s.copyWith(embedThumbnail: v)) : null,
+                  onChanged: _c.hasFfmpeg
+                      ? (v) => _set(_s.copyWith(embedThumbnail: v))
+                      : null,
                 ),
                 SwitchListTile(
                   title: const Text('Embed metadata'),
                   subtitle: const Text('Title, artist, date and description'),
                   value: _s.embedMetadata,
-                  onChanged: _c.hasFfmpeg ? (v) => _set(_s.copyWith(embedMetadata: v)) : null,
+                  onChanged: _c.hasFfmpeg
+                      ? (v) => _set(_s.copyWith(embedMetadata: v))
+                      : null,
                 ),
                 SwitchListTile(
                   title: const Text('Embed chapters'),
                   value: _s.embedChapters,
-                  onChanged: _c.hasFfmpeg ? (v) => _set(_s.copyWith(embedChapters: v)) : null,
+                  onChanged: _c.hasFfmpeg
+                      ? (v) => _set(_s.copyWith(embedChapters: v))
+                      : null,
                 ),
                 SwitchListTile(
                   title: const Text('Subtitles'),
-                  subtitle: Text(_c.hasFfmpeg
-                      ? 'Added to the video when available'
-                      : 'Saved next to the video when available'),
+                  subtitle: Text(
+                    _c.hasFfmpeg
+                        ? 'Added to the video when available'
+                        : 'Saved next to the video when available',
+                  ),
                   value: _s.subtitles,
                   onChanged: (v) => _set(_s.copyWith(subtitles: v)),
                 ),
@@ -240,7 +284,8 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                       autocorrect: false,
                       decoration: const InputDecoration(
                         labelText: 'Languages',
-                        helperText: 'Comma-separated codes; en.* is every English variant',
+                        helperText:
+                            'Comma-separated codes; en.* is every English variant',
                       ),
                       onChanged: (v) => _set(_s.copyWith(subtitleLangs: v)),
                     ),
@@ -264,8 +309,14 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
                 ListTile(
                   leading: const Icon(LucideIcons.fileText),
                   title: const Text('Licenses'),
-                  subtitle: const Text('yt-dlp, FFmpeg, Python, youtubedl-android and more'),
-                  onTap: () => showLicensePage(context: context, applicationName: 'Explorer'),
+                  subtitle: const Text(
+                    'yt-dlp, FFmpeg, Python, youtubedl-android and more',
+                  ),
+                  onTap: () => showLicensePage(
+                    context: context,
+                    applicationName: 'Explorer',
+                    applicationLegalese: appLegalese,
+                  ),
                 ),
               ]),
             ],
@@ -281,15 +332,23 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
     return [
       ListTile(
         leading: const Icon(LucideIcons.refreshCw),
-        title: Text(version == null
-            ? (_c.engineState == EngineState.ready ? 'yt-dlp' : 'yt-dlp (not set up yet)')
-            : 'yt-dlp $version'),
-        subtitle: Text(last == null
-            ? 'Never checked for updates'
-            : 'Checked ${DateFormat('d MMM y, HH:mm').format(last)}'),
+        title: Text(
+          version == null
+              ? (_c.engineState == EngineState.ready
+                    ? 'yt-dlp'
+                    : 'yt-dlp (not set up yet)')
+              : 'yt-dlp $version',
+        ),
+        subtitle: Text(
+          last == null
+              ? 'Never checked for updates'
+              : 'Checked ${DateFormat('d MMM y, HH:mm').format(last)}',
+        ),
         trailing: _c.updating
             ? const SizedBox.square(
-                dimension: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
+                dimension: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              )
             : OutlinedButton(
                 onPressed: _c.isSupported ? _update : null,
                 style: OutlinedButton.styleFrom(
@@ -301,8 +360,10 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
       ),
       SwitchListTile(
         title: const Text('Update automatically'),
-        subtitle: const Text('Check for a new stable release once a day. Sites '
-            'change often; an old yt-dlp stops working.'),
+        subtitle: const Text(
+          'Check for a new stable release once a day. Sites '
+          'change often; an old yt-dlp stops working.',
+        ),
         value: _s.autoUpdate,
         onChanged: (v) => _set(_s.copyWith(autoUpdate: v)),
       ),
@@ -319,18 +380,18 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
 
   /// Bordered group; rows separated by hairlines.
   Widget _card(List<Widget> children) => SurfaceCard(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        clip: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (var i = 0; i < children.length; i++) ...[
-              if (i > 0 && children[i] is! Align) const Divider(height: 1),
-              children[i],
-            ],
-          ],
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    clip: true,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0 && children[i] is! Align) const Divider(height: 1),
+          children[i],
+        ],
+      ],
+    ),
+  );
 
   Widget _dropdown<T>({
     required String title,
@@ -348,9 +409,9 @@ class _VideoDownloaderSettingsScreenState extends State<VideoDownloaderSettingsS
               flex: 4,
               child: Text(
                 title,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w500,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
               ),
             ),
             const SizedBox(width: 12),
