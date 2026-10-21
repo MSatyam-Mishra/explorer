@@ -1,11 +1,10 @@
 import 'dart:io';
 
-import 'package:bloc/bloc.dart';
-import 'package:explorer/core/services/directory_services.dart';
-import 'package:explorer/features/sidebar/model/category_model.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
-
+import 'package:explorer/core/services/device_files.dart';
+import 'package:explorer/features/sidebar/model/category_model.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
@@ -17,110 +16,77 @@ class SidebarBloc extends Bloc<SidebarEvent, SidebarState> {
     on<LoadSidebarData>(_onLoadSidebarData);
   }
 
+  /// Shows the categories at once; storage volumes and counts fill in as
+  /// they're found.
   Future<void> _onLoadSidebarData(
     LoadSidebarData event,
     Emitter<SidebarState> emit,
   ) async {
-    emit(SidebarLoading());
+    final counts = <String, int>{};
+    var volumes = const <Directory>[];
+    void publish() {
+      if (!emit.isDone) {
+        emit(SidebarLoaded(_categories(counts), externalStorage: volumes));
+      }
+    }
+
+    publish();
     try {
-      int photoCount = 0;
-      int videoCount = 0;
-      int audioCount = 0;
-
-      if (!Platform.isWindows) {
-        final ps = await PhotoManager.requestPermissionExtend();
-        if (!ps.hasAccess) {
-          emit(
-            SidebarError('Storage permission is required to list categories.'),
-          );
-          return;
-        }
-
-        photoCount = await PhotoManager.getAssetCount(
-          type: RequestType.image,
-        );
-        videoCount = await PhotoManager.getAssetCount(
-          type: RequestType.video,
-        );
-        audioCount = await PhotoManager.getAssetCount(
-          type: RequestType.audio,
-        );
-      }
-
-      // Downloads Logic
-      int downloadCount = 0;
-      final Directory? downloadsDir =
-          await DirectoryService.findDownloadsDirectory();
-      if (downloadsDir != null && await downloadsDir.exists()) {
-        downloadCount = await downloadsDir
-            .list(recursive: true)
-            .where((e) => e is File)
-            .length;
-      }
-
-      final List<Category> categories = [
-        Category(
-          icon: LucideIcons.image,
-          name: 'Photos',
-          fileCount: photoCount,
-          color: Colors.purple.shade300,
-        ),
-        Category(
-          icon: LucideIcons.clapperboard,
-          name: 'Video',
-          fileCount: videoCount,
-          color: Colors.red.shade300,
-        ),
-        Category(
-          icon: LucideIcons.music,
-          name: 'Audio',
-          fileCount: audioCount,
-          color: Colors.orange.shade300,
-        ),
-        Category(
-          icon: LucideIcons.fileText,
-          name: 'Documents',
-          fileCount: 0,
-          color: Colors.blue.shade300,
-        ),
-        Category(
-          icon: LucideIcons.lock,
-          name: 'Vault',
-          fileCount: 0,
-          color: Colors.teal.shade300,
-        ),
-        Category(
-          icon: LucideIcons.archive,
-          name: 'Archives',
-          fileCount: 0,
-          color: Colors.brown.shade300,
-        ),
-        Category(
-          icon: LucideIcons.download,
-          name: 'Downloads',
-          fileCount: downloadCount,
-          color: Colors.green.shade300,
-        ),
-        Category(
-          icon: LucideIcons.cloud,
-          name: 'Cloud Drive',
-          fileCount: 0,
-          color: Colors.indigo.shade300,
-        ),
-        Category(
-          icon: LucideIcons.layoutGrid,
-          name: 'Apps',
-          fileCount: 0,
-          color: Colors.tealAccent.shade700,
-        ),
-      ];
-
-      // Fetch external storage volumes
-      final externalVolumes = await LocalFileRepository().getStorageVolumes();
-
-      emit(SidebarLoaded(categories, externalStorage: externalVolumes));
+      volumes = await LocalFileRepository().getStorageVolumes();
+      publish();
     } catch (e) {
-      emit(SidebarError(e.toString()));
+      debugPrint('Sidebar: no storage volumes: $e');
+    }
+
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+      try {
+        final permission = await PhotoManager.requestPermissionExtend();
+        if (permission.hasAccess) {
+          final media = await Future.wait([
+            PhotoManager.getAssetCount(type: RequestType.image),
+            PhotoManager.getAssetCount(type: RequestType.video),
+            PhotoManager.getAssetCount(type: RequestType.audio),
+          ]);
+          counts
+            ..['Photos'] = media[0]
+            ..['Video'] = media[1]
+            ..['Audio'] = media[2];
+          publish();
+        }
+      } catch (e) {
+        debugPrint('Sidebar: media counts failed: $e');
+      }
+    }
+
+    for (final (name, group) in const [
+      ('Documents', DeviceFileGroup.documents),
+      ('Archives', DeviceFileGroup.archives),
+    ]) {
+      try {
+        counts[name] = (await DeviceFiles.find(group)).length;
+        publish();
+      } catch (e) {
+        debugPrint('Sidebar: $name count failed: $e');
+      }
     }
   }
+
+  static List<Category> _categories(Map<String, int> counts) => [
+        for (final (icon, name, color) in [
+          (LucideIcons.image, 'Photos', Colors.purple.shade300),
+          (LucideIcons.clapperboard, 'Video', Colors.red.shade300),
+          (LucideIcons.music, 'Audio', Colors.orange.shade300),
+          (LucideIcons.fileText, 'Documents', Colors.blue.shade300),
+          (LucideIcons.archive, 'Archives', Colors.brown.shade300),
+          (LucideIcons.download, 'Downloads', Colors.green.shade300),
+          (LucideIcons.layoutGrid, 'Apps', Colors.teal.shade300),
+          (LucideIcons.lock, 'Vault', Colors.indigo.shade300),
+        ])
+          Category(
+            icon: icon,
+            name: name,
+            fileCount: counts[name] ?? 0,
+            color: color,
+          ),
+      ];
 }

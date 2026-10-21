@@ -28,6 +28,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var incomingFiles: IncomingFiles? = null
     private var localSend: LocalSendNative? = null
     private var videoDownloader: VideoDownloaderNative? = null
+    private var device: DeviceNative? = null
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -42,6 +43,8 @@ class MainActivity : FlutterFragmentActivity() {
         localSend = null
         videoDownloader?.dispose()
         videoDownloader = null
+        device?.dispose()
+        device = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -50,6 +53,7 @@ class MainActivity : FlutterFragmentActivity() {
         incomingFiles = IncomingFiles(this, flutterEngine.dartExecutor.binaryMessenger)
         localSend = LocalSendNative(this, flutterEngine.dartExecutor.binaryMessenger)
         videoDownloader = VideoDownloaderNative(this, flutterEngine.dartExecutor.binaryMessenger)
+        device = DeviceNative(this, flutterEngine.dartExecutor.binaryMessenger)
         
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 

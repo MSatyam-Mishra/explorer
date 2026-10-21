@@ -1,9 +1,21 @@
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
+
+import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 class DirectoryService {
+  /// The user's Downloads folder (on Android the shared `Download` folder,
+  /// not the app's private one).
   static Future<Directory?> findDownloadsDirectory() async {
+    if (Platform.isAndroid) {
+      for (final name in const ['Download', 'Downloads']) {
+        final dir = Directory(p.join(ExplorerPaths.androidInternalStorage, name));
+        if (await dir.exists()) return dir;
+      }
+      return null;
+    }
     if (Platform.isWindows) {
       final profile = Platform.environment['USERPROFILE'];
       if (profile != null) {
@@ -11,25 +23,11 @@ class DirectoryService {
         if (await downloads.exists()) return downloads;
       }
     }
-
     try {
-      final Directory? externalDir = await getExternalStorageDirectory();
-      if (externalDir == null) return null;
-
-      // Check for the common names
-      final List<String> commonNames = ['Download', 'Downloads'];
-      
-      for (final name in commonNames) {
-        final dir = Directory(p.join(externalDir.path, name));
-        if (await dir.exists()) {
-          print('Found downloads directory at: ${dir.path}');
-          return dir;
-        }
-      }
+      return await getDownloadsDirectory();
     } catch (e) {
-      print('Error finding downloads directory: $e');
+      debugPrint('No downloads directory: $e');
+      return null;
     }
-    // Fallback to the default if our check fails
-    return await getDownloadsDirectory();
   }
 }

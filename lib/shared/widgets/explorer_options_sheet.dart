@@ -158,9 +158,9 @@ class ExplorerOptionsSheet extends StatelessWidget {
         ),
         const _Heading('Sharing'),
         _ActionRow(
-          icon: LucideIcons.globe,
-          title: 'HTTP file server',
-          subtitle: 'Open this folder in a browser on any device on your Wi-Fi',
+          icon: LucideIcons.wifi,
+          title: 'Wi-Fi sharing',
+          subtitle: 'Open this folder from a browser or FTP app on your Wi-Fi',
           onTap: () {
             Navigator.pop(context);
             onHttpShare();

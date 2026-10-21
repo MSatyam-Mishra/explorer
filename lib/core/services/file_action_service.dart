@@ -19,6 +19,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
+import 'package:explorer/features/vault/vault_store.dart';
+import 'package:explorer/core/services/device_files.dart';
 
 class FileActionsService {
   final FileRepository repository;
@@ -68,6 +70,13 @@ class FileActionsService {
                   ),
                 ),
               ),
+              if (entity is File)
+                _SheetAction(
+                  icon: LucideIcons.lockKeyhole,
+                  label: 'Move to vault',
+                  detail: 'Hide it from other apps',
+                  onTap: () => run(() => moveToVault(context, entity)),
+                ),
               const _SheetDivider(),
               _SheetAction(
                 icon: LucideIcons.copy,
@@ -329,6 +338,25 @@ class FileActionsService {
         );
       },
     );
+  }
+
+  /// Moves [file] into the vault and refreshes the folder.
+  Future<void> moveToVault(BuildContext blocContext, File file) async {
+    final name = p.basename(file.path);
+    try {
+      await VaultStore().add(file);
+      DeviceFiles.invalidate();
+      if (!blocContext.mounted) return;
+      _toast(blocContext, 'Moved "$name" to the vault');
+      final bloc = blocContext.read<FileExplorerBloc>();
+      final state = bloc.state;
+      if (state is FileExplorerLoaded) bloc.add(LoadDirectory(state.path));
+    } catch (e) {
+      debugPrint('Error moving to vault: $e');
+      if (blocContext.mounted) {
+        _toast(blocContext, "Couldn't move \"$name\" to the vault: ${_reason(e)}");
+      }
+    }
   }
 
   void showInfoSheet(FileSystemEntity entity, BuildContext context) {

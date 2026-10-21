@@ -7,10 +7,6 @@ import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/archive_service.dart';
 import 'package:explorer/core/services/file_action_service.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
-import 'package:explorer/core/services/file_server/app_file_server_resources.dart';
-import 'package:explorer/core/services/file_server/http_file_server.dart';
-import 'package:explorer/core/services/localsend/localsend_platform.dart';
-import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
@@ -19,7 +15,7 @@ import 'package:explorer/features/file_explorere/widgets/file_grid_item.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
 import 'package:explorer/features/file_explorere/widgets/paste_bar.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
-import 'package:explorer/features/network/widgets/server_status_dialog.dart';
+import 'package:explorer/features/network/screens/file_server_screen.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/tasks/bloc/task_progress_bloc.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
@@ -708,50 +704,25 @@ class _FileExplorerUI extends StatelessWidget {
     BuildContext context,
     FileExplorerState state,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     if (state is! FileExplorerLoaded ||
         ExplorerPaths.isWindowsRoots(state.path)) {
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Open a folder to share it')),
       );
       return;
     }
-    final settings = context.read<ThemeCubit>().state;
     final bloc = context.read<FileExplorerBloc>();
-    final server = HttpFileServer(
-      resources: AppFileServerResources(iconStyle: settings.fileIconStyle),
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FileServerScreen(initialFolder: state.path),
+      ),
     );
-    try {
-      await server.start(
-        state.path,
-        theme: webThemeFor(settings.colorTheme),
-        deviceName: await LsSettingsStore.deviceModel(),
-      );
-    } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text("Couldn't start sharing: $e")),
-      );
-      return;
+    // Show files other devices uploaded.
+    final now = bloc.state;
+    if (!bloc.isClosed && now is FileExplorerLoaded) {
+      bloc.add(LoadDirectory(now.path));
     }
-    var received = false;
-    final subscription = server.received.listen((_) => received = true);
-    try {
-      if (context.mounted) {
-        await showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => ServerStatusDialog(
-            server: server,
-            folderName: ExplorerPaths.titleForPath(state.path),
-          ),
-        );
-      }
-    } finally {
-      await subscription.cancel();
-      await server.stop();
-    }
-    // Show files uploaded from a browser.
-    if (received && !bloc.isClosed) bloc.add(LoadDirectory(state.path));
   }
 }
 

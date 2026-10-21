@@ -3,12 +3,14 @@ import 'dart:io';
 import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/platform/windows_locations.dart';
-import 'package:explorer/core/services/auth_service.dart';
+import 'package:explorer/core/services/device_files.dart';
 import 'package:explorer/core/services/directory_services.dart';
 import 'package:explorer/core/theme/theme_cubit.dart';
 import 'package:explorer/features/category_view/bloc/bloc/screens/category_viewer_screen.dart';
+import 'package:explorer/features/category_view/file_category_screen.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
+import 'package:explorer/features/network/screens/file_server_screen.dart';
 import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/tools/screens/app_manager_screen.dart';
 import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
@@ -88,14 +90,15 @@ class MainDrawerContent extends StatelessWidget {
                   return Column(
                     children: [
                       for (final category in state.categories)
-                        AppSidebarItem(
-                          icon: _categoryIcon(category.name) ?? category.icon,
-                          label: category.name,
-                          trailing: category.fileCount > 0
-                              ? Text('${category.fileCount}')
-                              : null,
-                          onTap: () => _openCategory(context, category.name),
-                        ),
+                        if (category.name != 'Apps' || Platform.isAndroid)
+                          AppSidebarItem(
+                            icon: _categoryIcon(category.name) ?? category.icon,
+                            label: category.name,
+                            trailing: category.fileCount > 0
+                                ? Text('${category.fileCount}')
+                                : null,
+                            onTap: () => _openCategory(context, category.name),
+                          ),
                     ],
                   );
                 },
@@ -107,17 +110,18 @@ class MainDrawerContent extends StatelessWidget {
                 detail: 'Send and receive with LocalSend',
                 onTap: () => _push(context, const LocalSendScreen()),
               ),
+              AppSidebarItem(
+                icon: LucideIcons.wifi,
+                label: 'Wi-Fi sharing',
+                detail: 'Browser (HTTP) or FTP',
+                onTap: () => _openFileServer(context),
+              ),
               if (kVideoDownloaderEnabled)
                 AppSidebarItem(
                   icon: LucideIcons.cloudDownload,
                   label: 'Video downloader',
                   onTap: () => _push(context, const VideoDownloaderScreen()),
                 ),
-              AppSidebarItem(
-                icon: LucideIcons.layoutGrid,
-                label: 'App manager',
-                onTap: () => _push(context, const AppManagerScreen()),
-              ),
               AppSidebarItem(
                 icon: LucideIcons.usb,
                 label: 'USB boot',
@@ -131,17 +135,16 @@ class MainDrawerContent extends StatelessWidget {
   }
 
   static IconData? _categoryIcon(String name) => switch (name) {
-        'Photos' => LucideIcons.image,
-        'Video' => LucideIcons.clapperboard,
-        'Audio' => LucideIcons.music,
-        'Documents' => LucideIcons.fileText,
-        'Vault' => LucideIcons.lock,
-        'Archives' => LucideIcons.archive,
-        'Downloads' => LucideIcons.download,
-        'Cloud Drive' => LucideIcons.cloud,
-        'Apps' => LucideIcons.layoutGrid,
-        _ => null,
-      };
+    'Photos' => LucideIcons.image,
+    'Video' => LucideIcons.clapperboard,
+    'Audio' => LucideIcons.music,
+    'Documents' => LucideIcons.fileText,
+    'Vault' => LucideIcons.lock,
+    'Archives' => LucideIcons.archive,
+    'Downloads' => LucideIcons.download,
+    'Apps' => LucideIcons.layoutGrid,
+    _ => null,
+  };
 
   static void _push(BuildContext context, Widget screen) {
     dismissDrawer(context);
@@ -157,29 +160,68 @@ class MainDrawerContent extends StatelessWidget {
       _ => null,
     };
     if (type != null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CategoryViewerScreen(categoryType: type, title: name),
-        ),
-      );
+      _push(context, CategoryViewerScreen(categoryType: type, title: name));
       return;
     }
-    if (name == 'Downloads') {
-      final downloadsDir = await DirectoryService.findDownloadsDirectory();
-      if (downloadsDir != null && context.mounted) {
-        context.read<FileExplorerBloc>().add(LoadDirectory(downloadsDir.path));
-      }
-      return;
-    }
-    if (name == 'Vault') {
-      final isAuthenticated = await AuthService().authenticate();
-      if (isAuthenticated && context.mounted) {
-        Navigator.push(
+    final explorer = context.read<FileExplorerBloc>();
+    void showFolder(String folder) => explorer.add(LoadDirectory(folder));
+    switch (name) {
+      case 'Documents':
+        _push(
           context,
-          MaterialPageRoute(builder: (_) => const VaultScreen()),
+          FileCategoryScreen(
+            group: DeviceFileGroup.documents,
+            onShowInFolder: showFolder,
+          ),
         );
-      }
+      case 'Archives':
+        _push(
+          context,
+          FileCategoryScreen(
+            group: DeviceFileGroup.archives,
+            onShowInFolder: showFolder,
+          ),
+        );
+      case 'Downloads':
+        final downloads = await DirectoryService.findDownloadsDirectory();
+        if (!context.mounted) return;
+        if (downloads == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No Downloads folder on this device')),
+          );
+          return;
+        }
+        showFolder(downloads.path);
+      case 'Apps':
+        _push(context, const AppManagerScreen());
+      case 'Vault':
+        _push(context, const VaultScreen());
+    }
+  }
+
+  static Future<void> _openFileServer(BuildContext context) async {
+    dismissDrawer(context);
+    final explorer = context.read<FileExplorerBloc>();
+    final current = explorer.state;
+    final folder =
+        current is FileExplorerLoaded &&
+            !ExplorerPaths.isWindowsRoots(current.path)
+        ? current.path
+        : Platform.isAndroid
+        ? ExplorerPaths.androidInternalStorage
+        : (Platform.environment['USERPROFILE'] ??
+              Platform.environment['HOME'] ??
+              Directory.current.path);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FileServerScreen(initialFolder: folder),
+      ),
+    );
+    // Show files other devices uploaded.
+    final now = explorer.state;
+    if (!explorer.isClosed && now is FileExplorerLoaded) {
+      explorer.add(LoadDirectory(now.path));
     }
   }
 }
@@ -194,7 +236,11 @@ class _SidebarHeader extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final mode = context.select((ThemeCubit c) => c.state.themeMode);
     final (icon, label, next) = switch (mode) {
-      ThemeMode.system => (LucideIcons.monitor, 'System theme', ThemeMode.light),
+      ThemeMode.system => (
+        LucideIcons.monitor,
+        'System theme',
+        ThemeMode.light,
+      ),
       ThemeMode.light => (LucideIcons.sun, 'Light theme', ThemeMode.dark),
       ThemeMode.dark => (LucideIcons.moon, 'Dark theme', ThemeMode.system),
     };
@@ -243,14 +289,14 @@ class _WindowsStorageSection extends StatelessWidget {
   const _WindowsStorageSection();
 
   static IconData _libraryIcon(String name) => switch (name.toLowerCase()) {
-        'desktop' => LucideIcons.monitor,
-        'documents' => LucideIcons.fileText,
-        'downloads' => LucideIcons.download,
-        'music' => LucideIcons.music,
-        'pictures' => LucideIcons.image,
-        'videos' => LucideIcons.clapperboard,
-        _ => LucideIcons.folder,
-      };
+    'desktop' => LucideIcons.monitor,
+    'documents' => LucideIcons.fileText,
+    'downloads' => LucideIcons.download,
+    'music' => LucideIcons.music,
+    'pictures' => LucideIcons.image,
+    'videos' => LucideIcons.clapperboard,
+    _ => LucideIcons.folder,
+  };
 
   @override
   Widget build(BuildContext context) {
