@@ -1,8 +1,15 @@
 name: Desktop apps
 
-# Builds the Windows and Linux apps for every app release (tags v*) and
-# attaches them to the GitHub release, next to the APKs. To build them for a
-# release that already exists, run this workflow by hand with its tag.
+# Builds and packages the Windows and Linux apps for every app release (tags
+# v*) and attaches them to the GitHub release, next to the APKs:
+#   Windows: setup .exe, .msix, .msixbundle (+ the MSIX certificate)
+#   Linux:   .tar.gz, .tar.xz, .deb, .rpm, .AppImage, .flatpak, .snap
+# Each package is installed and checked before anything is uploaded.
+# Run it by hand to build for an existing release, or to try the packaging
+# without uploading.
+#
+# Secrets: MSIX_CERTIFICATE (base64 .pfx) and MSIX_CERTIFICATE_PASSWORD sign
+# the MSIX files; packaging/windows/explorer-msix.cer is its public part.
 on:
   release:
     types: [published]
@@ -11,99 +18,256 @@ on:
       tag:
         description: Release tag, for example v1.0.6
         required: true
+      ref:
+        description: Code to build, if not the tag (branch, tag or commit)
+        required: false
+        default: ''
+      upload:
+        description: Upload the packages to the release
+        type: boolean
+        default: true
 
 permissions:
   contents: write
 
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  REF: ${{ inputs.ref || github.event.release.tag_name || inputs.tag }}
   FLUTTER_VERSION: 3.44.1
 
 jobs:
-  build:
+  windows:
     # App releases only, not the video engine's.
     if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            os: windows-latest
-          # rive_native's prebuilt library needs glibc 2.38 and libstdc++ 13,
-          # so the app needs Ubuntu 24.04 or a distro as recent anyway.
-          - platform: linux
-            os: ubuntu-24.04
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
-
-      - name: Install Linux build tools
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+          ref: ${{ env.REF }}
+      # Packaging files come from this workflow's commit, so older tags can be
+      # packaged too.
+      - uses: actions/checkout@v4
+        with:
+          path: .packaging
+          sparse-checkout: packaging
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-
       - run: flutter pub get
-
-      - run: flutter build ${{ matrix.platform }} --release
+      - run: flutter build windows --release
         env:
           # Visual Studio 2026 rejects the <experimental/coroutine> header that
           # flutter_inappwebview_windows still uses, unless this is defined.
           # MSVC reads extra options from CL.
           CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
+      - name: Install Inno Setup
+        run: if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup --no-progress -y }
+
+      - name: Make the installer and MSIX packages
+        env:
+          MSIX_CERTIFICATE: ${{ secrets.MSIX_CERTIFICATE }}
+          MSIX_CERTIFICATE_PASSWORD: ${{ secrets.MSIX_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'msix.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:MSIX_CERTIFICATE))
+          try {
+            ./.packaging/packaging/windows/make-packages.ps1 -Version $env:TAG.TrimStart('v') `
+              -RepoDir . -OutDir dist -CertificatePath $pfx -CertificatePassword $env:MSIX_CERTIFICATE_PASSWORD
+          } finally {
+            Remove-Item $pfx
+          }
+
+      - name: Check that the packages install
+        run: |
+          $setup = (Get-ChildItem dist/*-setup.exe).FullName
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\Explorer"
+          if (-not (Test-Path "$dir\explorer.exe")) { throw 'The installer did not install explorer.exe' }
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+
+          Import-Certificate -FilePath (Get-ChildItem dist/*.cer).FullName -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          foreach ($package in Get-ChildItem dist/*.msix, dist/*.msixbundle) {
+            Add-AppxPackage -Path $package.FullName
+            $installed = Get-AppxPackage MSatyamMishra.Explorer
+            if (-not $installed) { throw "$($package.Name) did not install" }
+            Write-Output "$($package.Name): installed $($installed.PackageFullName)"
+            Remove-AppxPackage $installed.PackageFullName
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows
+          path: dist/*
+          if-no-files-found: error
+
+  linux-build:
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
+    # rive_native's prebuilt library needs glibc 2.38 and libstdc++ 13,
+    # so the app needs Ubuntu 24.04 or a distro as recent anyway.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+      - name: Install Linux build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build linux --release
       # flutter build only prints the last line of a native build error.
       - name: Show the native build error
-        if: failure() && matrix.platform == 'linux'
+        if: failure()
         run: ninja -C build/linux/x64/release 2>&1 | tail -80
+      # A tar keeps file modes and symlinks, which artifacts lose.
+      - run: tar -C build/linux/x64/release -cf bundle.tar bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bundle
+          path: bundle.tar
 
-      - name: Package the Windows app
-        if: matrix.platform == 'windows'
-        shell: pwsh
+  linux-packages:
+    needs: linux-build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-bundle
+      - run: tar -xf bundle.tar
+      - name: Install packaging tools
         run: |
-          $name = "explorer-$env:TAG-windows-x64"
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item -Recurse build/windows/x64/runner/Release dist/Explorer
-          Compress-Archive -Path dist/Explorer -DestinationPath "dist/$name.zip"
-          "ASSET=dist/$name.zip" >> $env:GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y ruby-dev rpm xvfb
+          sudo gem install --no-document fpm
+      - run: bash packaging/linux/make-packages.sh "${TAG#v}" bundle dist
 
-      - name: Package the Linux app
-        if: matrix.platform == 'linux'
+      # Started under a virtual display, the app must still run after 20 s.
+      - name: Check that the packages install and start
         run: |
-          name="explorer-$TAG-linux-x64"
-          mkdir -p dist
-          cp -r build/linux/x64/release/bundle dist/explorer
-          tar -C dist -czf "dist/$name.tar.gz" explorer
-          echo "ASSET=dist/$name.tar.gz" >> "$GITHUB_ENV"
+          running() { local status=0; xvfb-run -a timeout 20 "$@" || status=$?; [ "$status" = 124 ]; }
+          sudo apt-get install -y ./dist/*.deb
+          running explorer
+          sudo apt-get remove -y explorer
+          rpm -qip dist/*.rpm
+          chmod +x dist/*.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          running dist/*.AppImage
+          mkdir tar-check && tar -C tar-check -xJf dist/*.tar.xz && running tar-check/explorer/explorer
 
-      - name: Upload to the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "$ASSET" --clobber --repo "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-linux
+          path: dist/*
+          if-no-files-found: error
 
-  checksums:
-    needs: build
+  flatpak:
+    needs: linux-build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-bundle
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder xvfb
+          # Ubuntu 24.04 stops the user namespaces flatpak-builder's sandbox needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      - name: Build the Flatpak
+        run: |
+          mkdir -p fp/input dist
+          tar -C fp/input -xf bundle.tar
+          cp packaging/linux/flatpak/com.synqixlabs.explory.yml fp/
+          cp packaging/linux/com.synqixlabs.explory.desktop packaging/linux/com.synqixlabs.explory.metainfo.xml fp/input/
+          cp -a packaging/linux/icons fp/input/
+          flatpak-builder --user --force-clean --repo=fp/repo fp/build fp/com.synqixlabs.explory.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            fp/repo "dist/explorer-$TAG-linux-x86_64.flatpak" com.synqixlabs.explory
+      - name: Check that it installs and starts
+        run: |
+          flatpak install --user -y --noninteractive "dist/explorer-$TAG-linux-x86_64.flatpak"
+          status=0; dbus-run-session -- xvfb-run -a timeout 30 flatpak run com.synqixlabs.explory || status=$?
+          [ "$status" = 124 ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-flatpak
+          path: dist/*
+          if-no-files-found: error
+
+  snap:
+    needs: linux-build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-bundle
+      - name: Prepare the snap project
+        run: |
+          mkdir snap-project
+          tar -C snap-project -xf bundle.tar
+          cp -a packaging/linux/snap snap-project/snap
+          cp packaging/linux/icons/hicolor/256x256/apps/com.synqixlabs.explory.png snap-project/snap/gui/explorer.png
+          sed -i "s/@VERSION@/${TAG#v}/" snap-project/snap/snapcraft.yaml
+      - uses: snapcore/action-build@v1
+        id: build
+        with:
+          path: snap-project
+      - name: Check that it installs
+        run: |
+          sudo snap install --dangerous "${{ steps.build.outputs.snap }}"
+          snap list explorer
+          mkdir dist
+          mv "${{ steps.build.outputs.snap }}" "dist/explorer-$TAG-linux-amd64.snap"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-snap
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux-packages, flatpak, snap]
+    if: github.event_name == 'release' || inputs.upload
     runs-on: ubuntu-latest
     steps:
-      - name: Add the desktop apps to SHA256SUMS.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+      - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
-            --pattern 'SHA256SUMS.txt' --pattern '*-windows-x64.zip' --pattern '*-linux-x64.tar.gz'
-          cd assets
-          touch SHA256SUMS.txt
-          grep -v -e '-windows-x64\.zip$' -e '-linux-x64\.tar\.gz$' SHA256SUMS.txt > sums.txt || true
-          sha256sum -- *-windows-x64.zip *-linux-x64.tar.gz >> sums.txt
-          mv sums.txt SHA256SUMS.txt
+          ls -l dist
+          gh release upload "$TAG" dist/* --clobber
+          # Earlier builds attached a zip; the installers replace it.
+          gh release view "$TAG" --json assets -q '.assets[].name' | grep -- '-windows-x64\.zip$' |
+            while read -r old; do gh release delete-asset "$TAG" "$old" -y; done
+          # SHA256SUMS.txt: the APKs' lines, then every desktop package.
+          gh release download "$TAG" --pattern SHA256SUMS.txt --dir previous || true
+          touch previous/SHA256SUMS.txt
+          grep '\.apk$' previous/SHA256SUMS.txt > SHA256SUMS.txt || true
+          (cd dist && sha256sum -- *) >> SHA256SUMS.txt
           cat SHA256SUMS.txt
-          gh release upload "$TAG" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" SHA256SUMS.txt --clobber

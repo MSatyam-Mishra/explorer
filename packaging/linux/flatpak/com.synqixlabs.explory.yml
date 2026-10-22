@@ -1,0 +1,30 @@
+# Flatpak of the prebuilt Linux app. .github/workflows/desktop-release.yml puts
+# this file next to an input/ folder holding bundle/ (the flutter build linux
+# output), the .desktop and .metainfo.xml files and icons/, then runs
+# flatpak-builder and flatpak build-bundle.
+app-id: com.synqixlabs.explory
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: explorer
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  # A file manager needs to see the user's files.
+  - --filesystem=host
+modules:
+  - name: explorer
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/explorer /app/bin
+      - cp -a bundle/. /app/lib/explorer/
+      - ln -s /app/lib/explorer/explorer /app/bin/explorer
+      - install -Dm644 com.synqixlabs.explory.desktop -t /app/share/applications
+      - install -Dm644 com.synqixlabs.explory.metainfo.xml -t /app/share/metainfo
+      - cp -a icons /app/share/
+    sources:
+      - type: dir
+        path: input

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Explorer
+GenericName=File Manager
+Comment=Open, edit and share almost any file
+Exec=explorer
+Icon=com.synqixlabs.explory
+Terminal=false
+Categories=System;FileTools;FileManager;
+Keywords=files;folders;file manager;pdf;documents;archives;share;
+StartupNotify=true
+StartupWMClass=com.synqixlabs.explory
