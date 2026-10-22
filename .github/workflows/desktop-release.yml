@@ -53,6 +53,16 @@ jobs:
       - run: flutter pub get
 
       - run: flutter build ${{ matrix.platform }} --release
+        env:
+          # Visual Studio 2026 rejects the <experimental/coroutine> header that
+          # flutter_inappwebview_windows still uses, unless this is defined.
+          # MSVC reads extra options from CL.
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+
+      # flutter build only prints the last line of a native build error.
+      - name: Show the native build error
+        if: failure() && matrix.platform == 'linux'
+        run: ninja -C build/linux/x64/release 2>&1 | tail -80
 
       - name: Package the Windows app
         if: matrix.platform == 'windows'
