@@ -157,6 +157,8 @@ jobs:
       - name: Check that the packages install and start
         run: |
           running() { local status=0; xvfb-run -a timeout 20 "$@" || status=$?; [ "$status" = 124 ]; }
+          # Mesa: the GL drivers a desktop has, which the runner lacks.
+          sudo apt-get install -y libegl-mesa0 libgl1-mesa-dri
           sudo apt-get install -y ./dist/*.deb
           running explorer
           sudo apt-get remove -y explorer

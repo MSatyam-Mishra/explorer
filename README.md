@@ -136,20 +136,43 @@ Only download content you have the right to download, and respect each site's te
 
 ## Download
 
-Get the latest version from **[Releases](https://github.com/MSatyam-Mishra/explorer/releases)**.
+Get the latest version from **[Releases](https://github.com/MSatyam-Mishra/explorer/releases)**. Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
+
+### Android
+
+Android 7.0 or newer. New versions install over older ones as an update.
 
 | File | For |
 |---|---|
-| `…-arm64-v8a.apk` | **Most Android phones and tablets** (64-bit) |
-| `…-armeabi-v7a.apk` | Older 32-bit Android phones |
-| `…-x86_64.apk` | Android emulators and x86 Chromebooks |
-| `…-universal.apk` | Not sure which APK? Works on every Android device, but is larger |
-| `…-windows-x64.zip` | **Windows 10 and 11** (64-bit): unzip it and run `Explorer\explorer.exe` |
-| `…-linux-x64.tar.gz` | **Linux** (64-bit; Ubuntu 24.04, Fedora 39, Debian 13 or newer, or another distro with glibc 2.38+): extract it and run `explorer/explorer` |
+| `…-arm64-v8a.apk` | **Most phones and tablets** (64-bit) |
+| `…-armeabi-v7a.apk` | Older 32-bit phones |
+| `…-x86_64.apk` | Emulators and x86 Chromebooks |
+| `…-universal.apk` | Not sure which? Works on every device, but is larger |
 
-- **Android** needs version 7.0 or newer. New versions install over older ones as an update.
-- **Windows** may say it protected your PC, because the app isn't code-signed. Choose **More info → Run anyway**.
-- Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
+### Windows
+
+Windows 10 or 11, 64-bit.
+
+| File | How to install |
+|---|---|
+| `…-windows-x64-setup.exe` | **Recommended.** Run it. It installs for your user, without asking for admin rights. |
+| `…-windows-x64.msix` or `…-windows.msixbundle` | Windows app package. Trust its certificate first (below), then open the file. |
+
+- Windows may say it protected your PC, because the app isn't code-signed. Choose **More info → Run anyway**.
+- To install the MSIX packages, trust their certificate once: open `…-windows-msix-certificate.cer`, choose **Install Certificate → Local Machine → Place all certificates in the following store → Trusted People**.
+
+### Linux
+
+64-bit, on a recent distro: Ubuntu 24.04, Debian 13, Fedora 39, openSUSE Tumbleweed or newer (glibc 2.38 or newer).
+
+| File | How to install |
+|---|---|
+| `…-linux-amd64.deb` | Debian, Ubuntu, Linux Mint: `sudo apt install ./explorer-…-linux-amd64.deb` |
+| `…-linux-x86_64.rpm` | Fedora: `sudo dnf install ./explorer-…-linux-x86_64.rpm`; openSUSE: `sudo zypper install ./explorer-…-linux-x86_64.rpm` |
+| `…-linux-x86_64.AppImage` | Any distro: make it executable (`chmod +x`) and run it. Some distros need `libfuse2` first. |
+| `…-linux-x86_64.flatpak` | `flatpak install ./explorer-…-linux-x86_64.flatpak` (its runtime comes from Flathub) |
+| `…-linux-amd64.snap` | `sudo snap install --dangerous ./explorer-…-linux-amd64.snap` |
+| `…-linux-x64.tar.gz` or `.tar.xz` | Any distro: extract it and run `explorer/explorer` |
 
 ## Building from source
 
@@ -167,7 +190,7 @@ python tool/build_release.py
 python tool/build_release.py --without-video-downloader
 ```
 
-The Windows and Linux apps are built by GitHub Actions ([desktop-release.yml](.github/workflows/desktop-release.yml)) when a release is published, and attached to it. To build them yourself, run `flutter build windows` or `flutter build linux`. Windows builds need `nuget.exe` on the `PATH`, for the web view plugin.
+The Windows and Linux apps are built and packaged by GitHub Actions ([desktop-release.yml](.github/workflows/desktop-release.yml)) when a release is published, and attached to it; the packaging files are in [packaging/](packaging/). To build them yourself, run `flutter build windows` or `flutter build linux`. Windows builds need `nuget.exe` on the `PATH`, for the web view plugin.
 
 Release signing reads `android/key.properties`, which is git-ignored. Without that file, builds use the debug key.
 

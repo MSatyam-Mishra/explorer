@@ -37,12 +37,16 @@ common=(
   --url https://github.com/MSatyam-Mishra/explorer
   --description 'Universal file manager: open, edit and share almost any file'
 )
-# glibc 2.38 and libstdc++ 13: what rive_native's prebuilt library needs.
+# GTK 3 and EGL/GL for Flutter; glibc 2.38 and libstdc++ 13.2 (GLIBCXX_3.4.32) for rive_native's
+# prebuilt library. The .rpm names libraries, not packages, so it suits
+# Fedora, openSUSE and others alike.
 fpm "${common[@]}" -t deb -a amd64 --category utils \
-  -d 'libgtk-3-0t64 | libgtk-3-0' -d 'libc6 (>= 2.38)' -d 'libstdc++6 (>= 13)' \
+  -d 'libgtk-3-0t64 | libgtk-3-0' -d libegl1 -d libgl1 \
+  -d 'libc6 (>= 2.38)' -d 'libstdc++6 (>= 13.2)' \
   -p "$out/$name-amd64.deb" usr
 fpm "${common[@]}" -t rpm -a x86_64 --rpm-os linux \
-  -d gtk3 -d 'glibc >= 2.38' -d 'libstdc++ >= 13' \
+  -d 'libgtk-3.so.0()(64bit)' -d 'libEGL.so.1()(64bit)' -d 'libGL.so.1()(64bit)' \
+  -d 'libc.so.6(GLIBC_2.38)(64bit)' -d 'libstdc++.so.6(GLIBCXX_3.4.32)(64bit)' \
   -p "$out/$name-x86_64.rpm" usr
 
 # AppImage
