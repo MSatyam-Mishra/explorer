@@ -145,6 +145,26 @@ jobs:
            done < "$GITHUB_WORKSPACE/packaging/linux/system-libs.txt")
           cp -a build/linux/x64/release/bundle portable
           cp -a mpv.AppDir/usr/lib/. portable/lib/
+          # linuxdeploy also leaves out what AppImages assume every system
+          # has (libjack...): add whatever else libmpv needs, except what's
+          # on the system list and glibc and the C++ runtime.
+          libmpv="$(find /usr/lib -name 'libmpv.so.2' | head -1)"
+          ldd "$libmpv" | awk '/=> \//{print $3}' | while read -r lib; do
+            name=$(basename "$lib")
+            [ -e "portable/lib/$name" ] && continue
+            case "$name" in
+              libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*|libstdc++.so*|libgcc_s.so*|libresolv.so*|libutil.so*) continue ;;
+            esac
+            skip=
+            while read -r pattern; do
+              case "$pattern" in ''|'#'*) continue ;; esac
+              case "$name" in $pattern) skip=1; break ;; esac
+            done < "$GITHUB_WORKSPACE/packaging/linux/system-libs.txt"
+            [ -n "$skip" ] && continue
+            cp -L "$lib" "portable/lib/$name"
+            patchelf --set-rpath '$ORIGIN' "portable/lib/$name"
+            echo "added $name"
+          done
           # Plugins link libmpv; let them find it next to them.
           for plugin in portable/lib/*_plugin.so; do
             patchelf --set-rpath '$ORIGIN' "$plugin"
