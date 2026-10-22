@@ -204,8 +204,8 @@ jobs:
       - name: Check that the packages install and start
         run: |
           running() { local status=0; xvfb-run -a timeout 20 "$@" || status=$?; [ "$status" = 124 ]; }
-          # GL and Mesa drivers, sound and video acceleration: a desktop has them, the runner lacks them.
-          sudo apt-get install -y libegl1 libgles2 libgl1 libegl-mesa0 libgl1-mesa-dri libgtk-3-0t64 libpulse0 libasound2t64 libpipewire-0.3-0t64 libva2 libva-drm2 libva-x11-2 libvdpau1
+          # GL and Mesa drivers and sound: a desktop has them, the runner lacks them.
+          sudo apt-get install -y libegl1 libgles2 libgl1 libegl-mesa0 libgl1-mesa-dri libgtk-3-0t64 libpulse0 libasound2t64 libpipewire-0.3-0t64
           # First the AppImage and the archive, with no libmpv on the
           # system: they must bring their own.
           chmod +x dist/*.AppImage
