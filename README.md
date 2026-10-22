@@ -79,6 +79,14 @@
 - Explorer shows up in Android's **Open with** and **Share** menus, so other apps can hand files to it.
 - Light and dark themes, three file-icon styles, and layouts for phones, tablets and foldables.
 
+### 🖥️ On Windows and Linux
+
+- **Mouse like a desktop file manager**: click selects, double-click opens, Ctrl-click and Shift-click select several, and right-click opens a context menu.
+- **Keyboard**: Enter opens, Delete deletes, F2 renames, Ctrl+A/C/X/V select all, copy, cut and paste, Ctrl+Shift+N makes a folder, F5 refreshes, Backspace or Alt+← goes up, Escape clears the selection.
+- **Several windows**: Ctrl+N, or **Open in new window** on a folder.
+- Video and audio play with [libmpv](https://mpv.io/) through media_kit. Images have previous and next buttons and arrow keys.
+- Hidden and system files stay out of the way; **Options → Show hidden files** lists them.
+
 ### 📄 Opens almost anything
 
 | Kind | Formats | What you can do |
@@ -124,15 +132,15 @@ Download videos or audio from the [over 1,000 sites yt-dlp supports](https://git
 - Downloads continue in the background with a notification and are saved to `Download/Explorer Videos`.
 - yt-dlp keeps itself up to date.
 - **On Android**, the first use asks to download the video engine (Python for yt-dlp, and FFmpeg): about 50 MB, or 120 MB once installed. It isn't in the APK, to keep the app small, and you can remove it in the downloader's settings.
-- **On desktop**, the official yt-dlp is downloaded on first use. Install [FFmpeg](https://ffmpeg.org/) to merge high-quality video and audio.
+- **On Windows and Linux**, the first use asks to download what's missing: the official yt-dlp, [FFmpeg](https://ffmpeg.org/) (yt-dlp's builds) and [Deno](https://deno.com/) (the JavaScript runtime YouTube needs), about 150 MB. An FFmpeg or JavaScript runtime already on your computer is used instead. Downloads resume if the connection drops, are checked against their published checksums, and can be removed in the downloader's settings. On a Mac, install FFmpeg with Homebrew.
 
 Only download content you have the right to download, and respect each site's terms.
 
 ### 🔒 Vault and tools
 
-- **Vault**: move private files out of sight of other apps with **Move to vault** in a file's menu. It opens with your fingerprint, face or screen lock.
+- **Vault** (Android, Windows, macOS): move private files out of sight with **Move to vault** in a file's menu. It opens with your fingerprint, face, Windows Hello or screen lock.
 - **App manager**: search installed apps, including system apps, and open their details.
-- **USB boot**: write an `.iso` or `.img` disk image to a USB drive to make it bootable (needs a rooted phone).
+- **USB boot** (Android): write an `.iso` or `.img` disk image to a USB drive to make it bootable (needs a rooted phone).
 
 ## Download
 
@@ -163,7 +171,7 @@ Windows 10 or 11, 64-bit.
 
 ### Linux
 
-64-bit, on a recent distro: Ubuntu 24.04, Debian 13, Fedora 39, openSUSE Tumbleweed or newer (glibc 2.38 or newer).
+64-bit, on a recent distro: Ubuntu 24.04, Debian 13, Fedora 40, openSUSE Tumbleweed or newer. The `.deb`, `.rpm` and snap use the system's libmpv for video; the others bring their own.
 
 | File | How to install |
 |---|---|
