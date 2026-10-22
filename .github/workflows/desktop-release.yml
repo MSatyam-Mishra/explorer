@@ -1,0 +1,98 @@
+name: Desktop apps
+
+# Builds the Windows and Linux apps for every app release (tags v*) and
+# attaches them to the GitHub release, next to the APKs. To build them for a
+# release that already exists, run this workflow by hand with its tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v1.0.6
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  FLUTTER_VERSION: 3.44.1
+
+jobs:
+  build:
+    # App releases only, not the video engine's.
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+          # The oldest supported Ubuntu, so the app runs on older distros too.
+          - platform: linux
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install Linux build tools
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter build ${{ matrix.platform }} --release
+
+      - name: Package the Windows app
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $name = "explorer-$env:TAG-windows-x64"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse build/windows/x64/runner/Release dist/Explorer
+          Compress-Archive -Path dist/Explorer -DestinationPath "dist/$name.zip"
+          "ASSET=dist/$name.zip" >> $env:GITHUB_ENV
+
+      - name: Package the Linux app
+        if: matrix.platform == 'linux'
+        run: |
+          name="explorer-$TAG-linux-x64"
+          mkdir -p dist
+          cp -r build/linux/x64/release/bundle dist/explorer
+          tar -C dist -czf "dist/$name.tar.gz" explorer
+          echo "ASSET=dist/$name.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$ASSET" --clobber --repo "$GITHUB_REPOSITORY"
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add the desktop apps to SHA256SUMS.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
+            --pattern 'SHA256SUMS.txt' --pattern '*-windows-x64.zip' --pattern '*-linux-x64.tar.gz'
+          cd assets
+          touch SHA256SUMS.txt
+          grep -v -e '-windows-x64\.zip$' -e '-linux-x64\.tar\.gz$' SHA256SUMS.txt > sums.txt || true
+          sha256sum -- *-windows-x64.zip *-linux-x64.tar.gz >> sums.txt
+          mv sums.txt SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
