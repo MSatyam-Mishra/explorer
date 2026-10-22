@@ -116,7 +116,7 @@ jobs:
       - name: Install Linux build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev patchelf
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -137,9 +137,19 @@ jobs:
           chmod +x linuxdeploy
           APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy --appdir mpv.AppDir \
             --library "$(find /usr/lib -name 'libmpv.so.2' | head -1)"
+          # What every desktop has (and must match its GTK, drivers and
+          # sound server) comes from the system.
+          (cd mpv.AppDir/usr/lib && while read -r pattern; do
+             case "$pattern" in ''|'#'*) continue ;; esac
+             rm -f $pattern
+           done < "$GITHUB_WORKSPACE/packaging/linux/system-libs.txt")
           cp -a build/linux/x64/release/bundle portable
           cp -a mpv.AppDir/usr/lib/. portable/lib/
-          ls -l portable/lib | head -80
+          # Plugins link libmpv; let them find it next to them.
+          for plugin in portable/lib/*_plugin.so; do
+            patchelf --set-rpath '$ORIGIN' "$plugin"
+          done
+          ls -lS portable/lib | head -40
           du -sh build/linux/x64/release/bundle portable
       # A tar keeps file modes and symlinks, which artifacts lose.
       - run: |
@@ -175,15 +185,18 @@ jobs:
         run: |
           running() { local status=0; xvfb-run -a timeout 20 "$@" || status=$?; [ "$status" = 124 ]; }
           # Mesa: the GL drivers a desktop has, which the runner lacks.
-          sudo apt-get install -y libegl-mesa0 libgl1-mesa-dri
-          sudo apt-get install -y ./dist/*.deb
-          running explorer
-          sudo apt-get remove -y explorer
-          rpm -qip dist/*.rpm
+          sudo apt-get install -y libegl-mesa0 libgl1-mesa-dri libgtk-3-0t64
+          # First the AppImage and the archive, with no libmpv on the
+          # system: they must bring their own.
           chmod +x dist/*.AppImage
           export APPIMAGE_EXTRACT_AND_RUN=1
           running dist/*.AppImage
           mkdir tar-check && tar -C tar-check -xJf dist/*.tar.xz && running tar-check/explorer/explorer
+          # Then the .deb, which installs the system's libmpv.
+          sudo apt-get install -y ./dist/*.deb
+          running explorer
+          sudo apt-get remove -y explorer
+          rpm -qip dist/*.rpm
 
       - uses: actions/upload-artifact@v4
         with:
