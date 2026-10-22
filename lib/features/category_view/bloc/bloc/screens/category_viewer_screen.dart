@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:explorer/core/files/file_types.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/category_view/bloc/bloc/category_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/entity_meta.dart';
@@ -171,6 +172,7 @@ class _GroupedAssets extends StatelessWidget {
               itemBuilder: (context, index) {
                 final item = items[index];
                 if (item is AssetEntity) return _MediaTile(asset: item);
+                if (item is File) return _FileTile(file: item);
                 if (item is FileSystemEntity) {
                   return Center(child: EntityIcon(entity: item, size: 40));
                 }
@@ -192,6 +194,34 @@ Future<void> _openAsset(BuildContext context, AssetEntity asset) async {
   final file = await asset.file;
   if (file == null || !context.mounted) return;
   await FileOpener.open(context, file);
+}
+
+/// A file from a folder (desktop media categories): a thumbnail for
+/// pictures, an icon otherwise.
+class _FileTile extends StatelessWidget {
+  const _FileTile({required this.file});
+
+  final File file;
+
+  @override
+  Widget build(BuildContext context) {
+    final kind = FileTypes.kindOf(file.path);
+    final icon = Center(child: EntityIcon(entity: file, size: 40));
+    return Material(
+      color: context.colors.muted,
+      child: InkWell(
+        onTap: () => FileOpener.open(context, file),
+        child: kind == FileKind.image
+            ? Image.file(
+                file,
+                fit: BoxFit.cover,
+                cacheWidth: 320,
+                errorBuilder: (_, _, _) => icon,
+              )
+            : icon,
+      ),
+    );
+  }
 }
 
 /// Square thumbnail; videos get a duration pill.

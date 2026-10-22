@@ -32,5 +32,14 @@ class ChangeSortOrder extends FileExplorerEvent {
 
 class ClearSelection extends FileExplorerEvent {}
 
+/// Selects exactly [items] (mouse clicks on desktop). [selectionMode] shows
+/// the selection bar and check boxes; without it the items are only
+/// highlighted.
+class SetSelection extends FileExplorerEvent {
+  final Set<FileSystemEntity> items;
+  final bool selectionMode;
+  SetSelection(this.items, {this.selectionMode = false});
+}
+
 /// Selects every entry in the current folder.
 class SelectAll extends FileExplorerEvent {}

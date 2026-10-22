@@ -1,0 +1,76 @@
+import 'dart:io';
+
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:path/path.dart' as p;
+import 'package:video_player_media_kit/video_player_media_kit.dart';
+
+/// Windows, Linux and macOS support that phones don't need.
+abstract final class Desktop {
+  static bool get isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  /// Windows and Linux play video and audio with media_kit (libmpv), as
+  /// video_player and just_audio have no implementation there. macOS keeps
+  /// their AVFoundation players.
+  static void initMedia() {
+    if (!Platform.isWindows && !Platform.isLinux) return;
+    String? libmpv;
+    if (Platform.isLinux) {
+      // The AppImage, the Flatpak and the archives carry their own libmpv
+      // next to the app's libraries; the .deb, .rpm and snap use the
+      // system's.
+      final bundled = p.join(
+        p.dirname(Platform.resolvedExecutable),
+        'lib',
+        'libmpv.so.2',
+      );
+      if (File(bundled).existsSync()) libmpv = bundled;
+    }
+    // Doesn't throw without libmpv: playback then reports an error instead.
+    MediaKit.ensureInitialized(libmpv: libmpv);
+    VideoPlayerMediaKit.ensureInitialized(windows: true, linux: true);
+    JustAudioMediaKit.ensureInitialized(
+      windows: true,
+      linux: true,
+      libmpv: libmpv,
+    );
+  }
+
+  /// Whether files can be shared with other apps (share_plus shares only
+  /// text on Linux).
+  static bool get canShareFiles => !Platform.isLinux;
+
+  /// Whether flutter_inappwebview works here (it has no Linux version).
+  static bool get webViewsSupported => !Platform.isLinux;
+
+  static const _folderFlag = '--folder=';
+
+  /// Opens another Explorer window showing [folder]. Each window is its own
+  /// process, so it keeps working if another one closes.
+  static Future<void> openWindow({String? folder}) async {
+    await Process.start(
+      Platform.resolvedExecutable,
+      [if (folder != null) '$_folderFlag$folder'],
+      mode: ProcessStartMode.detached,
+    );
+  }
+
+  /// What the command line asks to open: a folder (from [openWindow], or a
+  /// folder passed by the system) or a file to view.
+  static ({String? folder, String? file}) parseArgs(List<String> args) {
+    for (final arg in args) {
+      if (arg.startsWith(_folderFlag)) {
+        return (folder: arg.substring(_folderFlag.length), file: null);
+      }
+      if (arg.startsWith('-')) continue;
+      if (FileSystemEntity.isDirectorySync(arg)) {
+        return (folder: p.absolute(arg), file: null);
+      }
+      if (FileSystemEntity.isFileSync(arg)) {
+        return (folder: p.dirname(p.absolute(arg)), file: p.absolute(arg));
+      }
+    }
+    return (folder: null, file: null);
+  }
+}

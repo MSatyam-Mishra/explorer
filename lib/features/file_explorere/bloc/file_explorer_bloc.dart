@@ -57,6 +57,18 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       }
     });
 
+    on<SetSelection>((event, emit) {
+      final currentState = state;
+      if (currentState is FileExplorerLoaded) {
+        emit(
+          currentState.copyWith(
+            isSelectionMode: event.selectionMode,
+            selectedItems: Set<FileSystemEntity>.of(event.items),
+          ),
+        );
+      }
+    });
+
     on<ClearSelection>((event, emit) {
       final currentState = state;
       if (currentState is FileExplorerLoaded) {

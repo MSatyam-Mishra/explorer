@@ -12,7 +12,12 @@ abstract final class ExplorerPaths {
   static bool get isDesktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
+  /// The folder to start in instead of the usual home (a new desktop
+  /// window, or a folder passed on the command line).
+  static String? startFolder;
+
   static String get initialPath {
+    if (startFolder != null) return startFolder!;
     if (Platform.isWindows) return windowsRoots;
     if (Platform.isAndroid) return androidInternalStorage;
     return Platform.environment['HOME'] ?? '/';

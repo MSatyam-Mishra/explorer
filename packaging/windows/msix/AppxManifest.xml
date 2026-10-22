@@ -32,7 +32,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="Explorer" Executable="explorer.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Explorer" Executable="explory.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="Explorer"
         Description="The universal file manager: open, edit and share almost any file."

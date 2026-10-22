@@ -444,7 +444,7 @@ class _VideoDownloaderSettingsScreenState
         busy
             ? _c.engineMessage ?? 'Installing…'
             : engine.installed
-            ? 'Python and FFmpeg, ${DownloaderText.bytes(engine.diskBytes)}'
+            ? '${engine.contents}, ${DownloaderText.bytes(engine.diskBytes)}'
             : 'Not downloaded. Needed to download videos '
                   '(${DownloaderText.bytes(engine.downloadBytes)}).',
       ),

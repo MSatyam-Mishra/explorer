@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:explorer/core/platform/desktop.dart';
+import 'package:explorer/shared/widgets/web_view_unavailable.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -141,6 +143,15 @@ class _MarkdownPreviewState extends State<MarkdownPreview> {
 
   @override
   Widget build(BuildContext context) {
+    if (!Desktop.webViewsSupported) {
+      return Padding(
+        padding: EdgeInsets.only(top: widget.topPadding),
+        child: WebViewUnavailable(
+          file: widget.file,
+          title: "The preview can't be shown here",
+        ),
+      );
+    }
     final base = _base;
     if (base == null) return const ViewerLoading();
     return InAppWebView(

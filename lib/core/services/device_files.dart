@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:isolate';
 
 import 'package:explorer/core/files/file_types.dart';
@@ -99,6 +100,23 @@ abstract final class DeviceFiles {
     return Isolate.run(() => _walk(roots, extensions));
   }
 
+  /// Files with [extensions] under the user's home [folders] ("Pictures",
+  /// "Downloads"...), newest first: the media categories on Windows and
+  /// Linux, which have no media library.
+  static Future<List<DeviceFile>> findInHome(
+    List<String> folders,
+    Set<String> extensions,
+  ) {
+    final home =
+        Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
+    if (home == null) return Future.value(const []);
+    final roots = [
+      for (final name in folders)
+        if (Directory(p.join(home, name)).existsSync()) p.join(home, name),
+    ];
+    return Isolate.run(() => _walk(roots, extensions));
+  }
+
   static List<String> _desktopRoots() {
     final home =
         Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
@@ -146,9 +164,17 @@ abstract final class DeviceFiles {
   /// Forgets cached results, e.g. after files were moved or deleted.
   static void invalidate() => _cache.clear();
 
-  /// Keeps the screen on and Wi-Fi awake while sharing (Android).
+  /// Keeps the screen on and Wi-Fi awake while sharing; on computers,
+  /// keeps them from going to sleep.
   static Future<void> keepAwake(bool on) async {
-    if (!Platform.isAndroid) return;
+    if (!Platform.isAndroid) {
+      try {
+        await WakelockPlus.toggle(enable: on);
+      } catch (e) {
+        debugPrint('keepAwake failed: $e');
+      }
+      return;
+    }
     try {
       await _channel.invokeMethod<void>('keepAwake', {'on': on});
     } on PlatformException catch (e) {

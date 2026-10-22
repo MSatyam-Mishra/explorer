@@ -2,6 +2,11 @@ import 'dart:io';
 
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/platform/windows_locations.dart';
+import 'package:explorer/core/services/folder_prefs_service.dart';
+import 'package:ffi/ffi.dart';
+import 'package:path/path.dart' as p;
+import 'package:win32/win32.dart'
+    show FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, GetFileAttributes;
 
 /// Abstract repository to handle file system operations.
 /// This allows us to swap implementations for Root or Network access later.
@@ -34,7 +39,27 @@ class LocalFileRepository implements FileRepository {
     if (!await dir.exists()) {
       throw FileSystemException("Directory not found", path);
     }
-    return dir.list().toList();
+    final entries = await dir.list().toList();
+    final prefs = FolderPrefsService();
+    await prefs.init();
+    if (prefs.showHidden) return entries;
+    return [for (final e in entries) if (!isHidden(e.path)) e];
+  }
+
+  /// Dotfiles, and on Windows files marked hidden or system
+  /// (`$Recycle.Bin`, `pagefile.sys`, `desktop.ini`...).
+  static bool isHidden(String path) {
+    if (p.basename(path).startsWith('.')) return true;
+    if (!Platform.isWindows) return false;
+    final name = path.toNativeUtf16();
+    try {
+      final attributes = GetFileAttributes(name);
+      // 0xFFFFFFFF: INVALID_FILE_ATTRIBUTES (unreadable); keep it listed.
+      if (attributes == 0xFFFFFFFF) return false;
+      return attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0;
+    } finally {
+      calloc.free(name);
+    }
   }
 
   /// Display labels for entries under [ExplorerPaths.windowsRoots].

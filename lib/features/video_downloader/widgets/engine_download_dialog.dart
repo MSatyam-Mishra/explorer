@@ -26,10 +26,10 @@ Future<bool> showEngineDownloadDialog(BuildContext context, EngineInfo engine) a
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'The video downloader needs its engine (Python for yt-dlp, '
-                  "and FFmpeg) before it can download anything. It isn't part "
-                  'of the app, to keep the app small; you only download it once.',
+                Text(
+                  'The video downloader needs its engine (${engine.contents}) '
+                  "before it can download anything. It isn't part of the app, "
+                  'to keep the app small; you only download it once.',
                 ),
                 const SizedBox(height: 16),
                 _Fact(
@@ -45,8 +45,8 @@ Future<bool> showEngineDownloadDialog(BuildContext context, EngineInfo engine) a
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  "It comes from Explorer's GitHub page and is checked before "
-                  'it is installed. You can remove it in the downloader settings.',
+                  'It comes from ${engine.source} and is checked before it is '
+                  'installed. You can remove it in the downloader settings.',
                   style: text.bodySmall,
                 ),
               ],

@@ -55,7 +55,11 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused &&
+    // Phones pause in the background; desktop windows are only hidden
+    // (minimized), never paused.
+    final away = state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden;
+    if (away &&
         _unlocked &&
         !_unlocking &&
         !_stayUnlocked &&
@@ -215,10 +219,16 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                   padding: const EdgeInsets.all(24),
                   icon: LucideIcons.lockKeyhole,
                   title: 'Your vault is empty',
-                  description:
-                      'Files in the vault are hidden from other apps and the '
-                      'file list. Use Move to vault in a file\'s menu, or add '
-                      'files here.',
+                  description: Platform.isAndroid
+                      ? 'Files in the vault are hidden from other apps and the '
+                          'file list. Use Move to vault in a file\'s menu, or add '
+                          'files here.'
+                      // On a computer other programs can still reach the
+                      // app's folder, and the files aren't encrypted.
+                      : 'Files in the vault are moved out of your folders, and '
+                          'Explorer asks for your sign-in before showing them. '
+                          "They aren't encrypted. Use Move to vault in a file's "
+                          'menu, or add files here.',
                   actions: [
                     FilledButton.icon(
                       onPressed: _addFiles,

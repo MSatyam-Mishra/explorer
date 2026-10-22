@@ -16,6 +16,7 @@ class ExplorerOptionsSheet extends StatelessWidget {
     required this.onHttpShare,
     required this.onSortChanged,
     required this.onViewModeChanged,
+    required this.onShowHiddenChanged,
   });
 
   final FileExplorerLoaded fileState;
@@ -23,12 +24,16 @@ class ExplorerOptionsSheet extends StatelessWidget {
   final void Function(SortOption option, SortOrder order) onSortChanged;
   final void Function(ViewMode mode) onViewModeChanged;
 
+  /// "Show hidden files" was switched (saved already).
+  final VoidCallback onShowHiddenChanged;
+
   static Future<void> show(
     BuildContext context, {
     required FileExplorerLoaded fileState,
     required VoidCallback onHttpShare,
     required void Function(SortOption option, SortOrder order) onSortChanged,
     required void Function(ViewMode mode) onViewModeChanged,
+    required VoidCallback onShowHiddenChanged,
   }) {
     return AppSheet.show<void>(
       context,
@@ -37,6 +42,7 @@ class ExplorerOptionsSheet extends StatelessWidget {
         onHttpShare: onHttpShare,
         onSortChanged: onSortChanged,
         onViewModeChanged: onViewModeChanged,
+        onShowHiddenChanged: onShowHiddenChanged,
       ),
     );
   }
@@ -66,6 +72,19 @@ class ExplorerOptionsSheet extends StatelessWidget {
           ],
           selected: {fileState.viewMode},
           onSelectionChanged: (s) => onViewModeChanged(s.first),
+        ),
+        StatefulBuilder(
+          builder: (context, setState) => SwitchListTile(
+            contentPadding: const EdgeInsets.only(top: 8),
+            title: const Text('Show hidden files'),
+            subtitle: const Text('Files starting with a dot, and system files'),
+            value: FolderPrefsService().showHidden,
+            onChanged: (value) async {
+              await FolderPrefsService().setShowHidden(value);
+              setState(() {});
+              onShowHiddenChanged();
+            },
+          ),
         ),
         const _Heading('Sort by'),
         Row(

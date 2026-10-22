@@ -26,7 +26,7 @@ DefaultGroupName=Explorer
 DisableProgramGroupPage=yes
 LicenseFile={#RepoDir}\LICENSE
 SetupIconFile={#RepoDir}\windows\runner\resources\app_icon.ico
-UninstallDisplayIcon={app}\explorer.exe
+UninstallDisplayIcon={app}\explory.exe
 UninstallDisplayName=Explorer
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputName}
@@ -48,9 +48,13 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#AppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Versions up to 1.0.6 named the program explorer.exe.
+Type: files; Name: "{app}\explorer.exe"
+
 [Icons]
-Name: "{autoprograms}\Explorer"; Filename: "{app}\explorer.exe"
-Name: "{autodesktop}\Explorer"; Filename: "{app}\explorer.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Explorer"; Filename: "{app}\explory.exe"
+Name: "{autodesktop}\Explorer"; Filename: "{app}\explory.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\explorer.exe"; Description: "{cm:LaunchProgram,Explorer}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\explory.exe"; Description: "{cm:LaunchProgram,Explorer}"; Flags: nowait postinstall skipifsilent

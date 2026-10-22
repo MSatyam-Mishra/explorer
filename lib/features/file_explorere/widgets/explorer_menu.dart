@@ -34,12 +34,36 @@ abstract final class ExplorerMenu {
     );
   }
 
-  /// A row with an optional leading icon and a trailing check mark.
+  /// Opens [items] at [globalPosition], e.g. where a right-click happened.
+  static Future<T?> showAt<T>(
+    BuildContext context,
+    Offset globalPosition, {
+    required List<PopupMenuEntry<T>> items,
+    double minWidth = 220,
+  }) {
+    final overlay =
+        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final point = overlay.globalToLocal(globalPosition);
+    return showMenu<T>(
+      context: context,
+      position: RelativeRect.fromRect(
+        point & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: items,
+      constraints: BoxConstraints(minWidth: minWidth, maxWidth: 320),
+      menuPadding: const EdgeInsets.symmetric(vertical: 4),
+    );
+  }
+
+  /// A row with an optional leading icon, and a trailing check mark or
+  /// keyboard [shortcut] hint ("Ctrl+C").
   static PopupMenuItem<T> item<T>(
     BuildContext context, {
     required T value,
     required String label,
     IconData? icon,
+    String? shortcut,
     bool checked = false,
     bool destructive = false,
     bool enabled = true,
@@ -75,6 +99,16 @@ abstract final class ExplorerMenu {
           if (checked) ...[
             const SizedBox(width: 12),
             Icon(LucideIcons.check, size: 16, color: colors.foreground),
+          ],
+          if (shortcut != null) ...[
+            const SizedBox(width: 16),
+            Text(
+              shortcut,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colors.mutedForeground),
+            ),
           ],
         ],
       ),

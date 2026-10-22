@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 
@@ -21,6 +22,20 @@ class FolderPrefsService {
       _prefs = await SharedPreferences.getInstance();
       _initialized = true;
     }
+  }
+
+  static const _showHiddenKey = 'show_hidden_files';
+
+  /// Whether dotfiles and hidden or system files are listed. The phone app
+  /// always listed them; on computers they're hidden, as in other file
+  /// managers. Call [init] first.
+  bool get showHidden =>
+      (_initialized ? _prefs.getBool(_showHiddenKey) : null) ??
+      !ExplorerPaths.isDesktop;
+
+  Future<void> setShowHidden(bool value) async {
+    await init();
+    await _prefs.setBool(_showHiddenKey, value);
   }
 
   // Generate a hash for the path to keep keys short and clean

@@ -794,8 +794,8 @@ class _EngineCard extends StatelessWidget {
           Text(
             failed
                 ? error!
-                : 'Videos can only be downloaded with the engine: Python for '
-                    "yt-dlp, and FFmpeg. It's a one-time $size download.",
+                : 'Videos can only be downloaded with the engine: '
+                    "${engine.contents}. It's a one-time $size download.",
             style: text.bodySmall,
           ),
           const SizedBox(height: 12),

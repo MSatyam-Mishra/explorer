@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/viewer_image/image_codec.dart';
 import 'package:explorer/features/viewer_image/raw_image.dart';
@@ -10,7 +11,9 @@ import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
 import 'package:filesize/filesize.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:photo_view/photo_view.dart';
@@ -97,6 +100,47 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   File get _current => _images[_currentIndex];
+
+  /// Shows the image at [index] (buttons and keys on desktop).
+  void _goTo(int index) {
+    if (index < 0 || index >= _images.length || index == _currentIndex) return;
+    if (!_pageController.hasClients) return;
+    if ((index - _currentIndex).abs() == 1) {
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _pageController.jumpToPage(index);
+    }
+  }
+
+  KeyEventResult _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.pageUp ||
+        key == LogicalKeyboardKey.arrowUp) {
+      _goTo(_currentIndex - 1);
+    } else if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.pageDown ||
+        key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.space) {
+      _goTo(_currentIndex + 1);
+    } else if (key == LogicalKeyboardKey.home) {
+      _goTo(0);
+    } else if (key == LogicalKeyboardKey.end) {
+      _goTo(_images.length - 1);
+    } else if (key == LogicalKeyboardKey.escape) {
+      Navigator.maybePop(context);
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
 
   Future<void> _edit() async {
     final saved = await Navigator.push<String>(
@@ -193,12 +237,50 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         onPageChanged: (index) => setState(() => _currentIndex = index),
     );
     final raw = RawImages.isRaw(_current.path);
+    final arrows = Desktop.isDesktop && _images.length > 1;
     // Always the same Stack, so swiping onto a raw doesn't re-parent (and
     // reset) the gallery mid-gesture.
     final galleryWithBadge = Stack(
       fit: StackFit.expand,
       children: [
-        gallery,
+        // A mouse can drag between images too (Flutter leaves mouse drags
+        // out of scrolling by default).
+        ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: PointerDeviceKind.values.toSet(),
+          ),
+          child: gallery,
+        ),
+        if (arrows) ...[
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _NavButton(
+                icon: LucideIcons.chevronLeft,
+                tooltip: 'Previous (←)',
+                onPressed: _currentIndex > 0
+                    ? () => _goTo(_currentIndex - 1)
+                    : null,
+              ),
+            ),
+          ),
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _NavButton(
+                icon: LucideIcons.chevronRight,
+                tooltip: 'Next (→)',
+                onPressed: _currentIndex < _images.length - 1
+                    ? () => _goTo(_currentIndex + 1)
+                    : null,
+              ),
+            ),
+          ),
+        ],
         if (_images.length > 1 || raw)
           Positioned(
             left: 16,
@@ -289,7 +371,47 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             const SizedBox(width: 4),
           ],
         ),
-        body: body,
+        body: Focus(
+          autofocus: true,
+          onKeyEvent: (_, event) => _onKey(event),
+          child: body,
+        ),
+      ),
+    );
+  }
+}
+
+/// Round previous/next button over the photo (desktop).
+class _NavButton extends StatelessWidget {
+  const _NavButton({required this.icon, required this.tooltip, this.onPressed});
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return AnimatedOpacity(
+      opacity: enabled ? 1 : 0,
+      duration: const Duration(milliseconds: 150),
+      child: IgnorePointer(
+        ignoring: !enabled,
+        child: Tooltip(
+          message: tooltip,
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.45),
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onPressed,
+              child: SizedBox.square(
+                dimension: 44,
+                child: Icon(icon, color: Colors.white, size: 24),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

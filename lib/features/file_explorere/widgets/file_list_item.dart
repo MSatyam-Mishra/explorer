@@ -32,7 +32,8 @@ class FileListItem extends StatelessWidget {
   final FileRowStyle style;
 
   /// Right click / two-finger tap (desktop, trackpads).
-  final VoidCallback? onSecondaryTap;
+  /// Right-click, with where it happened (for a context menu).
+  final GestureTapUpCallback? onSecondaryTapUp;
 
   const FileListItem({
     super.key,
@@ -43,7 +44,7 @@ class FileListItem extends StatelessWidget {
     required this.onLongPress,
     this.displayName,
     this.style = FileRowStyle.comfortable,
-    this.onSecondaryTap,
+    this.onSecondaryTapUp,
   });
 
   static double heightFor(FileRowStyle style) => switch (style) {
@@ -86,7 +87,7 @@ class FileListItem extends StatelessWidget {
           borderRadius: radius,
           onTap: onTap,
           onLongPress: onLongPress,
-          onSecondaryTap: onSecondaryTap,
+          onSecondaryTapUp: onSecondaryTapUp,
           child: SizedBox(
             height: heightFor(style),
             child: Padding(

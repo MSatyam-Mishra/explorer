@@ -16,6 +16,7 @@ import 'package:explorer/features/sidebar/bloc/bloc/sidebar_bloc.dart';
 import 'package:explorer/features/tools/screens/app_manager_screen.dart';
 import 'package:explorer/features/tools/screens/usb_boot_screen.dart';
 import 'package:explorer/features/vault/screens/vault_screen.dart';
+import 'package:explorer/features/vault/vault_store.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
 import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:explorer/shared/widgets/storage_drawer.dart';
@@ -65,6 +66,8 @@ class MainDrawerContent extends StatelessWidget {
               const AppSidebarSection('Storage'),
               if (Platform.isWindows)
                 const _WindowsStorageSection()
+              else if (Platform.isLinux || Platform.isMacOS)
+                const _UnixStorageSection()
               else
                 BlocBuilder<SidebarBloc, SidebarState>(
                   builder: (context, state) => Column(
@@ -91,7 +94,8 @@ class MainDrawerContent extends StatelessWidget {
                   return Column(
                     children: [
                       for (final category in state.categories)
-                        if (category.name != 'Apps' || Platform.isAndroid)
+                        if ((category.name != 'Apps' || Platform.isAndroid) &&
+                            (category.name != 'Vault' || VaultStore.supported))
                           AppSidebarItem(
                             icon: _categoryIcon(category.name) ?? category.icon,
                             label: category.name,
@@ -123,11 +127,13 @@ class MainDrawerContent extends StatelessWidget {
                   label: 'Video downloader',
                   onTap: () => _push(context, const VideoDownloaderScreen()),
                 ),
-              AppSidebarItem(
-                icon: LucideIcons.usb,
-                label: 'USB boot',
-                onTap: () => _push(context, const UsbBootScreen()),
-              ),
+              // Writing disk images needs Android's USB host access (or root).
+              if (Platform.isAndroid)
+                AppSidebarItem(
+                  icon: LucideIcons.usb,
+                  label: 'USB boot',
+                  onTap: () => _push(context, const UsbBootScreen()),
+                ),
               AppSidebarItem(
                 icon: LucideIcons.info,
                 label: 'About and licences',
@@ -294,6 +300,59 @@ class _SidebarHeader extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Linux and macOS: the home folder, the whole file system and mounted
+/// drives (USB sticks, other disks).
+class _UnixStorageSection extends StatefulWidget {
+  const _UnixStorageSection();
+
+  @override
+  State<_UnixStorageSection> createState() => _UnixStorageSectionState();
+}
+
+class _UnixStorageSectionState extends State<_UnixStorageSection> {
+  late final List<Directory> _volumes = _findVolumes();
+
+  static List<Directory> _findVolumes() {
+    final user = Platform.environment['USER'];
+    final parents = Platform.isMacOS
+        ? const ['/Volumes']
+        : [if (user != null) ...['/media/$user', '/run/media/$user'], '/mnt'];
+    final found = <Directory>[];
+    for (final parent in parents) {
+      try {
+        for (final entity in Directory(parent).listSync(followLinks: false)) {
+          if (entity is Directory) found.add(entity);
+        }
+      } on FileSystemException {
+        // Missing or unreadable.
+      }
+    }
+    return found;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final home = Platform.environment['HOME'];
+    return Column(
+      children: [
+        if (home != null)
+          StorageDrawerItem(icon: LucideIcons.house, title: 'Home', path: home),
+        const StorageDrawerItem(
+          icon: LucideIcons.hardDrive,
+          title: 'File system',
+          path: '/',
+        ),
+        for (final volume in _volumes)
+          StorageDrawerItem(
+            icon: LucideIcons.usb,
+            title: p.basename(volume.path),
+            path: volume.path,
+          ),
+      ],
     );
   }
 }

@@ -34,6 +34,10 @@ class VaultItem {
 class VaultStore {
   VaultStore({Directory? root}) : _root = root;
 
+  /// The vault opens with the fingerprint, face or screen lock (local_auth),
+  /// which Linux doesn't have.
+  static bool get supported => !Platform.isLinux;
+
   Directory? _root;
 
   Future<Directory> _dir() async => _root ??= Directory(

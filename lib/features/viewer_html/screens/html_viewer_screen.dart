@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:explorer/core/platform/desktop.dart';
+import 'package:explorer/shared/widgets/web_view_unavailable.dart';
 import 'dart:io';
 
 import 'package:explorer/core/services/local_content_server.dart';
@@ -29,11 +31,12 @@ class HtmlViewerScreen extends StatefulWidget {
 
 class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
   final _editorKey = GlobalKey<TextEditorPaneState>();
-  bool _showSource = false;
+  // No web view on Linux: start on the source.
+  bool _showSource = !Desktop.webViewsSupported;
 
   /// The source editor is built on first use: laying out a whole page's
   /// source in a hidden TextField would slow down showing the page.
-  bool _sourceCreated = false;
+  bool _sourceCreated = !Desktop.webViewsSupported;
   bool _dirty = false;
   Uri? _base;
   int _renderToken = 0;
@@ -224,6 +227,12 @@ class _HtmlViewerScreenState extends State<HtmlViewerScreen> {
   }
 
   Widget _buildRendered() {
+    if (!Desktop.webViewsSupported) {
+      return WebViewUnavailable(
+        file: widget.file,
+        title: "The page can't be shown here",
+      );
+    }
     final base = _base;
     if (base == null) return const ViewerLoading();
     final url = base.resolve(Uri.encodeComponent(p.basename(widget.file.path)));

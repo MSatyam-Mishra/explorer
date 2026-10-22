@@ -5,16 +5,19 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'desktop_tools.dart';
 import 'downloader_backend.dart';
 import 'ytdlp_args.dart';
 import 'ytdlp_installer.dart';
 import 'ytdlp_models.dart';
 import 'ytdlp_output.dart';
 
-/// Windows, macOS and Linux: the official yt-dlp executable (downloaded on
-/// first use into the app support folder), with FFmpeg from the system when
-/// there is one. Jobs run in this process, so they continue while the app
-/// is open, whichever screen is showing.
+/// Windows, macOS and Linux: the official yt-dlp executable, with FFmpeg
+/// and a JavaScript runtime (for YouTube) from the system when it has them.
+/// What's missing is downloaded into the app support folder once the user
+/// agrees (the "video engine": yt-dlp, FFmpeg, Deno). Jobs run in this
+/// process, so they continue while the app is open, whichever screen is
+/// showing.
 class DesktopDownloaderBackend extends VideoDownloaderBackend {
   DesktopDownloaderBackend({Directory? supportDirectory, Directory? tempDirectory})
       : _supportOverride = supportDirectory,
@@ -27,7 +30,9 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
   final _fetches = <String, Process>{};
   final _cancelledFetches = <String>{};
   YtDlpInstaller? _installer;
+  DesktopTools? _desktopTools;
   _Tools? _tools;
+  bool _cancelSetup = false;
   String? _versionCache;
   DateTime? _versionStamp;
 
@@ -40,43 +45,122 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
     return _installer = YtDlpInstaller(Directory(p.join(base.path, 'video_downloader')));
   }
 
-  _Tools _findTools() => _tools ??= _Tools.find();
+  Future<DesktopTools> _downloadedTools() async {
+    if (_desktopTools != null) return _desktopTools!;
+    final installer = await _ytDlp();
+    return _desktopTools = DesktopTools(installer.directory);
+  }
+
+  Future<_Tools> _findTools() async =>
+      _tools ??= _Tools.find(await _downloadedTools());
+
+  /// The engine's parts this computer needs: yt-dlp always, FFmpeg and Deno
+  /// unless the system has them (or there's no download for them, as for
+  /// FFmpeg on macOS).
+  Future<List<_Part>> _parts() async {
+    final installer = await _ytDlp();
+    final downloaded = await _downloadedTools();
+    final tools = await _findTools();
+    return [
+      _Part(
+        'yt-dlp',
+        installed: installer.isInstalled,
+        downloadBytes: Platform.isWindows ? 18000000 : 36000000,
+        diskBytes: Platform.isWindows ? 18000000 : 36000000,
+        install: (progress, cancelled) =>
+            installer.install(onProgress: progress, isCancelled: cancelled),
+      ),
+      if (DesktopTools.ffmpegAsset() != null &&
+          (downloaded.hasFfmpeg || tools.ffmpeg == null))
+        _Part(
+          'FFmpeg',
+          installed: downloaded.hasFfmpeg,
+          downloadBytes: DesktopTools.ffmpegDownloadBytes,
+          diskBytes: DesktopTools.ffmpegDiskBytes,
+          install: (progress, cancelled) =>
+              downloaded.installFfmpeg(onProgress: progress, isCancelled: cancelled),
+        ),
+      if (DesktopTools.denoAsset() != null &&
+          (downloaded.hasDeno || tools.jsRuntime == null))
+        _Part(
+          'Deno',
+          installed: downloaded.hasDeno,
+          downloadBytes: DesktopTools.denoDownloadBytes,
+          diskBytes: DesktopTools.denoDiskBytes,
+          install: (progress, cancelled) =>
+              downloaded.installDeno(onProgress: progress, isCancelled: cancelled),
+        ),
+    ];
+  }
+
+  static String _list(List<String> names) => names.length < 2
+      ? names.join()
+      : '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
 
   @override
   Future<BackendStatus> status() async {
     final installer = await _ytDlp();
-    final tools = _findTools();
+    final tools = await _findTools();
+    final parts = await _parts();
+    final missing = parts.where((part) => !part.installed).toList();
     return BackendStatus(
       ready: installer.isInstalled,
-      needsSetup: !installer.isInstalled,
+      needsSetup: missing.isNotEmpty,
       hasFfmpeg: tools.ffmpeg != null,
       ffmpegNote: tools.ffmpeg != null
-          ? 'Using FFmpeg at ${tools.ffmpeg}.'
+          ? (tools.ffmpegDownloaded
+              ? 'FFmpeg is part of the video engine.'
+              : 'Using FFmpeg at ${tools.ffmpeg}.')
           : 'FFmpeg was not found. Without it Explorer can only download '
               'formats that already contain both video and audio (often '
               'lower quality), and cannot convert to MP3 or embed '
-              'thumbnails. Install FFmpeg and make sure it is on your PATH, '
+              'thumbnails. Install FFmpeg (on a Mac: brew install ffmpeg), '
               'then reopen the downloader.',
-      setupNote: 'The first time, Explorer downloads the official yt-dlp '
-          'program (${YtDlpInstaller.assetName()}, about 20–40 MB) from '
-          'github.com/yt-dlp/yt-dlp and checks its SHA-256 checksum.',
+      setupNote: 'A one-time download. Keep Explorer open until it\'s done.',
+      engine: EngineInfo(
+        installed: missing.isEmpty,
+        downloadBytes: missing.fold(0, (sum, part) => sum + part.downloadBytes),
+        diskBytes: parts.fold(0, (sum, part) => sum + part.diskBytes),
+        contents: _list([for (final part in parts) part.name]),
+        source: 'the GitHub pages of ${_list([for (final part in parts) part.name])}',
+      ),
     );
   }
 
   @override
   Future<void> prepare({void Function(double? progress, String message)? onProgress}) async {
+    _cancelSetup = false;
+    final missing = (await _parts()).where((part) => !part.installed).toList();
+    for (final (index, part) in missing.indexed) {
+      final step = missing.length > 1 ? ' (${index + 1} of ${missing.length})' : '';
+      onProgress?.call(null, 'Downloading ${part.name}$step…');
+      await part.install((received, total) {
+        final mb = (received / 1e6).toStringAsFixed(0);
+        onProgress?.call(
+          total == null ? null : received / total,
+          total == null
+              ? 'Downloading ${part.name}$step: $mb MB'
+              : 'Downloading ${part.name}$step: $mb of ${(total / 1e6).toStringAsFixed(0)} MB',
+        );
+      }, () => _cancelSetup);
+    }
+    _tools = null;
+  }
+
+  @override
+  Future<void> cancelPrepare() async => _cancelSetup = true;
+
+  @override
+  Future<void> removeEngine() async {
+    if (_jobs.values.any((j) => j.isActive) || _fetches.isNotEmpty) {
+      throw const DownloaderException(
+          'Wait for the downloads to finish, then remove the video engine.');
+    }
     final installer = await _ytDlp();
-    if (installer.isInstalled) return;
-    onProgress?.call(null, 'Downloading yt-dlp…');
-    await installer.install(onProgress: (received, total) {
-      final mb = (received / 1e6).toStringAsFixed(1);
-      onProgress?.call(
-        total == null ? null : received / total,
-        total == null
-            ? 'Downloading yt-dlp… $mb MB'
-            : 'Downloading yt-dlp… $mb of ${(total / 1e6).toStringAsFixed(1)} MB',
-      );
-    });
+    await (await _downloadedTools()).remove();
+    if (await installer.binary.exists()) await installer.binary.delete();
+    _tools = null;
+    _versionCache = null;
   }
 
   @override
@@ -137,7 +221,7 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
   static const _env = {'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'};
 
   Future<List<String>> _commonArgs() async {
-    final tools = _findTools();
+    final tools = await _findTools();
     return [
       if (tools.ffmpeg != null) ...['--ffmpeg-location', tools.ffmpeg!],
       if (tools.jsRuntime != null) ...['--js-runtimes', tools.jsRuntime!],
@@ -286,7 +370,7 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
       } else {
         job.status = JobStatus.failed;
         var error = job.tracker.failureMessage('yt-dlp exited with code $code');
-        if (_findTools().ffmpeg == null && error.contains('Requested format is not available')) {
+        if (_tools?.ffmpeg == null && error.contains('Requested format is not available')) {
           error = 'This video is only offered as separate video and audio '
               'streams, which need FFmpeg to be combined. Install FFmpeg, make '
               'sure it is on your PATH, reopen the downloader and retry.';
@@ -397,17 +481,47 @@ class _DesktopJob {
 /// FFmpeg and a JavaScript runtime (yt-dlp needs one for YouTube), looked
 /// up on PATH and in the usual install folders: apps started from the
 /// macOS Finder don't get the shell's PATH.
+/// A part of the desktop video engine.
+class _Part {
+  _Part(
+    this.name, {
+    required this.installed,
+    required this.downloadBytes,
+    required this.diskBytes,
+    required this.install,
+  });
+
+  final String name;
+  final bool installed;
+  final int downloadBytes;
+  final int diskBytes;
+  final Future<void> Function(
+    void Function(int received, int? total) onProgress,
+    bool Function() isCancelled,
+  ) install;
+}
+
 class _Tools {
-  const _Tools({this.ffmpeg, this.jsRuntime});
+  const _Tools({this.ffmpeg, this.jsRuntime, this.ffmpegDownloaded = false});
 
   final String? ffmpeg;
+
+  /// [ffmpeg] is the engine's, not the system's.
+  final bool ffmpegDownloaded;
 
   /// yt-dlp `--js-runtimes` value, e.g. "node:/usr/bin/node". Null when
   /// none was found, or deno is on PATH (yt-dlp's default).
   final String? jsRuntime;
 
-  static _Tools find() {
-    final ffmpeg = which('ffmpeg');
+  /// The system's FFmpeg and JavaScript runtime, else the ones in
+  /// [downloaded].
+  static _Tools find(DesktopTools downloaded) {
+    var ffmpeg = which('ffmpeg');
+    var ffmpegDownloaded = false;
+    if (ffmpeg == null && downloaded.hasFfmpeg) {
+      ffmpeg = downloaded.ffmpeg.path;
+      ffmpegDownloaded = true;
+    }
     String? js;
     for (final runtime in const ['deno', 'node', 'bun']) {
       final path = which(runtime);
@@ -416,7 +530,8 @@ class _Tools {
         break;
       }
     }
-    return _Tools(ffmpeg: ffmpeg, jsRuntime: js);
+    if (js == null && downloaded.hasDeno) js = 'deno:${downloaded.deno.path}';
+    return _Tools(ffmpeg: ffmpeg, jsRuntime: js, ffmpegDownloaded: ffmpegDownloaded);
   }
 
   static String? which(String name) {

@@ -22,15 +22,24 @@ class EngineMissingException extends DownloaderException {
 }
 
 /// An engine that is downloaded separately, once the user agrees (Android:
-/// Python and FFmpeg for yt-dlp, ~50 MB, left out of the APK).
+/// Python and FFmpeg for yt-dlp, ~50 MB, left out of the APK; desktop:
+/// yt-dlp, and FFmpeg and Deno unless the computer has them).
 class EngineInfo {
   const EngineInfo({
     required this.installed,
     required this.downloadBytes,
     required this.diskBytes,
+    this.contents = 'Python and FFmpeg',
+    this.source = "Explorer's GitHub page",
   });
 
   final bool installed;
+
+  /// What it is made of, e.g. "yt-dlp, FFmpeg and Deno".
+  final String contents;
+
+  /// Where it is downloaded from.
+  final String source;
 
   /// Size of the download.
   final int downloadBytes;

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:explorer/core/platform/desktop.dart';
+import 'package:explorer/shared/widgets/web_view_unavailable.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -563,6 +565,17 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The viewer is a three.js page, and Linux has no web view.
+    if (!Desktop.webViewsSupported) {
+      return ExplorerScaffold(
+        title: _fileName,
+        body: WebViewUnavailable(
+          file: widget.originalFile ?? widget.file,
+          title: "The 3D viewer isn't available here",
+          inBrowser: false,
+        ),
+      );
+    }
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {

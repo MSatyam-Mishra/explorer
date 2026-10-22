@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/shared/ui/app_ui.dart';
@@ -543,11 +544,12 @@ class ExplorerSelectionHeader extends StatelessWidget {
                 style: AppForeground.title(context),
               ),
             ),
-            AppIconButton(
-              icon: const Icon(LucideIcons.share2),
-              tooltip: 'Share',
-              onPressed: any ? onShare : null,
-            ),
+            if (Desktop.canShareFiles)
+              AppIconButton(
+                icon: const Icon(LucideIcons.share2),
+                tooltip: 'Share',
+                onPressed: any ? onShare : null,
+              ),
             AppIconButton(
               icon: const Icon(LucideIcons.radio),
               tooltip: 'Send nearby',

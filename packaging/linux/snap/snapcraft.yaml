@@ -34,3 +34,6 @@ parts:
   explorer:
     plugin: dump
     source: bundle
+    # Video and audio playback (media_kit).
+    stage-packages:
+      - libmpv2

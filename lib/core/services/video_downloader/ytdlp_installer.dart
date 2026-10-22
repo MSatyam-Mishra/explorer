@@ -65,6 +65,7 @@ class YtDlpInstaller {
   Future<String> install({
     String? tag,
     void Function(int received, int? total)? onProgress,
+    bool Function()? isCancelled,
   }) async {
     tag ??= await latestTag().catchError((Object _) => '');
     final base = tag.isEmpty ? '$_releases/latest/download' : '$_releases/download/$tag';
@@ -91,6 +92,9 @@ class YtDlpInstaller {
       var received = 0;
       try {
         await for (final chunk in response) {
+          if (isCancelled?.call() ?? false) {
+            throw const DownloaderException('Cancelled', cancelled: true);
+          }
           final bytes = chunk is Uint8List ? chunk : Uint8List.fromList(chunk);
           digest.update(bytes, 0, bytes.length);
           sink.add(bytes);

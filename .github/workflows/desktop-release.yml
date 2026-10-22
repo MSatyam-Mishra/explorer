@@ -86,7 +86,7 @@ jobs:
           $setup = (Get-ChildItem dist/*-setup.exe).FullName
           Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
           $dir = "$env:LOCALAPPDATA\Programs\Explorer"
-          if (-not (Test-Path "$dir\explorer.exe")) { throw 'The installer did not install explorer.exe' }
+          if (-not (Test-Path "$dir\explory.exe")) { throw 'The installer did not install explory.exe' }
           Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
 
           Import-Certificate -FilePath (Get-ChildItem dist/*.cer).FullName -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
@@ -116,7 +116,7 @@ jobs:
       - name: Install Linux build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -128,12 +128,29 @@ jobs:
       - name: Show the native build error
         if: failure()
         run: ninja -C build/linux/x64/release 2>&1 | tail -80
+      # The AppImage, the Flatpak and the archives carry libmpv (video and
+      # audio) and the libraries it needs that a desktop may lack, next to
+      # the app's own; the .deb, .rpm and snap use the system's libmpv.
+      - name: Make the portable bundle
+        run: |
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy --appdir mpv.AppDir \
+            --library "$(find /usr/lib -name 'libmpv.so.2' | head -1)"
+          cp -a build/linux/x64/release/bundle portable
+          cp -a mpv.AppDir/usr/lib/. portable/lib/
+          ls -l portable/lib | head -80
+          du -sh build/linux/x64/release/bundle portable
       # A tar keeps file modes and symlinks, which artifacts lose.
-      - run: tar -C build/linux/x64/release -cf bundle.tar bundle
+      - run: |
+          tar -C build/linux/x64/release -cf bundle.tar bundle
+          tar -cf portable.tar portable
       - uses: actions/upload-artifact@v4
         with:
           name: linux-bundle
-          path: bundle.tar
+          path: |
+            bundle.tar
+            portable.tar
 
   linux-packages:
     needs: linux-build
@@ -145,13 +162,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: linux-bundle
-      - run: tar -xf bundle.tar
+      - run: tar -xf bundle.tar && tar -xf portable.tar
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ruby-dev rpm xvfb
           sudo gem install --no-document fpm
-      - run: bash packaging/linux/make-packages.sh "${TAG#v}" bundle dist
+      - run: bash packaging/linux/make-packages.sh "${TAG#v}" bundle portable dist
 
       # Started under a virtual display, the app must still run after 20 s.
       - name: Check that the packages install and start
@@ -195,7 +212,8 @@ jobs:
       - name: Build the Flatpak
         run: |
           mkdir -p fp/input dist
-          tar -C fp/input -xf bundle.tar
+          tar -xf portable.tar
+          mv portable fp/input/bundle
           cp packaging/linux/flatpak/com.synqixlabs.explory.yml fp/
           cp packaging/linux/com.synqixlabs.explory.desktop packaging/linux/com.synqixlabs.explory.metainfo.xml fp/input/
           cp -a packaging/linux/icons fp/input/

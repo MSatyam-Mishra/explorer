@@ -21,7 +21,7 @@ class FileGridItem extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
-    this.onSecondaryTap,
+    this.onSecondaryTapUp,
     this.gallery = false,
   });
 
@@ -31,7 +31,8 @@ class FileGridItem extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  final VoidCallback? onSecondaryTap;
+  /// Right-click, with where it happened (for a context menu).
+  final GestureTapUpCallback? onSecondaryTapUp;
   final bool gallery;
 
   @override
@@ -53,7 +54,7 @@ class FileGridItem extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        onSecondaryTap: onSecondaryTap,
+        onSecondaryTapUp: onSecondaryTapUp,
         child: Stack(
           children: [
             Positioned.fill(

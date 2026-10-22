@@ -1,7 +1,12 @@
 // FILE PATH: lib/main.dart
 
+import 'dart:io';
+
 import 'package:explorer/core/app/app_bloc_observer.dart';
 import 'package:explorer/core/app_licenses.dart';
+import 'package:explorer/core/platform/desktop.dart';
+import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/services/incoming_files.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_licenses.dart';
@@ -19,11 +24,26 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   Bloc.observer = const AppBlocObserver();
   registerAppLicenses();
   if (kVideoDownloaderEnabled) registerVideoDownloaderLicenses();
+  Desktop.initMedia();
+
+  // Desktop: a new window (or the system) can pass a folder to show or a
+  // file to open.
+  final launch = Desktop.isDesktop
+      ? Desktop.parseArgs(args)
+      : (folder: null, file: null);
+  ExplorerPaths.startFolder = launch.folder;
+  final launchFile = launch.file;
+  if (launchFile != null) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _navigatorKey.currentContext;
+      if (context != null) FileOpener.open(context, File(launchFile));
+    });
+  }
 
   // Launched from another app ("Open with" a file, or "Share" a link): go
   // straight to the viewer or the video downloader.

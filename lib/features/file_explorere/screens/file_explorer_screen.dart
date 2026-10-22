@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/router/file_opener.dart';
@@ -11,6 +13,7 @@ import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_header.dart';
+import 'package:explorer/features/file_explorere/widgets/explorer_menu.dart';
 import 'package:explorer/features/file_explorere/widgets/file_grid_item.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
 import 'package:explorer/features/file_explorere/widgets/paste_bar.dart';
@@ -23,6 +26,7 @@ import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_options_sheet.dart';
 import 'package:explorer/shared/widgets/main_drawer.dart';
 import 'package:explorer/shared/widgets/progress_card.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -31,6 +35,27 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 FileActionsService fileActionsService = FileActionsService();
+
+/// Mouse clicks in the file list (one explorer per window): the kind of the
+/// last pointer, and what was clicked last, for double-clicks and Shift
+/// ranges.
+final _clicks = _Clicks();
+
+class _Clicks {
+  PointerDeviceKind kind = PointerDeviceKind.touch;
+  String? lastPath;
+  DateTime lastTime = DateTime(0);
+  String? anchorPath;
+
+  /// A mouse clicks like on a desktop (click selects, double-click opens);
+  /// touch taps like on a phone (tap opens).
+  bool get mouse => kind == PointerDeviceKind.mouse;
+}
+
+/// Ctrl, or Cmd on macOS.
+bool get _commandPressed => Platform.isMacOS
+    ? HardwareKeyboard.instance.isMetaPressed
+    : HardwareKeyboard.instance.isControlPressed;
 
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
@@ -61,6 +86,9 @@ class _FileExplorerScreenState extends State<FileExplorerScreen>
   /// Coming back from system settings: pick up a newly granted permission.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Computers need no storage permission (and permission_handler has no
+    // Linux version).
+    if (ExplorerPaths.isDesktop) return;
     if (state == AppLifecycleState.resumed && !_granted) {
       setState(() => _permission = Permission.manageExternalStorage.status);
     }
@@ -282,17 +310,86 @@ class _FileExplorerUI extends StatelessWidget {
           context.read<FileExplorerBloc>().add(LoadDirectory(parentPath));
         }
       },
-      child: docked
-          ? ColoredBox(
-              color: context.colors.background,
-              child: AdaptiveSplitView(
-                secondaryWidth: _sidebarWidth,
-                primary: page,
-                secondary: const DockedSidebar(child: MainDrawerContent()),
-              ),
-            )
-          : page,
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: (_, event) => _onKey(context, event),
+        child: docked
+            ? ColoredBox(
+                color: context.colors.background,
+                child: AdaptiveSplitView(
+                  secondaryWidth: _sidebarWidth,
+                  primary: page,
+                  secondary: const DockedSidebar(child: MainDrawerContent()),
+                ),
+              )
+            : page,
+      ),
     );
+  }
+
+  /// Keyboard shortcuts of desktop file managers.
+  KeyEventResult _onKey(BuildContext context, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    // Typing in a text field: the keys are the field's.
+    if (FocusManager.instance.primaryFocus?.context?.widget is EditableText) {
+      return KeyEventResult.ignored;
+    }
+    final bloc = context.read<FileExplorerBloc>();
+    final state = bloc.state;
+    if (state is! FileExplorerLoaded) return KeyEventResult.ignored;
+    final keys = HardwareKeyboard.instance;
+    final key = event.logicalKey;
+    final command = _commandPressed;
+    final selected = state.selectedItems.toList();
+    final single = selected.length == 1 ? selected.single : null;
+    final inFolder = !ExplorerPaths.isWindowsRoots(state.path);
+    final clipboard = context.read<ClipboardBloc>();
+
+    if (command && key == LogicalKeyboardKey.keyA) {
+      bloc.add(SelectAll());
+    } else if (command && key == LogicalKeyboardKey.keyC && selected.isNotEmpty) {
+      clipboard.add(CopyToClipboard(selected.first));
+    } else if (command && key == LogicalKeyboardKey.keyX && selected.isNotEmpty) {
+      clipboard.add(CutToClipboard(selected.first));
+    } else if (command && key == LogicalKeyboardKey.keyV) {
+      if (clipboard.state is ClipboardReadyToPaste && inFolder) {
+        clipboard.add(PasteFromClipboard(state.path));
+      }
+    } else if (command && keys.isShiftPressed && key == LogicalKeyboardKey.keyN) {
+      if (inFolder) {
+        fileActionsService.showCreateFolderDialog(context, state.path);
+      }
+    } else if (command && key == LogicalKeyboardKey.keyN && Desktop.isDesktop) {
+      Desktop.openWindow(folder: state.path);
+    } else if (key == LogicalKeyboardKey.f5 ||
+        (command && key == LogicalKeyboardKey.keyR)) {
+      bloc.add(LoadDirectory(state.path));
+    } else if (key == LogicalKeyboardKey.enter && single != null) {
+      if (keys.isAltPressed) {
+        fileActionsService.showInfoSheet(single, context);
+      } else {
+        _open(context, state, single);
+      }
+    } else if (command && key == LogicalKeyboardKey.keyI && single != null) {
+      fileActionsService.showInfoSheet(single, context);
+    } else if (key == LogicalKeyboardKey.delete && selected.isNotEmpty) {
+      fileActionsService.deleteFiles(context, selected);
+    } else if (key == LogicalKeyboardKey.f2 && single != null) {
+      fileActionsService.showRenameDialog(context, single);
+    } else if (key == LogicalKeyboardKey.escape && selected.isNotEmpty) {
+      bloc.add(ToggleSelectionMode(enable: false));
+    } else if (key == LogicalKeyboardKey.backspace ||
+        (keys.isAltPressed && key == LogicalKeyboardKey.arrowLeft) ||
+        (command && key == LogicalKeyboardKey.arrowUp)) {
+      final parent = ExplorerPaths.parentOf(state.path);
+      if (parent == null) return KeyEventResult.ignored;
+      bloc.add(LoadDirectory(parent));
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
   }
 
   Widget _buildDockedTopBar(
@@ -389,6 +486,7 @@ class _FileExplorerUI extends StatelessWidget {
                 onViewModeChanged: (ViewMode mode) {
                   bloc.add(ChangeViewMode(mode));
                 },
+                onShowHiddenChanged: () => bloc.add(LoadDirectory(loaded.path)),
               );
             },
     );
@@ -486,11 +584,19 @@ class _FileExplorerUI extends StatelessWidget {
     final entities = state.entities;
     final bloc = context.read<FileExplorerBloc>();
 
-    void onTap(FileSystemEntity e) => _handleTap(context, state, e);
+    void onTap(FileSystemEntity e) => _clicks.mouse
+        ? _handleClick(context, state, e)
+        : _handleTap(context, state, e);
     void onLongPress(FileSystemEntity e) => _handleLongPress(context, state, e);
-    VoidCallback? onSecondaryTap(FileSystemEntity e) => state.isSelectionMode
-        ? null
-        : () => fileActionsService.showFileOptionsMenu(context, e);
+    GestureTapUpCallback? onSecondaryTap(FileSystemEntity e) {
+      if (Desktop.isDesktop) {
+        return (details) =>
+            _showItemMenu(context, state, e, details.globalPosition);
+      }
+      return state.isSelectionMode
+          ? null
+          : (_) => fileActionsService.showFileOptionsMenu(context, e);
+    }
 
     final footer = SliverToBoxAdapter(
       child: _FolderSummary(entities: entities),
@@ -529,7 +635,7 @@ class _FileExplorerUI extends StatelessWidget {
                 isSelected: state.selectedItems.contains(entity),
                 onTap: () => onTap(entity),
                 onLongPress: () => onLongPress(entity),
-                onSecondaryTap: onSecondaryTap(entity),
+                onSecondaryTapUp: onSecondaryTap(entity),
               );
             }, childCount: entities.length),
           ),
@@ -573,7 +679,7 @@ class _FileExplorerUI extends StatelessWidget {
                 isSelected: state.selectedItems.contains(entity),
                 onTap: () => onTap(entity),
                 onLongPress: () => onLongPress(entity),
-                onSecondaryTap: onSecondaryTap(entity),
+                onSecondaryTapUp: onSecondaryTap(entity),
               );
             }, childCount: entities.length),
           ),
@@ -582,7 +688,7 @@ class _FileExplorerUI extends StatelessWidget {
       ];
     }
 
-    return Scrollbar(
+    final list = Scrollbar(
       child: CustomScrollView(
         // Remembers each folder's scroll position when coming back up.
         key: PageStorageKey<String>('explorer:${state.path}'),
@@ -595,6 +701,239 @@ class _FileExplorerUI extends StatelessWidget {
         ],
       ),
     );
+    return Listener(
+      // Before the item's tap fires: was it a mouse or a finger?
+      onPointerDown: (event) => _clicks.kind = event.kind,
+      child: GestureDetector(
+        // Only where no item took the click: the space around them.
+        onTap: () {
+          if (_clicks.mouse && state.selectedItems.isNotEmpty) {
+            bloc.add(ToggleSelectionMode(enable: false));
+          }
+        },
+        onSecondaryTapUp: Desktop.isDesktop
+            ? (details) =>
+                _showFolderMenu(context, state, details.globalPosition)
+            : null,
+        child: list,
+      ),
+    );
+  }
+
+  /// Opens a folder or file, as a tap does.
+  Future<void> _open(
+    BuildContext context,
+    FileExplorerLoaded state,
+    FileSystemEntity entity,
+  ) async {
+    final bloc = context.read<FileExplorerBloc>();
+    if (entity is Directory) {
+      bloc.add(LoadDirectory(entity.path));
+      return;
+    }
+    if (state.selectedItems.isNotEmpty) {
+      bloc.add(ToggleSelectionMode(enable: false));
+    }
+    final result = await FileOpener.open(context, entity as File);
+    // Only re-list when the viewer changed the folder (saved a copy...).
+    if (result == true && !bloc.isClosed) {
+      bloc.add(LoadDirectory(state.path));
+    }
+  }
+
+  /// A mouse click, as desktop file managers handle it: click selects,
+  /// double-click opens, Ctrl (Cmd) adds or removes, Shift selects a range.
+  void _handleClick(
+    BuildContext context,
+    FileExplorerLoaded state,
+    FileSystemEntity entity,
+  ) {
+    final bloc = context.read<FileExplorerBloc>();
+    final keys = HardwareKeyboard.instance;
+    final now = DateTime.now();
+    final isDouble = _clicks.lastPath == entity.path &&
+        now.difference(_clicks.lastTime) <= kDoubleTapTimeout;
+    _clicks
+      ..lastPath = entity.path
+      ..lastTime = now;
+
+    if (isDouble && !_commandPressed && !keys.isShiftPressed) {
+      _clicks.lastPath = null;
+      _open(context, state, entity);
+      return;
+    }
+    if (_commandPressed) {
+      final items = {...state.selectedItems};
+      if (!items.remove(entity)) items.add(entity);
+      _clicks.anchorPath = entity.path;
+      bloc.add(SetSelection(items, selectionMode: items.length > 1));
+      return;
+    }
+    final anchor = _clicks.anchorPath;
+    if (keys.isShiftPressed && anchor != null) {
+      final paths = [for (final e in state.entities) e.path];
+      final from = paths.indexOf(anchor);
+      final to = paths.indexOf(entity.path);
+      if (from >= 0 && to >= 0) {
+        final range = state.entities
+            .sublist(math.min(from, to), math.max(from, to) + 1)
+            .toSet();
+        bloc.add(SetSelection(range, selectionMode: range.length > 1));
+        return;
+      }
+    }
+    _clicks.anchorPath = entity.path;
+    bloc.add(SetSelection({entity}));
+  }
+
+  /// Right-click on an item: its menu, or the selection's when it's part of
+  /// a selection of several.
+  void _showItemMenu(
+    BuildContext context,
+    FileExplorerLoaded state,
+    FileSystemEntity entity,
+    Offset position,
+  ) {
+    final selected = state.selectedItems;
+    if (selected.length > 1 && selected.any((e) => e.path == entity.path)) {
+      _showSelectionMenu(context, state, position);
+      return;
+    }
+    _clicks.anchorPath = entity.path;
+    context.read<FileExplorerBloc>().add(SetSelection({entity}));
+    fileActionsService.showContextMenu(
+      context,
+      entity,
+      position,
+      onOpen: () => _open(context, state, entity),
+    );
+  }
+
+  Future<void> _showSelectionMenu(
+    BuildContext context,
+    FileExplorerLoaded state,
+    Offset position,
+  ) async {
+    final bloc = context.read<FileExplorerBloc>();
+    final selected = state.selectedItems.toList();
+    final action = await ExplorerMenu.showAt<String>(
+      context,
+      position,
+      items: [
+        ExplorerMenu.label(context, '${selected.length} selected'),
+        if (Desktop.canShareFiles)
+          ExplorerMenu.item(context,
+              value: 'share', label: 'Share', icon: LucideIcons.share2),
+        ExplorerMenu.item(context,
+            value: 'nearby', label: 'Send nearby', icon: LucideIcons.radio),
+        ExplorerMenu.item(context,
+            value: 'zip',
+            label: 'Compress to ZIP',
+            icon: LucideIcons.fileArchive),
+        ExplorerMenu.divider(),
+        ExplorerMenu.item(context,
+            value: 'all',
+            label: 'Select all',
+            icon: LucideIcons.listChecks,
+            shortcut: FileActionsService.shortcut('A')),
+        ExplorerMenu.item(context,
+            value: 'none', label: 'Clear selection', icon: LucideIcons.x),
+        ExplorerMenu.divider(),
+        ExplorerMenu.item(context,
+            value: 'delete',
+            label: 'Delete',
+            icon: LucideIcons.trash2,
+            destructive: true,
+            shortcut: 'Delete'),
+      ],
+    );
+    if (action == null || !context.mounted) return;
+    switch (action) {
+      case 'share':
+        fileActionsService.shareMany(context, selected);
+      case 'nearby':
+        bloc.add(ToggleSelectionMode(enable: false));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LocalSendScreen(initialItems: selected),
+          ),
+        );
+      case 'zip':
+        _handleCompress(context, state);
+      case 'all':
+        bloc.add(SelectAll());
+      case 'none':
+        bloc.add(ToggleSelectionMode(enable: false));
+      case 'delete':
+        fileActionsService.deleteFiles(context, selected);
+    }
+  }
+
+  /// Right-click on the empty space of a folder.
+  Future<void> _showFolderMenu(
+    BuildContext context,
+    FileExplorerLoaded state,
+    Offset position,
+  ) async {
+    final bloc = context.read<FileExplorerBloc>();
+    final clipboard = context.read<ClipboardBloc>();
+    final inFolder = !ExplorerPaths.isWindowsRoots(state.path);
+    final canPaste = inFolder && clipboard.state is ClipboardReadyToPaste;
+    final action = await ExplorerMenu.showAt<String>(
+      context,
+      position,
+      items: [
+        if (inFolder)
+          ExplorerMenu.item(context,
+              value: 'folder',
+              label: 'New folder',
+              icon: LucideIcons.folderPlus,
+              shortcut: Platform.isMacOS ? '⇧⌘N' : 'Ctrl+Shift+N'),
+        ExplorerMenu.item(context,
+            value: 'paste',
+            label: 'Paste',
+            icon: LucideIcons.clipboardPaste,
+            enabled: canPaste,
+            shortcut: FileActionsService.shortcut('V')),
+        ExplorerMenu.item(context,
+            value: 'all',
+            label: 'Select all',
+            icon: LucideIcons.listChecks,
+            shortcut: FileActionsService.shortcut('A')),
+        ExplorerMenu.item(context,
+            value: 'refresh',
+            label: 'Refresh',
+            icon: LucideIcons.refreshCw,
+            shortcut: 'F5'),
+        ExplorerMenu.divider(),
+        ExplorerMenu.item(context,
+            value: 'window',
+            label: 'Open in new window',
+            icon: LucideIcons.appWindow,
+            shortcut: FileActionsService.shortcut('N')),
+        if (inFolder)
+          ExplorerMenu.item(context,
+              value: 'wifi',
+              label: 'Share over Wi-Fi',
+              icon: LucideIcons.wifi),
+      ],
+    );
+    if (action == null || !context.mounted) return;
+    switch (action) {
+      case 'folder':
+        fileActionsService.showCreateFolderDialog(context, state.path);
+      case 'paste':
+        clipboard.add(PasteFromClipboard(state.path));
+      case 'all':
+        bloc.add(SelectAll());
+      case 'refresh':
+        bloc.add(LoadDirectory(state.path));
+      case 'window':
+        Desktop.openWindow(folder: state.path);
+      case 'wifi':
+        _handleHttpShare(context, state);
+    }
   }
 
   static String _friendlyError(String message) {
@@ -613,16 +952,7 @@ class _FileExplorerUI extends StatelessWidget {
     if (state.isSelectionMode) {
       context.read<FileExplorerBloc>().add(SelectItem(entity));
     } else {
-      if (entity is Directory) {
-        context.read<FileExplorerBloc>().add(LoadDirectory(entity.path));
-      } else {
-        final bloc = context.read<FileExplorerBloc>();
-        final result = await FileOpener.open(context, entity as File);
-        // Only re-list when the viewer changed the folder (saved a copy...).
-        if (result == true && !bloc.isClosed) {
-          bloc.add(LoadDirectory(state.path));
-        }
-      }
+      await _open(context, state, entity);
     }
   }
 

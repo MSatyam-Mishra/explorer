@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:explorer/core/files/file_types.dart';
+import 'package:explorer/core/services/device_files.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
@@ -60,6 +62,30 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
         }
         return; // Exit after handling this case
       }
+      // Windows and Linux have no media library (photo_manager): look
+      // through the user's Pictures, Videos or Music folders instead.
+      if (Platform.isWindows || Platform.isLinux) {
+        final (folders, extensions) = switch (event.type) {
+          RequestType.image => (
+            const ['Pictures', 'Downloads', 'Desktop'],
+            {...FileTypes.image, ...FileTypes.rasterImage, ...FileTypes.cameraRaw},
+          ),
+          RequestType.video => (
+            const ['Videos', 'Downloads', 'Desktop'],
+            FileTypes.video,
+          ),
+          _ => (const ['Music', 'Downloads'], FileTypes.audio),
+        };
+        final files = await DeviceFiles.findInHome(folders, extensions);
+        final groups = <DateTime, List<dynamic>>{};
+        for (final file in files) {
+          final m = file.modified;
+          (groups[DateTime(m.year, m.month, m.day)] ??= []).add(File(file.path));
+        }
+        if (!emit.isDone) emit(CategoryLoaded(groups));
+        return;
+      }
+
       // Photos, videos or audio from the media library, newest first.
       // The last list shows at once; the newest page then replaces it and
       // older pages follow in the background, so big libraries open fast.

@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:archive/archive_io.dart';
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/entity_meta.dart';
+import 'package:explorer/features/file_explorere/widgets/explorer_menu.dart';
 import 'package:explorer/features/file_explorere/widgets/info_row.dart';
 import 'package:explorer/shared/ui/app_ui.dart';
 
@@ -28,6 +30,119 @@ class FileActionsService {
   FileActionsService({FileRepository? repository})
     : repository = repository ?? LocalFileRepository();
 
+  /// "Ctrl+C" on Windows and Linux, "⌘C" on macOS.
+  static String shortcut(String key, {bool modifier = true}) {
+    if (!modifier) return key;
+    return Platform.isMacOS ? '⌘$key' : 'Ctrl+$key';
+  }
+
+  /// Desktop right-click menu for [entity] at [position], with the actions
+  /// of [showFileOptionsMenu]. [onOpen] opens it as a click would.
+  Future<void> showContextMenu(
+    BuildContext context,
+    FileSystemEntity entity,
+    Offset position, {
+    required VoidCallback onOpen,
+  }) async {
+    final isFile = entity is File;
+    final action = await ExplorerMenu.showAt<_EntityAction>(
+      context,
+      position,
+      items: [
+        ExplorerMenu.item(context,
+            value: _EntityAction.open,
+            label: 'Open',
+            icon: isFile ? LucideIcons.fileInput : LucideIcons.folderOpen,
+            shortcut: 'Enter'),
+        if (!isFile && Desktop.isDesktop)
+          ExplorerMenu.item(context,
+              value: _EntityAction.newWindow,
+              label: 'Open in new window',
+              icon: LucideIcons.appWindow),
+        if (isFile)
+          ExplorerMenu.item(context,
+              value: _EntityAction.openWith,
+              label: 'Open with…',
+              icon: LucideIcons.squareArrowOutUpRight),
+        ExplorerMenu.divider(),
+        ExplorerMenu.item(context,
+            value: _EntityAction.copy,
+            label: 'Copy',
+            icon: LucideIcons.copy,
+            shortcut: shortcut('C')),
+        ExplorerMenu.item(context,
+            value: _EntityAction.cut,
+            label: 'Cut',
+            icon: LucideIcons.scissors,
+            shortcut: shortcut('X')),
+        ExplorerMenu.item(context,
+            value: _EntityAction.rename,
+            label: 'Rename',
+            icon: LucideIcons.pencil,
+            shortcut: 'F2'),
+        ExplorerMenu.divider(),
+        if (Desktop.canShareFiles)
+          ExplorerMenu.item(context,
+              value: _EntityAction.share,
+              label: 'Share',
+              icon: LucideIcons.share2),
+        ExplorerMenu.item(context,
+            value: _EntityAction.sendNearby,
+            label: 'Send nearby',
+            icon: LucideIcons.radio),
+        if (isFile && VaultStore.supported)
+          ExplorerMenu.item(context,
+              value: _EntityAction.vault,
+              label: 'Move to vault',
+              icon: LucideIcons.lockKeyhole),
+        ExplorerMenu.item(context,
+            value: _EntityAction.properties,
+            label: 'Properties',
+            icon: LucideIcons.info,
+            shortcut: Platform.isMacOS ? '⌘I' : 'Alt+Enter'),
+        ExplorerMenu.divider(),
+        ExplorerMenu.item(context,
+            value: _EntityAction.delete,
+            label: 'Delete',
+            icon: LucideIcons.trash2,
+            destructive: true,
+            shortcut: 'Delete'),
+      ],
+    );
+    if (action == null || !context.mounted) return;
+    switch (action) {
+      case _EntityAction.open:
+        onOpen();
+      case _EntityAction.newWindow:
+        await Desktop.openWindow(folder: entity.path);
+      case _EntityAction.openWith:
+        await FileOpener.showOpenWith(context, entity as File);
+      case _EntityAction.copy:
+        context.read<ClipboardBloc>().add(CopyToClipboard(entity));
+        _toast(context, 'Copied. Open a folder and paste.');
+      case _EntityAction.cut:
+        context.read<ClipboardBloc>().add(CutToClipboard(entity));
+        _toast(context, 'Cut. Open a folder and paste.');
+      case _EntityAction.rename:
+        await showRenameDialog(context, entity);
+      case _EntityAction.share:
+        share(context, entity);
+      case _EntityAction.sendNearby:
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LocalSendScreen(initialItems: [entity]),
+          ),
+        );
+      case _EntityAction.vault:
+        await moveToVault(context, entity as File);
+      case _EntityAction.properties:
+        showInfoSheet(entity, context);
+      case _EntityAction.delete:
+        await showDeleteConfirmationDialog(context, entity);
+    }
+  }
+
   // Method to show the main options menu
   void showFileOptionsMenu(BuildContext context, FileSystemEntity entity) {
     AppSheet.show<void>(
@@ -52,11 +167,12 @@ class FileActionsService {
                   onTap: () =>
                       run(() => FileOpener.showOpenWith(context, entity)),
                 ),
-              _SheetAction(
-                icon: LucideIcons.share2,
-                label: 'Share',
-                onTap: () => run(() => share(context, entity)),
-              ),
+              if (Desktop.canShareFiles)
+                _SheetAction(
+                  icon: LucideIcons.share2,
+                  label: 'Share',
+                  onTap: () => run(() => share(context, entity)),
+                ),
               _SheetAction(
                 icon: LucideIcons.radio,
                 label: 'Send nearby',
@@ -70,11 +186,13 @@ class FileActionsService {
                   ),
                 ),
               ),
-              if (entity is File)
+              if (entity is File && VaultStore.supported)
                 _SheetAction(
                   icon: LucideIcons.lockKeyhole,
                   label: 'Move to vault',
-                  detail: 'Hide it from other apps',
+                  detail: Platform.isAndroid
+                      ? 'Hide it from other apps'
+                      : 'Move it out of your folders',
                   onTap: () => run(() => moveToVault(context, entity)),
                 ),
               const _SheetDivider(),
@@ -158,8 +276,11 @@ class FileActionsService {
       selectBaseName: !isDirectory,
       validator: (name) {
         if (name == oldName) return '';
-        if (File(p.join(entity.parent.path, name)).existsSync() ||
-            Directory(p.join(entity.parent.path, name)).existsSync()) {
+        final target = p.join(entity.parent.path, name);
+        // On Windows and macOS "report.pdf" and "Report.pdf" are the same
+        // file: changing only the case is a rename, not a clash.
+        if ((File(target).existsSync() || Directory(target).existsSync()) &&
+            !FileSystemEntity.identicalSync(entity.path, target)) {
           return 'An item with this name already exists.';
         }
         return null;
@@ -400,14 +521,23 @@ class FileActionsService {
     return Rect.fromCenter(center: size.center(Offset.zero), width: 1, height: 1);
   }
 
-  void share(BuildContext context, FileSystemEntity entity) {
+  Future<void> share(BuildContext context, FileSystemEntity entity) async {
     if (entity is File) {
-      SharePlus.instance.share(ShareParams(
-        files: [XFile(entity.path)],
+      await _shareFiles(context, [XFile(entity.path)]);
+    } else if (entity is Directory) {
+      await shareZippedFolder(context, entity);
+    }
+  }
+
+  /// Shares [files], saying so when the system can't.
+  Future<void> _shareFiles(BuildContext context, List<XFile> files) async {
+    try {
+      await SharePlus.instance.share(ShareParams(
+        files: files,
         sharePositionOrigin: _shareOrigin(context),
       ));
-    } else if (entity is Directory) {
-      shareZippedFolder(context, entity);
+    } catch (e) {
+      if (context.mounted) _toast(context, "Couldn't share: $e");
     }
   }
 
@@ -415,7 +545,10 @@ class FileActionsService {
   /// several items, folders are skipped.
   void shareMany(BuildContext context, List<FileSystemEntity> entities) {
     if (entities.isEmpty) return;
-    if (entities.length == 1) return share(context, entities.single);
+    if (entities.length == 1) {
+      share(context, entities.single);
+      return;
+    }
     final files = entities.whereType<File>().toList();
     if (files.isEmpty) {
       _toast(context, 'Folders can only be shared one at a time.');
@@ -424,10 +557,7 @@ class FileActionsService {
     if (files.length != entities.length) {
       _toast(context, 'Folders were skipped. Share them one at a time.');
     }
-    SharePlus.instance.share(ShareParams(
-      files: [for (final f in files) XFile(f.path)],
-      sharePositionOrigin: _shareOrigin(context),
-    ));
+    _shareFiles(context, [for (final f in files) XFile(f.path)]);
   }
 
   Future<void> shareZippedFolder(
@@ -842,4 +972,18 @@ class _DetailsCard extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _EntityAction {
+  open,
+  newWindow,
+  openWith,
+  copy,
+  cut,
+  rename,
+  share,
+  sendNearby,
+  vault,
+  properties,
+  delete,
 }

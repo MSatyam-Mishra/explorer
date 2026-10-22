@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
@@ -148,11 +149,12 @@ class _HistoryTile extends StatelessWidget {
                         icon: LucideIcons.externalLink,
                         label: 'Open',
                       ),
-                      menuItem(
-                        value: _HistoryAction.share,
-                        icon: LucideIcons.share2,
-                        label: 'Share',
-                      ),
+                      if (Desktop.canShareFiles)
+                        menuItem(
+                          value: _HistoryAction.share,
+                          icon: LucideIcons.share2,
+                          label: 'Share',
+                        ),
                     ],
                     menuItem(
                       value: _HistoryAction.copyLink,
