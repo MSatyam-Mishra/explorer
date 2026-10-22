@@ -5,19 +5,21 @@
 <h1 align="center">Explorer</h1>
 
 <p align="center">
-  <b>The universal file manager for Android.</b><br>
+  <b>The universal file manager for Android, Windows and Linux.</b><br>
   Open, edit and share almost any file, without installing another app.
 </p>
 
 <p align="center">
   <a href="https://github.com/MSatyam-Mishra/explorer/releases"><img src="https://img.shields.io/github/v/release/MSatyam-Mishra/explorer?include_prereleases&sort=semver&label=release&color=2563eb" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white" alt="Android 7.0 or newer">
+  <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows&logoColor=white" alt="Windows 10 or newer">
+  <img src="https://img.shields.io/badge/Linux-x64-FCC624?logo=linux&logoColor=black" alt="Linux x64">
   <img src="https://img.shields.io/badge/Flutter-3.44-02569B?logo=flutter&logoColor=white" alt="Built with Flutter">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/MSatyam-Mishra/explorer?color=blue" alt="License: GPL-3.0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/MSatyam-Mishra/explorer/releases"><b>Download the APK</b></a> ·
+  <a href="https://github.com/MSatyam-Mishra/explorer/releases"><b>Download</b></a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#features">Features</a> ·
   <a href="#building-from-source">Build from source</a>
@@ -134,20 +136,24 @@ Only download content you have the right to download, and respect each site's te
 
 ## Download
 
-Get the latest APK from **[Releases](https://github.com/MSatyam-Mishra/explorer/releases)**. Android 7.0 or newer.
+Get the latest version from **[Releases](https://github.com/MSatyam-Mishra/explorer/releases)**.
 
-| APK | For |
+| File | For |
 |---|---|
-| `arm64-v8a` | **Most phones and tablets** (64-bit) |
-| `armeabi-v7a` | Older 32-bit phones |
-| `x86_64` | Emulators and x86 Chromebooks |
-| `universal` | Not sure? Works everywhere, but is larger |
+| `…-arm64-v8a.apk` | **Most Android phones and tablets** (64-bit) |
+| `…-armeabi-v7a.apk` | Older 32-bit Android phones |
+| `…-x86_64.apk` | Android emulators and x86 Chromebooks |
+| `…-universal.apk` | Not sure which APK? Works on every Android device, but is larger |
+| `…-windows-x64.zip` | **Windows 10 and 11** (64-bit): unzip it and run `Explorer\explorer.exe` |
+| `…-linux-x64.tar.gz` | **Linux** (64-bit; Ubuntu 24.04, Fedora 39, Debian 13 or newer, or another distro with glibc 2.38+): extract it and run `explorer/explorer` |
 
-New versions install over older ones as an update. Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
+- **Android** needs version 7.0 or newer. New versions install over older ones as an update.
+- **Windows** may say it protected your PC, because the app isn't code-signed. Choose **More info → Run anyway**.
+- Each release lists SHA-256 checksums in `SHA256SUMS.txt`.
 
 ## Building from source
 
-Requires Flutter 3.44 or newer. Explorer also runs on Windows, macOS and Linux when built from source.
+Requires Flutter 3.44 or newer. Releases include Android, Windows and Linux builds; macOS can be built from source.
 
 ```sh
 flutter pub get
@@ -160,6 +166,8 @@ Release APKs (all ABIs plus universal, obfuscated, with SHA-256 checksums) are b
 python tool/build_release.py
 python tool/build_release.py --without-video-downloader
 ```
+
+The Windows and Linux apps are built by GitHub Actions ([desktop-release.yml](.github/workflows/desktop-release.yml)) when a release is published, and attached to it. To build them yourself, run `flutter build windows` or `flutter build linux`. Windows builds need `nuget.exe` on the `PATH`, for the web view plugin.
 
 Release signing reads `android/key.properties`, which is git-ignored. Without that file, builds use the debug key.
 
