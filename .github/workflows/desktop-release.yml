@@ -29,9 +29,10 @@ jobs:
         include:
           - platform: windows
             os: windows-latest
-          # The oldest supported Ubuntu, so the app runs on older distros too.
+          # rive_native's prebuilt library needs glibc 2.38 and libstdc++ 13,
+          # so the app needs Ubuntu 24.04 or a distro as recent anyway.
           - platform: linux
-            os: ubuntu-22.04
+            os: ubuntu-24.04
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
