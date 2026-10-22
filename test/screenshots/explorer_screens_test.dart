@@ -16,12 +16,19 @@ import '../support/themed_app.dart';
 
 /// SCREENSHOTS=1 flutter test test/screenshots → build/screenshots/*.png
 void main() {
+  late Directory root;
   late Directory sample;
 
   setUpAll(() async {
     if (!screenshotsEnabled) return;
     await loadAppFonts();
-    sample = await Directory.systemTemp.createTemp('explorer_shots_');
+    // The folder and its parents show in the title and breadcrumbs, so
+    // they get names like on a phone.
+    root = Directory(p.join(Directory.systemTemp.path, 'Phone'));
+    if (await root.exists()) await root.delete(recursive: true);
+    sample = await Directory(
+      p.join(root.path, 'Internal storage', 'My files'),
+    ).create(recursive: true);
     for (final d in ['Documents', 'Pictures', 'Music', 'Projects']) {
       await Directory(p.join(sample.path, d)).create();
     }
@@ -45,7 +52,7 @@ void main() {
   });
 
   tearDownAll(() async {
-    if (screenshotsEnabled) await sample.delete(recursive: true);
+    if (screenshotsEnabled) await root.delete(recursive: true);
   });
 
   for (final mode in [ThemeMode.light, ThemeMode.dark]) {
