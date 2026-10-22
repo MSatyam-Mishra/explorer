@@ -3,16 +3,16 @@ import 'dart:io';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
-import 'package:video_player_media_kit/video_player_media_kit.dart';
 
 /// Windows, Linux and macOS support that phones don't need.
 abstract final class Desktop {
   static bool get isDesktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
-  /// Windows and Linux play video and audio with media_kit (libmpv), as
-  /// video_player and just_audio have no implementation there. macOS keeps
-  /// their AVFoundation players.
+  /// Windows and Linux play video and audio with media_kit (libmpv, with
+  /// FFmpeg's decoders): video in DesktopVideoPlayer, audio through
+  /// just_audio, which has no implementation there of its own. macOS keeps
+  /// the AVFoundation players.
   static void initMedia() {
     if (!Platform.isWindows && !Platform.isLinux) return;
     String? libmpv;
@@ -29,7 +29,6 @@ abstract final class Desktop {
     }
     // Doesn't throw without libmpv: playback then reports an error instead.
     MediaKit.ensureInitialized(libmpv: libmpv);
-    VideoPlayerMediaKit.ensureInitialized(windows: true, linux: true);
     JustAudioMediaKit.ensureInitialized(
       windows: true,
       linux: true,

@@ -8,6 +8,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
+import 'desktop_video_player.dart';
+
 class VideoPlayerScreen extends StatefulWidget {
   final File videoFile;
 
@@ -18,14 +20,18 @@ class VideoPlayerScreen extends StatefulWidget {
 }
 
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
-  late VideoPlayerController _videoPlayerController;
+  /// Windows and Linux use media_kit's own player (video_player has no
+  /// implementation there).
+  static bool get _desktop => Platform.isWindows || Platform.isLinux;
+
+  VideoPlayerController? _videoPlayerController;
   ChewieController? _chewieController;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _initPlayer();
+    if (!_desktop) _initPlayer();
   }
 
   Future<void> _initPlayer() async {
@@ -75,7 +81,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
-    _videoPlayerController.dispose();
+    _videoPlayerController?.dispose();
     _chewieController?.dispose();
     super.dispose();
   }
@@ -88,7 +94,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Widget _build(BuildContext context) {
     final chewie = _chewieController;
     final Widget content;
-    if (_error != null) {
+    if (_desktop) {
+      content = DesktopVideoPlayer(file: widget.videoFile);
+    } else if (_error != null) {
       content = ViewerMessage(
         icon: LucideIcons.videoOff,
         title: "Can't play this video",
@@ -115,7 +123,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           top: DockedGlossyTopBar.contentTopInset(context),
           bottom: MediaQuery.paddingOf(context).bottom,
         ),
-        child: Center(child: content),
+        // The desktop player fills the space (its controls sit at the
+        // bottom); Chewie sizes itself to the video.
+        child: _desktop ? content : Center(child: content),
       ),
     );
   }

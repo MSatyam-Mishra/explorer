@@ -25,7 +25,7 @@ import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_options_sheet.dart';
 import 'package:explorer/shared/widgets/main_drawer.dart';
-import 'package:explorer/shared/widgets/progress_card.dart';
+import 'package:explorer/shared/widgets/progress_dock.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -252,12 +252,18 @@ class _FileExplorerUI extends StatelessWidget {
               ),
             ),
           ),
-        if (taskState is TaskInProgress)
-          ProgressCard(
-            title: taskState.title,
-            message: taskState.message,
-            progress: taskState.progress,
-          ),
+        // Copying, moving and video downloads; can be tucked away.
+        ProgressDock(
+          fileTask: taskState is TaskInProgress
+              ? DockTask(
+                  title: taskState.title,
+                  message: taskState.message,
+                  progress: taskState.progress.isFinite
+                      ? taskState.progress
+                      : null,
+                )
+              : null,
+        ),
       ],
     );
 

@@ -95,6 +95,9 @@ class VideoDownloaderController extends ChangeNotifier {
 
   Future<void> start() => _starting ??= _start();
 
+  /// [start] ran: the downloader was opened in this session.
+  bool get isStarted => _starting != null;
+
   Future<void> _start() async {
     final prefs = _prefs = await SharedPreferences.getInstance();
     try {
