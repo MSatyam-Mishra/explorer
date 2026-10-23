@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 /// A line of text found in an image, with where each word is (in the
@@ -30,8 +30,11 @@ class ImageText {
   String get text => lines.map((l) => l.text).join('\n');
 
   /// Windows' OCR JSON (see [ImageTextReader]).
-  static ImageText? fromWindowsJson(String json) {
-    final data = jsonDecode(json);
+  static ImageText? fromWindowsJson(String json) => fromMap(jsonDecode(json));
+
+  /// `{w, h, lines: [{t, words: [{t, x, y, w, h}]}]}`, from Windows' OCR or
+  /// Android's ML Kit.
+  static ImageText? fromMap(Object? data) {
     if (data is! Map || data['error'] != null) return null;
     List<Object?> list(Object? value) => value is List ? value : [if (value != null) value];
     double n(Object? v) => (v as num).toDouble();
@@ -64,10 +67,13 @@ class ImageText {
   }
 }
 
-/// Finds the text in images with the system's own OCR: Windows'
-/// (Windows.Media.Ocr, as the Photos app uses), or Tesseract on Linux
-/// when it's installed. Nothing is downloaded.
+/// Finds the text in images on the device: Windows' own OCR
+/// (Windows.Media.Ocr, as the Photos app uses), ML Kit from Google Play
+/// services on Android, and Tesseract on Linux (the app's copy, else the
+/// system's).
 abstract final class ImageTextReader {
+  static const _android = MethodChannel('explorer/image_text');
+
   static final _cache = <String, ImageText?>{};
   static String? _tesseract;
   static bool _lookedForTesseract = false;
@@ -77,14 +83,21 @@ abstract final class ImageTextReader {
   static bool get enabled => supported && !Platform.environment.containsKey('FLUTTER_TEST');
 
   static bool get supported {
-    if (Platform.isWindows) return true;
+    if (Platform.isWindows || Platform.isAndroid) return true;
     if (Platform.isLinux) return _tesseractPath != null;
     return false;
   }
 
+  /// The portable Linux packages carry Tesseract and its English data in
+  /// tesseract/ next to the app.
+  static String get _bundledTesseract =>
+      p.join(p.dirname(Platform.resolvedExecutable), 'tesseract');
+
   static String? get _tesseractPath {
     if (_lookedForTesseract) return _tesseract;
     _lookedForTesseract = true;
+    final bundled = p.join(_bundledTesseract, 'tesseract');
+    if (File(bundled).existsSync()) return _tesseract = bundled;
     for (final dir in (Platform.environment['PATH'] ?? '').split(':')) {
       if (dir.isNotEmpty && File(p.join(dir, 'tesseract')).existsSync()) {
         return _tesseract = p.join(dir, 'tesseract');
@@ -106,7 +119,11 @@ abstract final class ImageTextReader {
     if (_cache.containsKey(key)) return _cache[key];
     ImageText? text;
     try {
-      text = Platform.isWindows ? await _windows(file.path) : await _linux(file.path);
+      text = Platform.isWindows
+          ? await _windows(file.path)
+          : Platform.isAndroid
+              ? ImageText.fromMap(await _android.invokeMethod<Object?>('read', {'path': file.path}))
+              : await _linux(file.path);
     } catch (_) {
       text = null;
     }
@@ -131,8 +148,14 @@ abstract final class ImageTextReader {
   }
 
   static Future<ImageText?> _linux(String path) async {
-    final result = await Process.run(_tesseractPath!, [path, 'stdout', 'tsv'], stdoutEncoding: utf8)
-        .timeout(const Duration(seconds: 60));
+    final tesseract = _tesseractPath!;
+    final bundled = p.isWithin(_bundledTesseract, tesseract);
+    final result = await Process.run(
+      tesseract,
+      [path, 'stdout', 'tsv'],
+      environment: {if (bundled) 'TESSDATA_PREFIX': p.join(_bundledTesseract, 'tessdata')},
+      stdoutEncoding: utf8,
+    ).timeout(const Duration(seconds: 60));
     return result.exitCode == 0 ? ImageText.fromTesseractTsv(result.stdout as String) : null;
   }
 

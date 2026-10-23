@@ -116,7 +116,7 @@ jobs:
       - name: Install Linux build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev patchelf
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev patchelf tesseract-ocr tesseract-ocr-eng
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -146,25 +146,33 @@ jobs:
           cp -a build/linux/x64/release/bundle portable
           cp -a mpv.AppDir/usr/lib/. portable/lib/
           # linuxdeploy also leaves out what AppImages assume every system
-          # has (libjack...): add whatever else libmpv needs, except what's
+          # has (libjack...): add whatever else a binary needs, except what's
           # on the system list and glibc and the C++ runtime.
-          libmpv="$(find /usr/lib -name 'libmpv.so.2' | head -1)"
-          ldd "$libmpv" | awk '/=> \//{print $3}' | while read -r lib; do
-            name=$(basename "$lib")
-            [ -e "portable/lib/$name" ] && continue
-            case "$name" in
-              libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*|libstdc++.so*|libgcc_s.so*|libresolv.so*|libutil.so*) continue ;;
-            esac
-            skip=
-            while read -r pattern; do
-              case "$pattern" in ''|'#'*) continue ;; esac
-              case "$name" in $pattern) skip=1; break ;; esac
-            done < "$GITHUB_WORKSPACE/packaging/linux/system-libs.txt"
-            [ -n "$skip" ] && continue
-            cp -L "$lib" "portable/lib/$name"
-            patchelf --set-rpath '$ORIGIN' "portable/lib/$name"
-            echo "added $name"
-          done
+          add_libraries() {
+            ldd "$1" | awk '/=> \//{print $3}' | while read -r lib; do
+              name=$(basename "$lib")
+              [ -e "portable/lib/$name" ] && continue
+              case "$name" in
+                libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*|libstdc++.so*|libgcc_s.so*|libresolv.so*|libutil.so*) continue ;;
+              esac
+              skip=
+              while read -r pattern; do
+                case "$pattern" in ''|'#'*) continue ;; esac
+                case "$name" in $pattern) skip=1; break ;; esac
+              done < "$GITHUB_WORKSPACE/packaging/linux/system-libs.txt"
+              [ -n "$skip" ] && continue
+              cp -L "$lib" "portable/lib/$name"
+              patchelf --set-rpath '$ORIGIN' "portable/lib/$name"
+              echo "added $name"
+            done
+          }
+          add_libraries "$(find /usr/lib -name 'libmpv.so.2' | head -1)"
+          # Tesseract and its English data, for text in images.
+          mkdir -p portable/tesseract/tessdata
+          cp -L /usr/bin/tesseract portable/tesseract/tesseract
+          patchelf --set-rpath '$ORIGIN/../lib' portable/tesseract/tesseract
+          cp /usr/share/tesseract-ocr/5/tessdata/eng.traineddata portable/tesseract/tessdata/
+          add_libraries /usr/bin/tesseract
           # Plugins link libmpv; let them find it next to them.
           for plugin in portable/lib/*_plugin.so; do
             patchelf --set-rpath '$ORIGIN' "$plugin"
@@ -188,7 +196,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: packaging
+          sparse-checkout: |
+            packaging
+            test/fixtures
       - uses: actions/download-artifact@v4
         with:
           name: linux-bundle
@@ -212,6 +222,10 @@ jobs:
           export APPIMAGE_EXTRACT_AND_RUN=1
           running dist/*.AppImage
           mkdir tar-check && tar -C tar-check -xJf dist/*.tar.xz && running tar-check/explorer/explorer
+          # Its Tesseract reads text without one on the system.
+          TESSDATA_PREFIX=tar-check/explorer/tesseract/tessdata \
+            tar-check/explorer/tesseract/tesseract test/fixtures/ocr_invoice.png stdout | tee ocr.txt
+          grep -q 'Invoice 2041' ocr.txt
           # Then the .deb, which installs the system's libmpv.
           sudo apt-get install -y ./dist/*.deb
           running explorer

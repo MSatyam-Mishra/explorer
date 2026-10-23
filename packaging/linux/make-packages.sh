@@ -2,8 +2,9 @@
 # Packages the Linux build (flutter build linux --release) as .tar.gz, .tar.xz,
 # .deb, .rpm and .AppImage. Used by .github/workflows/desktop-release.yml:
 #   packaging/linux/make-packages.sh <version> <bundle> <portable bundle> <out>
-# The portable bundle also carries libmpv and the libraries it needs (for the
-# archives and the AppImage); the .deb and .rpm depend on the system's.
+# The portable bundle also carries libmpv and Tesseract and the libraries
+# they need (for the archives and the AppImage); the .deb and .rpm depend on
+# the system's libmpv and recommend its Tesseract.
 # Needs fpm (gem install fpm), rpm (for rpmbuild) and internet access (it
 # downloads appimagetool).
 set -euo pipefail
@@ -47,11 +48,14 @@ common=(
 fpm "${common[@]}" -t deb -a amd64 --category utils \
   -d 'libgtk-3-0t64 | libgtk-3-0' -d libegl1 -d libgles2 -d libgl1 -d 'libmpv2 | libmpv1' \
   -d 'libc6 (>= 2.38)' -d 'libstdc++6 (>= 13.2)' \
+  --deb-recommends tesseract-ocr --deb-recommends tesseract-ocr-eng \
   -p "$out/$name-amd64.deb" usr
 fpm "${common[@]}" -t rpm -a x86_64 --rpm-os linux \
   -d 'libgtk-3.so.0()(64bit)' -d 'libEGL.so.1()(64bit)' -d 'libGLESv2.so.2()(64bit)' -d 'libGL.so.1()(64bit)' \
   -d 'libmpv.so.2()(64bit)' \
   -d 'libc.so.6(GLIBC_2.38)(64bit)' -d 'libstdc++.so.6(GLIBCXX_3.4.32)(64bit)' \
+  --rpm-tag 'Recommends: tesseract' --rpm-tag 'Recommends: tesseract-langpack-eng' \
+  --rpm-tag 'Recommends: tesseract-ocr' --rpm-tag 'Recommends: tesseract-ocr-traineddata-english' \
   -p "$out/$name-x86_64.rpm" usr
 
 # AppImage
@@ -59,6 +63,7 @@ appdir=$work/Explorer.AppDir
 mkdir -p "$appdir"
 cp -a "$root/usr" "$appdir/"
 cp -a "$portable/lib/." "$appdir/usr/lib/explorer/lib/"
+cp -a "$portable/tesseract" "$appdir/usr/lib/explorer/"
 # appimagetool fails on AppStream data its validator dislikes; it's optional.
 rm -rf "$appdir/usr/share/metainfo"
 cp "$here/$id.desktop" "$appdir/"

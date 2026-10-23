@@ -24,6 +24,9 @@ apps:
   explorer:
     command: explorer
     extensions: [gnome]
+    environment:
+      # Tesseract's English data, for text in images.
+      TESSDATA_PREFIX: $SNAP/usr/share/tesseract-ocr/5/tessdata
     plugs:
       - home
       - removable-media
@@ -34,6 +37,9 @@ parts:
   explorer:
     plugin: dump
     source: bundle
-    # Video and audio playback (media_kit).
     stage-packages:
+      # Video and audio playback (media_kit).
       - libmpv2
+      # Text in images.
+      - tesseract-ocr
+      - tesseract-ocr-eng
