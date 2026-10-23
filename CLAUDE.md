@@ -1,7 +1,7 @@
 # Explorer: notes for Claude Code
 
 Flutter app "Explorer" (`com.synqixlabs.explory`), a universal file manager with
-built-in viewers and tools, for **Android, Windows and Linux**. Repo:
+built-in viewers and tools, for **Android, Windows and Linux** (macOS builds too; see below). Repo:
 `MSatyam-Mishra/explorer` (public). Owner: Satyam (MSatyam-Mishra).
 
 ## Working with the owner
@@ -14,6 +14,7 @@ built-in viewers and tools, for **Android, Windows and Linux**. Repo:
 ## Toolchain and commands
 
 - Flutter 3.44.1 stable, Dart 3.12. Android SDK (AVD `explorer_test`, Play Store image, x86_64). Rust is installed on the main PC; `super_drag_and_drop` (cargokit) uses precompiled binaries.
+- macOS (a MacBook, Xcode 26, CocoaPods, rustup): `flutter build macos --release` gives `build/macos/Build/Products/Release/Explorer.app` (universal, macOS 12+, sandbox off). `super_native_extensions` compiles Rust through a native-assets hook (toolchain 1.97.1), so rustup must be installed. The app is ad-hoc signed (no Developer ID), so other Macs show a Gatekeeper warning; a DMG is made with `hdiutil create -srcfolder`.
 - `flutter analyze lib test`: the only known findings are old ones in `lib/core/services/driver/mass_storage_driver.dart`, `lib/core/services/usb_host_service.dart` and `plugins/vocsy_epub_viewer-main`.
 - `flutter test`: about 160 tests, about 30 s. Screenshots: `SCREENSHOTS=1 flutter test test/screenshots` writes `build/screenshots/*.png`. On a device: `flutter test integration_test/image_text_test.dart -d <device>`.
 - Widget tests run on a fake clock, so real file I/O must go inside `tester.runAsync` (the `settle()` helpers alternate `runAsync` and `pump`). Under `FLUTTER_TEST` the app uses an in-memory clipboard, no folder watching, no native drag and drop and no OCR in the viewer. Opt-in: `EXPLORER_REAL_CLIPBOARD=1` (real Windows clipboard test), `EXPLORER_FFMPEG=path` (converter tests).
@@ -67,4 +68,5 @@ GitHub **pre-releases** tagged `vX.Y.Z`:
     4. Review screenshots of the Resize dialog and the Tasks view.
     5. Next release (v1.0.8): README and release notes.
 - **Translucent window (Acrylic)**: done and checked on Windows 11 (a colourful window behind shows through, blurred). Linux (transparent, blur only on KDE/X11 or compositors that force it) and macOS (vibrancy) are untested: check that the Linux window still appears in CI's start check and on a real desktop. One unexplained `flutter_windows.dll` crash happened once while testing with two windows open; it didn't come back in later tries, so watch for it.
+- **macOS** (2026-10-24): builds and starts. A code check found Mac gaps still to fix: Cmd+Q skips close-while-busy (copies cut short), copies drop file permissions, `.app` opens as a folder, folder share deletes its zip too soon, no OCR (could use Vision), no FFmpeg download for macOS (WebP/AVIF/HEIC, video merging), Audio category empty, Finder clipboard, Delete key and Control-click, Cmd+F in the editor, new volumes not shown, Finder "Open With" ignored. Not in CI yet.
 - Ideas not started: keeping conversions alive on Android after the app is closed (foreground service); Recycle Bin/Trash; back/forward history; mouse-wheel zoom in the image viewer; known folders/OneDrive; multi-select in the archive viewer.
