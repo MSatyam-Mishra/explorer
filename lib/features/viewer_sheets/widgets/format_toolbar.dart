@@ -253,6 +253,7 @@ class _NumberFormatButton extends StatelessWidget {
           viewerMenuItem(
             value: p.$2,
             label: p.$1,
+            icon: LucideIcons.hash,
             hint: _sample(p.$2),
             checked: p.$2 == current,
           ),

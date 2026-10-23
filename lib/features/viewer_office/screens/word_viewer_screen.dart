@@ -624,6 +624,20 @@ class _WordViewerScreenState extends State<WordViewerScreen> {
 
   void _showOutlineSheet() {
     final headings = _headings();
+    if (!AppSheet.usesBottomSheet(context)) {
+      AppSheet.showRaw<void>(
+        context,
+        style: SheetStyle.side,
+        builder: (sheet) => _OutlineList(
+          headings: headings,
+          onTap: (i, para) {
+            Navigator.pop(sheet);
+            _viewController.reveal(i, paragraph: para);
+          },
+        ),
+      );
+      return;
+    }
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

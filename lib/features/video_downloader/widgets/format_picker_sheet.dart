@@ -11,6 +11,12 @@ Future<VideoFormat?> showFormatPicker(
   required bool hasFfmpeg,
   VideoFormat? selected,
 }) {
+  if (!AppSheet.usesBottomSheet(context)) {
+    return AppSheet.showRaw<VideoFormat>(
+      context,
+      builder: (_) => _FormatList(info: info, hasFfmpeg: hasFfmpeg, selected: selected),
+    );
+  }
   return showModalBottomSheet<VideoFormat>(
     context: context,
     isScrollControlled: true,
@@ -36,13 +42,13 @@ class _FormatList extends StatelessWidget {
     required this.info,
     required this.hasFfmpeg,
     required this.selected,
-    required this.scrollController,
+    this.scrollController,
   });
 
   final VideoInfo info;
   final bool hasFfmpeg;
   final VideoFormat? selected;
-  final ScrollController scrollController;
+  final ScrollController? scrollController;
 
   @override
   Widget build(BuildContext context) {

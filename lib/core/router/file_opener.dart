@@ -23,6 +23,7 @@ import 'package:explorer/features/viewer_text/text_document.dart';
 import 'package:explorer/features/viewer_vector/screens/lottie_viewer_screen.dart';
 import 'package:explorer/features/viewer_vector/screens/rive_viewer_screen.dart';
 import 'package:explorer/features/viewer_vector/screens/svg_viewer_screen.dart';
+import 'package:explorer/shared/ui/app_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -177,11 +178,7 @@ class FileOpener {
       (Icons.play_circle_outline, 'Media player', FileKind.video),
       if (allowExternal) (Icons.open_in_new, 'Another app', null),
     ];
-    final choice = await showModalBottomSheet<(IconData, String, FileKind?)>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
+    Widget chooser(BuildContext sheetContext) => ListView(
           shrinkWrap: true,
           children: [
             Padding(
@@ -199,9 +196,14 @@ class FileOpener {
                 onTap: () => Navigator.pop(sheetContext, option),
               ),
           ],
-        ),
-      ),
-    );
+        );
+    final choice = AppSheet.usesBottomSheet(context)
+        ? await showModalBottomSheet<(IconData, String, FileKind?)>(
+            context: context,
+            showDragHandle: true,
+            builder: (sheetContext) => SafeArea(child: chooser(sheetContext)),
+          )
+        : await AppSheet.showRaw<(IconData, String, FileKind?)>(context, builder: chooser);
     if (choice == null || !context.mounted) return null;
     final target = choice.$3;
     if (target == null) {

@@ -12,6 +12,22 @@ import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 import 'explorer_menu.dart';
 
+/// Menu icons for sorting and grouping.
+IconData sortIcon(SortOption option) => switch (option) {
+      SortOption.name => LucideIcons.arrowDownAZ,
+      SortOption.date => LucideIcons.calendarClock,
+      SortOption.size => LucideIcons.ruler,
+      SortOption.type => LucideIcons.shapes,
+    };
+
+IconData groupByIcon(GroupBy groupBy) => switch (groupBy) {
+      GroupBy.none => LucideIcons.list,
+      GroupBy.name => LucideIcons.arrowDownAZ,
+      GroupBy.date => LucideIcons.calendarClock,
+      GroupBy.type => LucideIcons.shapes,
+      GroupBy.size => LucideIcons.ruler,
+    };
+
 /// One folder on the way from a storage root to the current folder.
 class PathCrumb {
   const PathCrumb(this.path, this.label);
@@ -513,6 +529,7 @@ class _SortMenuButton extends StatelessWidget {
                   anchor,
                   value: o,
                   label: labelFor(o),
+                  icon: sortIcon(o),
                   checked: o == option,
                 ),
               ExplorerMenu.divider(),
@@ -538,6 +555,7 @@ class _SortMenuButton extends StatelessWidget {
                     anchor,
                     value: g,
                     label: groupByLabel(g),
+                    icon: groupByIcon(g),
                     checked: g == (groupBy ?? GroupBy.none),
                   ),
               ],

@@ -26,6 +26,7 @@ class ReaderSettingsSheet extends StatefulWidget {
   }) {
     return AppSheet.show<void>(
       context,
+    style: SheetStyle.side,
       maxHeightFraction: 0.85,
       child: ReaderSettingsSheet(
         initial: initial,

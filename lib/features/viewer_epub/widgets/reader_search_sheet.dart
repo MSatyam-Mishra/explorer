@@ -75,6 +75,21 @@ class ReaderSearchSheet extends StatefulWidget {
     required String Function(int spineIndex) titleForSpine,
     required ValueChanged<SearchHit> onSelect,
   }) {
+    if (!AppSheet.usesBottomSheet(context)) {
+      return AppSheet.showRaw<void>(
+        context,
+        style: SheetStyle.side,
+        builder: (sheetContext) => ReaderSearchSheet(
+          controller: controller,
+          source: source,
+          titleForSpine: titleForSpine,
+          onSelect: (hit) {
+            Navigator.of(sheetContext).pop();
+            onSelect(hit);
+          },
+        ),
+      );
+    }
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

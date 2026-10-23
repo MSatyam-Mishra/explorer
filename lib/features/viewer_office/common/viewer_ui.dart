@@ -970,6 +970,7 @@ Future<void> showViewerInfoSheet(
 }) {
   return AppSheet.show<void>(
     context,
+    style: SheetStyle.side,
     maxHeightFraction: 0.8,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

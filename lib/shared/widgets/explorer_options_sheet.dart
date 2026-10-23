@@ -40,6 +40,7 @@ class ExplorerOptionsSheet extends StatelessWidget {
   }) {
     return AppSheet.show<void>(
       context,
+    style: SheetStyle.side,
       child: ExplorerOptionsSheet(
         fileState: fileState,
         onHttpShare: onHttpShare,
@@ -66,12 +67,13 @@ class ExplorerOptionsSheet extends StatelessWidget {
         Text('View, sorting and appearance.', style: text.bodySmall),
         const _Heading('Layout'),
         SegmentedButton<ViewMode>(
+          style: _compactSegments,
           showSelectedIcon: false,
           segments: const [
-            ButtonSegment(value: ViewMode.list, label: Text('List')),
-            ButtonSegment(value: ViewMode.grid, label: Text('Grid')),
-            ButtonSegment(value: ViewMode.compact, label: Text('Compact')),
-            ButtonSegment(value: ViewMode.gallery, label: Text('Gallery')),
+            ButtonSegment(value: ViewMode.list, icon: Icon(LucideIcons.list, size: 16), label: Text('List')),
+            ButtonSegment(value: ViewMode.grid, icon: Icon(LucideIcons.layoutGrid, size: 16), label: Text('Grid')),
+            ButtonSegment(value: ViewMode.compact, icon: Icon(LucideIcons.rows3, size: 16), label: Text('Dense')),
+            ButtonSegment(value: ViewMode.gallery, icon: Icon(LucideIcons.images, size: 16), label: Text('Gallery')),
           ],
           selected: {fileState.viewMode},
           onSelectionChanged: (s) => onViewModeChanged(s.first),
@@ -94,12 +96,13 @@ class ExplorerOptionsSheet extends StatelessWidget {
           children: [
             Expanded(
               child: SegmentedButton<SortOption>(
+                style: _compactSegments,
                 showSelectedIcon: false,
                 segments: const [
-                  ButtonSegment(value: SortOption.name, label: Text('Name')),
-                  ButtonSegment(value: SortOption.date, label: Text('Date')),
-                  ButtonSegment(value: SortOption.size, label: Text('Size')),
-                  ButtonSegment(value: SortOption.type, label: Text('Type')),
+                  ButtonSegment(value: SortOption.name, icon: Icon(LucideIcons.arrowDownAZ, size: 16), label: Text('Name')),
+                  ButtonSegment(value: SortOption.date, icon: Icon(LucideIcons.calendarClock, size: 16), label: Text('Date')),
+                  ButtonSegment(value: SortOption.size, icon: Icon(LucideIcons.ruler, size: 16), label: Text('Size')),
+                  ButtonSegment(value: SortOption.type, icon: Icon(LucideIcons.shapes, size: 16), label: Text('Type')),
                 ],
                 selected: {fileState.sortOption},
                 onSelectionChanged: (s) =>
@@ -204,6 +207,12 @@ class ExplorerOptionsSheet extends StatelessWidget {
     );
   }
 }
+
+/// Room for an icon and a word in each of four segments.
+const _compactSegments = ButtonStyle(
+  padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6)),
+  visualDensity: VisualDensity.compact,
+);
 
 class _Heading extends StatelessWidget {
   const _Heading(this.label);

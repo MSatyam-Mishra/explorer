@@ -1015,7 +1015,7 @@ class _FileExplorerUI extends StatelessWidget {
             items: [
               for (final g in GroupBy.values)
                 ExplorerMenu.item<Object>(context,
-                    value: g, label: groupByLabel(g), checked: g == state.groupBy),
+                    value: g, label: groupByLabel(g), icon: groupByIcon(g), checked: g == state.groupBy),
             ]),
         ExplorerMenu.divider(),
         ExplorerMenu.item(context,

@@ -207,9 +207,9 @@ class _FileCategoryScreenState extends State<FileCategoryScreen> {
         initialValue: _sort,
         onSelected: (sort) => setState(() => _sort = sort),
         itemBuilder: (_) => const [
-          PopupMenuItem(value: _Sort.newest, child: Text('Newest first')),
-          PopupMenuItem(value: _Sort.name, child: Text('Name')),
-          PopupMenuItem(value: _Sort.size, child: Text('Largest first')),
+          PopupMenuItem(value: _Sort.newest, child: _MenuLabel(LucideIcons.calendarClock, 'Newest first')),
+          PopupMenuItem(value: _Sort.name, child: _MenuLabel(LucideIcons.arrowDownAZ, 'Name')),
+          PopupMenuItem(value: _Sort.size, child: _MenuLabel(LucideIcons.arrowDownWideNarrow, 'Largest first')),
         ],
       ),
       body: () {

@@ -14,6 +14,7 @@ Future<void> showLsSettingsSheet(
   if (settings == null) return Future.value();
   return AppSheet.show<void>(
     context,
+    style: SheetStyle.side,
     maxHeightFraction: 0.86,
     child: _SettingsSheet(controller: controller, initial: settings),
   );

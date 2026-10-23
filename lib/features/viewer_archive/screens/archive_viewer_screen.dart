@@ -643,6 +643,7 @@ class _ArchiveViewerScreenState extends State<ArchiveViewerScreen> {
     final ratio = ratioLabel(s.index.totalSize, s.archiveSize);
     AppSheet.show<void>(
       context,
+    style: SheetStyle.side,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,

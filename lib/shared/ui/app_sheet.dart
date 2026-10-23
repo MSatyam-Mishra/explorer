@@ -1,7 +1,17 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+/// How a sheet appears on computers and wide screens, where bottom sheets
+/// look out of place: a centred [dialog] (choices, short forms) or a
+/// [side] sheet from the right (details, settings). Phones keep the bottom
+/// sheet.
+enum SheetStyle { dialog, side }
+
 /// Bottom sheet with the app's sheet styling (drag handle, rounded top,
-/// border; see the bottomSheetTheme in AppTheme) and scrolling content.
+/// border; see the bottomSheetTheme in AppTheme) and scrolling content, or
+/// on computers and wide screens a dialog or side sheet ([SheetStyle]).
 class AppSheet extends StatelessWidget {
   const AppSheet({
     super.key,
@@ -19,11 +29,29 @@ class AppSheet extends StatelessWidget {
   final double? bottomMargin;
   final double? cornerRadius;
 
+  /// Whether sheets come up from the bottom here: phones and narrow
+  /// windows on touch devices.
+  static bool usesBottomSheet(BuildContext context) =>
+      !const {TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS}
+          .contains(defaultTargetPlatform) &&
+      MediaQuery.sizeOf(context).width < 720;
+
   static Future<T?> show<T>(
     BuildContext context, {
     required Widget child,
     double maxHeightFraction = 0.85,
+    SheetStyle style = SheetStyle.dialog,
   }) {
+    if (!usesBottomSheet(context)) {
+      return showRaw<T>(
+        context,
+        style: style,
+        builder: (_) => SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: child,
+        ),
+      );
+    }
     return showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,
@@ -31,6 +59,48 @@ class AppSheet extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 640),
       builder: (_) => AppSheet(
         maxHeightFraction: maxHeightFraction,
+        child: child,
+      ),
+    );
+  }
+
+  /// A dialog or side sheet holding [builder]'s content as it is (it
+  /// scrolls itself, if needed); for content made for a bottom sheet,
+  /// check [usesBottomSheet] first.
+  static Future<T?> showRaw<T>(
+    BuildContext context, {
+    required WidgetBuilder builder,
+    SheetStyle style = SheetStyle.dialog,
+  }) {
+    if (style == SheetStyle.dialog) {
+      return showDialog<T>(
+        context: context,
+        builder: (dialog) {
+          final size = MediaQuery.sizeOf(dialog);
+          return Dialog(
+            insetPadding: const EdgeInsets.all(24),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 560, maxHeight: size.height * 0.85),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: builder(dialog),
+              ),
+            ),
+          );
+        },
+      );
+    }
+    return showGeneralDialog<T>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (sheet, _, _) => _SideSheet(child: Builder(builder: builder)),
+      transitionBuilder: (_, animation, _, child) => SlideTransition(
+        position: Tween(begin: const Offset(1, 0), end: Offset.zero)
+            .animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
         child: child,
       ),
     );
@@ -51,6 +121,52 @@ class AppSheet extends StatelessWidget {
           24 + media.viewInsets.bottom + media.padding.bottom,
         ),
         child: child,
+      ),
+    );
+  }
+}
+
+/// A panel along the window's right edge, the full height, with a close
+/// button.
+class _SideSheet extends StatelessWidget {
+  const _SideSheet({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final width = math.min(460.0, MediaQuery.sizeOf(context).width * 0.9);
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Material(
+        color: theme.dialogTheme.backgroundColor ?? theme.colorScheme.surface,
+        elevation: 8,
+        shadowColor: Colors.black45,
+        shape: Border(left: BorderSide(color: theme.dividerColor)),
+        child: SizedBox(
+          width: width,
+          height: double.infinity,
+          child: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                    child: IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                      onPressed: () => Navigator.maybePop(context),
+                    ),
+                  ),
+                ),
+                Expanded(child: child),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

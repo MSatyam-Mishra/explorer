@@ -537,6 +537,7 @@ class _ThreeDViewerScreenState extends State<ThreeDViewerScreen> {
     }
     AppSheet.show<void>(
       context,
+      style: SheetStyle.side,
       maxHeightFraction: 0.72,
       child: ModelInfoPanel(
         controller: _viewer,
@@ -928,6 +929,7 @@ class _AnimationMenu extends StatelessWidget {
           menuItem(
             value: entry.$1,
             label: entry.$2,
+            icon: LucideIcons.clapperboard,
             checked: controller.animationIndex == entry.$1,
           ),
         if (controller.animationIndex != -2) ...[
@@ -993,6 +995,7 @@ class _AnimationBar extends StatelessWidget {
                   menuItem(
                     value: entry.$1,
                     label: entry.$2,
+                    icon: LucideIcons.clapperboard,
                     checked: controller.animationIndex == entry.$1,
                   ),
               ],

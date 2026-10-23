@@ -220,6 +220,7 @@ class _DesignPreviewScreenState extends State<DesignPreviewScreen> {
     }
     AppSheet.show<void>(
       context,
+    style: SheetStyle.side,
       maxHeightFraction: 0.75,
       child: _DetailsPanel(
         file: widget.file,

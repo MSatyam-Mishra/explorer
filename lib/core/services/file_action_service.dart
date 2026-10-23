@@ -579,7 +579,7 @@ class FileActionsService {
   }
 
   void showInfoSheet(FileSystemEntity entity, BuildContext context) {
-    AppSheet.show<void>(context, child: _PropertiesSheet(entity: entity));
+    AppSheet.show<void>(context, style: SheetStyle.side, child: _PropertiesSheet(entity: entity));
   }
 
   static Future<int> calculateDirectorySize(Directory dir) async =>

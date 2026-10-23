@@ -995,6 +995,7 @@ class _PdfPageCanvasScreenState extends State<PdfPageCanvasScreen> {
             label: textTool
                 ? '${sizeLabel(size)} text'
                 : '${sizeLabel(size)} line',
+            icon: textTool ? LucideIcons.type : LucideIcons.penLine,
             checked: size == currentSize,
           ),
       ],

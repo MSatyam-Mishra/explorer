@@ -13,6 +13,14 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
+/// The icon for [format] in menus.
+IconData formatIcon(ImageFormat format) => switch (format) {
+      ImageFormat.svg => LucideIcons.penTool,
+      ImageFormat.ico => LucideIcons.appWindow,
+      ImageFormat.gif => LucideIcons.film,
+      _ => LucideIcons.fileImage,
+    };
+
 /// A "Convert to" choice in a menu.
 class ConvertImages {
   const ConvertImages(this.format);
@@ -49,6 +57,7 @@ abstract final class ImageActions {
               context,
               value: ConvertImages(f),
               label: f.label,
+              icon: formatIcon(f),
               enabled: support[f]!.usable,
               shortcut: switch (support[f]!.kind) {
                 SupportKind.needsFfmpeg => 'needs FFmpeg',
@@ -96,7 +105,7 @@ abstract final class ImageActions {
             ),
             for (final f in targets)
               ListTile(
-                leading: const Icon(LucideIcons.fileImage),
+                leading: Icon(formatIcon(f)),
                 title: Text(f.label),
                 subtitle: support[f]!.reason == null && support[f]!.kind != SupportKind.needsFfmpeg
                     ? null

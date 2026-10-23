@@ -230,6 +230,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     } else {
       AppSheet.show<void>(
         context,
+    style: SheetStyle.side,
         maxHeightFraction: 0.7,
         child: _ImageInfoPane(file: _current, inSheet: true),
       );
