@@ -11,6 +11,7 @@ import 'package:explorer/core/services/file_action_service.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
+import 'package:explorer/features/file_explorere/bloc/grouping.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_header.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_menu.dart';
@@ -370,6 +371,8 @@ class _FileExplorerUI extends StatelessWidget {
       }
     } else if (command && key == LogicalKeyboardKey.keyN && Desktop.isDesktop) {
       Desktop.openWindow(folder: state.path);
+    } else if ((command && key == LogicalKeyboardKey.keyF) || key == LogicalKeyboardKey.f3) {
+      bloc.add(OpenSearch());
     } else if (key == LogicalKeyboardKey.f5 ||
         (command && key == LogicalKeyboardKey.keyR)) {
       bloc.add(LoadDirectory(state.path));
@@ -387,6 +390,8 @@ class _FileExplorerUI extends StatelessWidget {
       fileActionsService.showRenameDialog(context, single);
     } else if (key == LogicalKeyboardKey.escape && selected.isNotEmpty) {
       bloc.add(ToggleSelectionMode(enable: false));
+    } else if (key == LogicalKeyboardKey.escape && state.searchOpen) {
+      bloc.add(CloseSearch());
     } else if (key == LogicalKeyboardKey.backspace ||
         (keys.isAltPressed && key == LogicalKeyboardKey.arrowLeft) ||
         (command && key == LogicalKeyboardKey.arrowUp)) {
@@ -413,7 +418,7 @@ class _FileExplorerUI extends StatelessWidget {
       void exitSelection() => bloc.add(ToggleSelectionMode(enable: false));
       return ExplorerSelectionHeader(
         count: selected.length,
-        total: fileExplorerState.entities.length,
+        total: fileExplorerState.visibleEntities.length,
         wide: docked,
         onClose: exitSelection,
         onShare: () => fileActionsService.shareMany(context, selected),
@@ -468,6 +473,13 @@ class _FileExplorerUI extends StatelessWidget {
       viewMode: loaded?.viewMode,
       sortOption: loaded?.sortOption,
       sortOrder: loaded?.sortOrder,
+      groupBy: loaded?.groupBy,
+      onGroupByChanged: loaded == null ? null : (g) => bloc.add(ChangeGroupBy(g)),
+      searchOpen: loaded?.searchOpen ?? false,
+      query: loaded?.query ?? '',
+      onSearch: loaded == null ? null : () => bloc.add(OpenSearch()),
+      onSearchChanged: (q) => bloc.add(SearchChanged(q)),
+      onSearchClosed: () => bloc.add(CloseSearch()),
       onViewModeChanged: loaded == null
           ? null
           : (mode) => bloc.add(ChangeViewMode(mode)),
@@ -542,6 +554,20 @@ class _FileExplorerUI extends StatelessWidget {
       );
     }
     if (state is FileExplorerLoaded) {
+      if (state.query.isNotEmpty && state.searchResults.isEmpty) {
+        return state.searching
+            ? Padding(
+                padding: EdgeInsets.only(top: topInset),
+                child: const _Searching(),
+              )
+            : ExplorerEmptyState(
+                padding: statePadding,
+                icon: LucideIcons.searchX,
+                title: 'Nothing matches “${state.query}”',
+                description: 'Nothing here or in the folders inside has that '
+                    'name. Use * for any text, as in *.pdf.',
+              );
+      }
       if (state.entities.isEmpty) {
         return ExplorerEmptyState(
           padding: statePadding,
@@ -589,8 +615,17 @@ class _FileExplorerUI extends StatelessWidget {
     required double bottom,
   }) {
     final wide = width >= 720;
-    final entities = state.entities;
+    final entities = state.visibleEntities;
+    final groups = state.groups.isEmpty ? [EntityGroup('', entities)] : state.groups;
     final bloc = context.read<FileExplorerBloc>();
+    final searching = state.query.isNotEmpty;
+
+    /// Where a search result from a subfolder is, from here.
+    String? locationOf(FileSystemEntity e) {
+      if (!searching) return null;
+      final dir = p.dirname(e.path);
+      return p.equals(dir, state.path) ? null : p.relative(dir, from: state.path);
+    }
 
     void onTap(FileSystemEntity e) => _clicks.mouse
         ? _handleClick(context, state, e)
@@ -607,8 +642,15 @@ class _FileExplorerUI extends StatelessWidget {
     }
 
     final footer = SliverToBoxAdapter(
-      child: _FolderSummary(entities: entities),
+      child: searching
+          ? (state.searching
+              ? const _Searching()
+              : _SearchSummary(count: entities.length))
+          : _FolderSummary(entities: entities),
     );
+    Widget heading(EntityGroup group, double side) => SliverToBoxAdapter(
+          child: _GroupHeading(group: group, side: side),
+        );
 
     final List<Widget> slivers;
     if (state.viewMode == ViewMode.grid || state.viewMode == ViewMode.gallery) {
@@ -616,8 +658,11 @@ class _FileExplorerUI extends StatelessWidget {
       final pad = wide ? 24.0 : 16.0;
       final spacing = wide ? 12.0 : 10.0;
       slivers = [
+        SliverToBoxAdapter(child: SizedBox(height: top + pad - 4)),
+        for (final group in groups) ...[
+        if (group.label.isNotEmpty) heading(group, pad),
         SliverPadding(
-          padding: EdgeInsets.fromLTRB(pad, top + pad - 4, pad, 0),
+          padding: EdgeInsets.fromLTRB(pad, 0, pad, group.label.isEmpty ? 0 : 12),
           sliver: SliverGrid(
             // Column count follows the window width (phones ≈3, tablets 6+).
             gridDelegate: gallery
@@ -634,7 +679,7 @@ class _FileExplorerUI extends StatelessWidget {
                     mainAxisSpacing: spacing,
                   ),
             delegate: SliverChildBuilderDelegate((context, index) {
-              final entity = entities[index];
+              final entity = group.entities[index];
               return FileGridItem(
                 entity: entity,
                 displayName: state.labelFor(entity),
@@ -645,9 +690,10 @@ class _FileExplorerUI extends StatelessWidget {
                 onLongPress: () => onLongPress(entity),
                 onSecondaryTapUp: onSecondaryTap(entity),
               );
-            }, childCount: entities.length),
+            }, childCount: group.entities.length),
           ),
         ),
+        ],
         footer,
       ];
     } else {
@@ -673,15 +719,18 @@ class _FileExplorerUI extends StatelessWidget {
             ],
           ),
         ),
+        for (final group in groups) ...[
+        if (group.label.isNotEmpty) heading(group, sidePad + 8),
         SliverPadding(
           padding: EdgeInsets.symmetric(horizontal: sidePad),
           sliver: SliverFixedExtentList(
             itemExtent: FileListItem.heightFor(style) + 2,
             delegate: SliverChildBuilderDelegate((context, index) {
-              final entity = entities[index];
+              final entity = group.entities[index];
               return FileListItem(
                 entity: entity,
                 displayName: state.labelFor(entity),
+                location: locationOf(entity),
                 style: style,
                 isSelectionMode: state.isSelectionMode,
                 isSelected: state.selectedItems.contains(entity),
@@ -689,9 +738,10 @@ class _FileExplorerUI extends StatelessWidget {
                 onLongPress: () => onLongPress(entity),
                 onSecondaryTapUp: onSecondaryTap(entity),
               );
-            }, childCount: entities.length),
+            }, childCount: group.entities.length),
           ),
         ),
+        ],
         footer,
       ];
     }
@@ -779,11 +829,12 @@ class _FileExplorerUI extends StatelessWidget {
     }
     final anchor = _clicks.anchorPath;
     if (keys.isShiftPressed && anchor != null) {
-      final paths = [for (final e in state.entities) e.path];
+      final shown = state.displayEntities;
+      final paths = [for (final e in shown) e.path];
       final from = paths.indexOf(anchor);
       final to = paths.indexOf(entity.path);
       if (from >= 0 && to >= 0) {
-        final range = state.entities
+        final range = shown
             .sublist(math.min(from, to), math.max(from, to) + 1)
             .toSet();
         bloc.add(SetSelection(range, selectionMode: range.length > 1));
@@ -918,6 +969,14 @@ class _FileExplorerUI extends StatelessWidget {
             label: 'Refresh',
             icon: LucideIcons.refreshCw,
             shortcut: 'F5'),
+        ExplorerMenu.submenu<Object>(context,
+            label: 'Group by',
+            icon: LucideIcons.rows3,
+            items: [
+              for (final g in GroupBy.values)
+                ExplorerMenu.item<Object>(context,
+                    value: g, label: groupByLabel(g), checked: g == state.groupBy),
+            ]),
         ExplorerMenu.divider(),
         ExplorerMenu.item(context,
             value: 'window',
@@ -933,6 +992,7 @@ class _FileExplorerUI extends StatelessWidget {
     if (action is ShareMethod) {
       return fileActionsService.shareVia(context, action, [Directory(state.path)]);
     }
+    if (action is GroupBy) return bloc.add(ChangeGroupBy(action));
     switch (action) {
       case 'folder':
         fileActionsService.showCreateFolderDialog(context, state.path);
@@ -1085,6 +1145,73 @@ class _FolderSummary extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Text(
         parts.join(' · '),
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+}
+
+/// A group's heading: its name, how many items, and a rule.
+class _GroupHeading extends StatelessWidget {
+  const _GroupHeading({required this.group, required this.side});
+
+  final EntityGroup group;
+  final double side;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(side + 4, 12, side + 4, 6),
+      child: Row(
+        children: [
+          Text(group.label, style: text.titleSmall),
+          const SizedBox(width: 8),
+          Text('${group.entities.length}', style: text.bodySmall),
+          const SizedBox(width: 12),
+          Expanded(child: Divider(height: 1, color: colors.border)),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Searching folders inside…" while subfolders are searched.
+class _Searching extends StatelessWidget {
+  const _Searching();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox.square(
+            dimension: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Text('Searching folders inside…', style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchSummary extends StatelessWidget {
+  const _SearchSummary({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Text(
+        count == 1 ? '1 result' : '$count results',
         textAlign: TextAlign.center,
         style: Theme.of(context).textTheme.bodySmall,
       ),

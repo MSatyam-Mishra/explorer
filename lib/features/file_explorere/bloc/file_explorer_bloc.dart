@@ -4,6 +4,8 @@ import 'package:bloc/bloc.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
+import 'package:explorer/features/file_explorere/bloc/folder_search.dart';
+import 'package:explorer/features/file_explorere/bloc/grouping.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
@@ -55,7 +57,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
         emit(
           currentState.copyWith(
             isSelectionMode: true,
-            selectedItems: Set<FileSystemEntity>.of(currentState.entities),
+            selectedItems: Set<FileSystemEntity>.of(currentState.visibleEntities),
           ),
         );
       }
@@ -109,16 +111,115 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
         if (latest is! FileExplorerLoaded || latest.path != currentState.path) {
           return;
         }
-        emit(
-          latest.copyWith(
-            sortOption: event.option,
-            sortOrder: event.order,
-            entities: sortedEntities,
-          ),
+        final sorted = latest.copyWith(
+          sortOption: event.option,
+          sortOrder: event.order,
+          entities: sortedEntities,
+          searchResults: latest.query.isEmpty
+              ? null
+              : _sortedLike(latest.searchResults, sortedEntities),
         );
+        emit(sorted.copyWith(groups: await _group(sorted)));
       }
     });
+
+    on<ChangeGroupBy>((event, emit) async {
+      final current = state;
+      if (current is! FileExplorerLoaded) return;
+      await FolderPrefsService().setGroupBy(current.path, event.groupBy);
+      final groups = await _group(current.copyWith(groupBy: event.groupBy));
+      final latest = state;
+      if (latest is FileExplorerLoaded && latest.path == current.path) {
+        emit(latest.copyWith(groupBy: event.groupBy, groups: groups));
+      }
+    });
+
+    on<OpenSearch>((event, emit) {
+      final current = state;
+      if (current is FileExplorerLoaded) emit(current.copyWith(searchOpen: true));
+    });
+
+    on<CloseSearch>((event, emit) async {
+      _searchGeneration++;
+      final current = state;
+      if (current is! FileExplorerLoaded) return;
+      final closed = current.copyWith(
+        searchOpen: false,
+        query: '',
+        searchResults: const [],
+        searching: false,
+      );
+      emit(closed.copyWith(groups: await _group(closed)));
+    });
+
+    on<SearchChanged>(_onSearchChanged);
   }
+
+  /// Incremented per search; a search's late results are dropped once
+  /// another one started.
+  int _searchGeneration = 0;
+
+  Future<void> _onSearchChanged(SearchChanged event, Emitter<FileExplorerState> emit) async {
+    final generation = ++_searchGeneration;
+    final current = state;
+    if (current is! FileExplorerLoaded) return;
+    final query = event.query.trim();
+    if (query.isEmpty) {
+      final cleared = current.copyWith(searchOpen: true, query: '', searchResults: const [], searching: false);
+      emit(cleared.copyWith(groups: await _group(cleared)));
+      return;
+    }
+    // The folder's own items at once.
+    final matcher = NameMatcher(query);
+    final results = [
+      for (final e in current.entities)
+        if (matcher.matches(current.labelFor(e))) e,
+    ];
+    // This PC lists drives: searching all of them would take ages.
+    final deep = !ExplorerPaths.isWindowsRoots(current.path);
+    var shown = current.copyWith(searchOpen: true, query: query, searchResults: List.of(results), searching: deep);
+    emit(shown.copyWith(groups: await _group(shown)));
+    if (!deep) return;
+
+    // Then its subfolders, once typing pauses.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (generation != _searchGeneration || emit.isDone) return;
+    await FolderPrefsService().init();
+    final found = searchSubfolders(current.path, query, showHidden: FolderPrefsService().showHidden);
+    await for (final batch in found) {
+      final latest = state;
+      if (generation != _searchGeneration || emit.isDone || latest is! FileExplorerLoaded || latest.path != current.path) {
+        return; // Cancelling the stream stops the search.
+      }
+      results.addAll(batch);
+      shown = latest.copyWith(searchResults: List.of(results));
+      emit(shown.copyWith(groups: await _group(shown)));
+    }
+    final latest = state;
+    if (generation == _searchGeneration && !emit.isDone && latest is FileExplorerLoaded && latest.path == current.path) {
+      emit(latest.copyWith(searching: false));
+    }
+  }
+
+  /// [results] with the folder's own items in [sorted]'s order first, then
+  /// those from subfolders as found.
+  static List<FileSystemEntity> _sortedLike(
+    List<FileSystemEntity> results,
+    List<FileSystemEntity> sorted,
+  ) {
+    final paths = {for (final e in results) e.path};
+    final own = [for (final e in sorted) if (paths.contains(e.path)) e];
+    final ownPaths = {for (final e in own) e.path};
+    return [...own, for (final e in results) if (!ownPaths.contains(e.path)) e];
+  }
+
+  /// The headings for what [s] shows.
+  Future<List<EntityGroup>> _group(FileExplorerLoaded s) => groupEntities(
+        s.visibleEntities,
+        s.groupBy,
+        stat: _statOrNull,
+        nameOf: s.labelFor,
+      );
 
   /// Incremented per [LoadDirectory]; a load that finishes after a newer
   /// one started drops its result, so the last folder opened always wins.
@@ -196,6 +297,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final viewMode = FolderPrefsService().getViewMode(event.path);
       final sortOption = FolderPrefsService().getSortOption(event.path);
       final sortOrder = FolderPrefsService().getSortOrder(event.path);
+      final groupBy = FolderPrefsService().getGroupBy(event.path);
 
       Map<String, String> pathLabels = {};
       if (ExplorerPaths.isWindowsRoots(event.path) &&
@@ -224,20 +326,28 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
         for (final e in sortedEntities)
           if (kept.contains(e.path)) e,
       };
-      emit(
-        FileExplorerLoaded(
-          entities: sortedEntities,
-          path: event.path,
-          viewMode: viewMode,
-          sortOption: sortOption,
-          sortOrder: sortOrder,
-          pathLabels: pathLabels,
-          selectedItems: selected,
-          isSelectionMode: selected.isNotEmpty &&
-              latest is FileExplorerLoaded &&
-              latest.isSelectionMode,
-        ),
+      final loaded = FileExplorerLoaded(
+        entities: sortedEntities,
+        path: event.path,
+        viewMode: viewMode,
+        sortOption: sortOption,
+        sortOrder: sortOrder,
+        pathLabels: pathLabels,
+        groupBy: groupBy,
+        selectedItems: selected,
+        isSelectionMode: selected.isNotEmpty &&
+            latest is FileExplorerLoaded &&
+            latest.isSelectionMode,
+        // A refresh keeps the search box open.
+        searchOpen: latest is FileExplorerLoaded && latest.path == event.path && latest.searchOpen,
       );
+      final groups = await _group(loaded);
+      if (stale()) return;
+      emit(loaded.copyWith(groups: groups));
+      // And searches again, so changed files show up in the results.
+      if (latest is FileExplorerLoaded && latest.path == event.path && latest.query.isNotEmpty) {
+        add(SearchChanged(latest.query));
+      }
     } catch (e) {
       if (stale()) return;
       emit(

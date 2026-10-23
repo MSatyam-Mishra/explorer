@@ -31,6 +31,9 @@ class FileListItem extends StatelessWidget {
   final String? displayName;
   final FileRowStyle style;
 
+  /// Where it is, for search results from subfolders ("Reports/2025").
+  final String? location;
+
   /// Right click / two-finger tap (desktop, trackpads).
   /// Right-click, with where it happened (for a context menu).
   final GestureTapUpCallback? onSecondaryTapUp;
@@ -44,6 +47,7 @@ class FileListItem extends StatelessWidget {
     required this.onLongPress,
     this.displayName,
     this.style = FileRowStyle.comfortable,
+    this.location,
     this.onSecondaryTapUp,
   });
 
@@ -109,12 +113,25 @@ class FileListItem extends StatelessWidget {
       fontWeight: FontWeight.w500,
       color: isSelected ? colors.accentForeground : colors.foreground,
     );
-    final name = Text(
-      title,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: nameStyle,
-    );
+    final where = location;
+    final Widget name = where == null || style == FileRowStyle.comfortable
+        ? Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: nameStyle)
+        : Row(
+            children: [
+              Flexible(
+                child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: nameStyle),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'in $where',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.bodySmall,
+                ),
+              ),
+            ],
+          );
 
     switch (style) {
       case FileRowStyle.comfortable:
@@ -127,7 +144,10 @@ class FileListItem extends StatelessWidget {
             EntityStatBuilder(
               entity: entity,
               builder: (context, stat) => Text(
-                stat == null ? ' ' : EntityFormat.summary(entity, stat),
+                [
+                  if (where != null) 'in $where',
+                  if (stat != null) EntityFormat.summary(entity, stat),
+                ].join(' · ').ifEmpty(' '),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: text.bodySmall,
@@ -393,4 +413,8 @@ class SelectionCheck extends StatelessWidget {
           : null,
     );
   }
+}
+
+extension on String {
+  String ifEmpty(String other) => isEmpty ? other : this;
 }

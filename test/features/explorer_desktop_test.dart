@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
@@ -168,6 +169,53 @@ void main() {
     expect(screen.initialFolder, root.path);
     expect(screen.only, [p.join(root.path, 'beta.txt')]);
     expect(screen.startNow, isTrue);
+  });
+
+  testWidgets('Ctrl+F searches here and in folders inside; Esc closes', (tester) async {
+    // Real file work runs outside the test's fake clock.
+    await tester.runAsync(
+      () => File(p.join(root.path, 'Docs', 'alpha plan.md')).writeAsString('plan'),
+    );
+    final bloc = await open(tester);
+    FileExplorerLoaded state() => bloc.state as FileExplorerLoaded;
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(find.byType(TextField), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'alpha');
+    await tester.pump();
+    expect(find.text('alpha.txt'), findsOneWidget);
+    expect(find.text('beta.txt'), findsNothing);
+    for (var i = 0; i < 20 && state().searching; i++) {
+      await settle(tester);
+    }
+    expect(state().searchResults.map((e) => p.basename(e.path)), ['alpha.txt', 'alpha plan.md']);
+    expect(find.text('alpha plan.md'), findsOneWidget);
+    expect(find.text('in Docs'), findsOneWidget);
+    expect(find.text('2 results'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('beta.txt'), findsOneWidget);
+  });
+
+  testWidgets('group by type puts items under headings', (tester) async {
+    final bloc = await open(tester);
+    bloc.add(ChangeGroupBy(GroupBy.type));
+    await settle(tester);
+    final groups = (bloc.state as FileExplorerLoaded).groups;
+    expect(groups.first.label, 'Folder');
+    expect(find.text('Folder'), findsWidgets);
+    expect(groups.expand((g) => g.entities).map((e) => p.basename(e.path)),
+        ['Docs', 'alpha.txt', 'beta.txt', 'gamma.txt']);
+
+    bloc.add(ChangeGroupBy(GroupBy.none));
+    await settle(tester);
+    expect((bloc.state as FileExplorerLoaded).groups, isEmpty);
   });
 
   testWidgets('new windows: header button, Ctrl+N, folders and files', (tester) async {

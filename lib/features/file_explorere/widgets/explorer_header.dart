@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
+import 'package:explorer/features/file_explorere/bloc/grouping.dart';
 import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
@@ -70,6 +72,13 @@ class ExplorerHeader extends StatelessWidget {
     this.onOptionsPressed,
     this.onNewFolder,
     this.onNewWindow,
+    this.groupBy,
+    this.onGroupByChanged,
+    this.searchOpen = false,
+    this.query = '',
+    this.onSearch,
+    this.onSearchChanged,
+    this.onSearchClosed,
   });
 
   final List<PathCrumb> crumbs;
@@ -92,6 +101,16 @@ class ExplorerHeader extends StatelessWidget {
   /// Opens this folder in another window (desktop).
   final VoidCallback? onNewWindow;
 
+  final GroupBy? groupBy;
+  final ValueChanged<GroupBy>? onGroupByChanged;
+
+  /// The search box replaces the location while [searchOpen].
+  final bool searchOpen;
+  final String query;
+  final VoidCallback? onSearch;
+  final ValueChanged<String>? onSearchChanged;
+  final VoidCallback? onSearchClosed;
+
   @override
   Widget build(BuildContext context) {
     return _HeaderTheme(
@@ -108,13 +127,28 @@ class ExplorerHeader extends StatelessWidget {
               const SizedBox(width: 8),
             ],
             Expanded(
-              child: crumbs.isEmpty
+              child: searchOpen
+                  ? _SearchField(
+                      query: query,
+                      hint: crumbs.isEmpty
+                          ? 'Search'
+                          : 'Search ${crumbs.last.label}',
+                      onChanged: onSearchChanged,
+                      onClosed: onSearchClosed,
+                    )
+                  : crumbs.isEmpty
                   ? Text('Files', style: AppForeground.title(context))
                   : wide
                       ? _Breadcrumb(crumbs: crumbs, onNavigate: onNavigate)
                       : _CompactTitle(crumbs: crumbs, onNavigate: onNavigate),
             ),
             const SizedBox(width: 8),
+            if (!searchOpen && onSearch != null)
+              AppIconButton(
+                icon: const Icon(LucideIcons.search),
+                tooltip: Platform.isMacOS ? 'Search (⌘F)' : 'Search (Ctrl+F)',
+                onPressed: onSearch,
+              ),
             if (wide && onNewFolder != null) ...[
               OutlinedButton.icon(
                 onPressed: onNewFolder,
@@ -136,6 +170,8 @@ class ExplorerHeader extends StatelessWidget {
                 option: sortOption!,
                 order: sortOrder!,
                 onChanged: onSortChanged!,
+                groupBy: groupBy,
+                onGroupByChanged: onGroupByChanged,
               ),
             if (onNewWindow != null)
               AppIconButton(
@@ -442,11 +478,16 @@ class _SortMenuButton extends StatelessWidget {
     required this.option,
     required this.order,
     required this.onChanged,
+    this.groupBy,
+    this.onGroupByChanged,
   });
 
   final SortOption option;
   final SortOrder order;
   final void Function(SortOption option, SortOrder order) onChanged;
+  final GroupBy? groupBy;
+  final ValueChanged<GroupBy>? onGroupByChanged;
+
 
   static String labelFor(SortOption option) => switch (option) {
         SortOption.name => 'Name',
@@ -460,7 +501,7 @@ class _SortMenuButton extends StatelessWidget {
     return Builder(
       builder: (anchor) => AppIconButton(
         icon: const Icon(LucideIcons.arrowUpDown),
-        tooltip: 'Sort',
+        tooltip: onGroupByChanged == null ? 'Sort' : 'Sort and group',
         onPressed: () async {
           final picked = await ExplorerMenu.show<Object>(
             anchor,
@@ -489,6 +530,17 @@ class _SortMenuButton extends StatelessWidget {
                 icon: LucideIcons.arrowDownWideNarrow,
                 checked: order == SortOrder.descending,
               ),
+              if (onGroupByChanged != null) ...[
+                ExplorerMenu.divider(),
+                ExplorerMenu.label(anchor, 'Group by'),
+                for (final g in GroupBy.values)
+                  ExplorerMenu.item<Object>(
+                    anchor,
+                    value: g,
+                    label: groupByLabel(g),
+                    checked: g == (groupBy ?? GroupBy.none),
+                  ),
+              ],
             ],
           );
           switch (picked) {
@@ -496,8 +548,69 @@ class _SortMenuButton extends StatelessWidget {
               onChanged(o, order);
             case SortOrder o when o != order:
               onChanged(option, o);
+            case GroupBy g when g != groupBy:
+              onGroupByChanged?.call(g);
           }
         },
+      ),
+    );
+  }
+}
+
+/// The search box in the header: what's typed goes to [onChanged] as it's
+/// typed; the clear button or Esc closes it.
+class _SearchField extends StatefulWidget {
+  const _SearchField({
+    required this.query,
+    required this.hint,
+    required this.onChanged,
+    required this.onClosed,
+  });
+
+  final String query;
+  final String hint;
+  final ValueChanged<String>? onChanged;
+  final VoidCallback? onClosed;
+
+  @override
+  State<_SearchField> createState() => _SearchFieldState();
+}
+
+class _SearchFieldState extends State<_SearchField> {
+  late final _controller = TextEditingController(text: widget.query);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () => widget.onClosed?.call(),
+      },
+      child: SizedBox(
+        height: 38,
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          onChanged: widget.onChanged,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: widget.hint,
+            prefixIcon: const Icon(LucideIcons.search, size: 16),
+            prefixIconConstraints: const BoxConstraints(minWidth: 36),
+            suffixIcon: IconButton(
+              icon: const Icon(LucideIcons.x, size: 16),
+              tooltip: 'Close search (Esc)',
+              onPressed: widget.onClosed,
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          ),
+        ),
       ),
     );
   }

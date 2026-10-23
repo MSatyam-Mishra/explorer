@@ -32,6 +32,8 @@ void main() {
     for (final d in ['Documents', 'Pictures', 'Music', 'Projects']) {
       await Directory(p.join(sample.path, d)).create();
     }
+    await File(p.join(sample.path, 'Documents', 'Report draft.docx'))
+        .writeAsBytes(List.filled(48 * 1024, 120));
     // Varied sizes (KB) and dates so the metadata looks realistic.
     const files = {
       'Quarterly report.pdf': 184, 'Meeting notes.docx': 32,
@@ -182,6 +184,24 @@ void main() {
 
         await open(p.join(sample.path, 'Missing folder'));
         await saveScreenshot(tester, 'explorer_error_$tag');
+        // Grouped by type, and searching.
+        await open(sample.path);
+        await view(ViewMode.list);
+        bloc.add(ChangeGroupBy(GroupBy.type));
+        await settle(tester);
+        await saveScreenshot(tester, 'explorer_grouped_$tag');
+        bloc.add(ChangeGroupBy(GroupBy.none));
+        bloc.add(OpenSearch());
+        await settle(tester);
+        await tester.enterText(find.byType(TextField), 'report');
+        await settleUntil(tester, () {
+          final s = bloc.state;
+          return s is FileExplorerLoaded && !s.searching;
+        });
+        await saveScreenshot(tester, 'explorer_search_$tag');
+        bloc.add(CloseSearch());
+        await settle(tester);
+
         debugDisableShadows = true;
       }, skip: !screenshotsEnabled);
     }

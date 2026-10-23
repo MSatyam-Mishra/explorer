@@ -24,6 +24,28 @@ class FileExplorerLoaded extends FileExplorerState {
   /// Optional display names (e.g. Windows drives / libraries on This PC).
   final Map<String, String> pathLabels;
 
+  /// Headings the items are grouped under; [groups] holds what's shown,
+  /// empty when not grouped.
+  final GroupBy groupBy;
+  final List<EntityGroup> groups;
+
+  /// The search box: whether it's open, what's typed, the matches (this
+  /// folder's first, then its subfolders'), and whether subfolders are
+  /// still being searched.
+  final bool searchOpen;
+  final String query;
+  final List<FileSystemEntity> searchResults;
+  final bool searching;
+
+  /// The folder's items, or the search results while searching.
+  List<FileSystemEntity> get visibleEntities =>
+      query.isEmpty ? entities : searchResults;
+
+  /// [visibleEntities] in the order shown (group after group).
+  List<FileSystemEntity> get displayEntities => groups.isEmpty
+      ? visibleEntities
+      : [for (final group in groups) ...group.entities];
+
   FileExplorerLoaded({
     required this.entities,
     required this.path,
@@ -33,6 +55,12 @@ class FileExplorerLoaded extends FileExplorerState {
     this.sortOption = SortOption.name,
     this.sortOrder = SortOrder.ascending,
     this.pathLabels = const {},
+    this.groupBy = GroupBy.none,
+    this.groups = const [],
+    this.searchOpen = false,
+    this.query = '',
+    this.searchResults = const [],
+    this.searching = false,
   });
 
   String labelFor(FileSystemEntity entity) {
@@ -49,6 +77,12 @@ class FileExplorerLoaded extends FileExplorerState {
     SortOption? sortOption,
     SortOrder? sortOrder,
     Map<String, String>? pathLabels,
+    GroupBy? groupBy,
+    List<EntityGroup>? groups,
+    bool? searchOpen,
+    String? query,
+    List<FileSystemEntity>? searchResults,
+    bool? searching,
   }) {
     return FileExplorerLoaded(
       entities: entities ?? this.entities,
@@ -59,6 +93,12 @@ class FileExplorerLoaded extends FileExplorerState {
       sortOption: sortOption ?? this.sortOption,
       sortOrder: sortOrder ?? this.sortOrder,
       pathLabels: pathLabels ?? this.pathLabels,
+      groupBy: groupBy ?? this.groupBy,
+      groups: groups ?? this.groups,
+      searchOpen: searchOpen ?? this.searchOpen,
+      query: query ?? this.query,
+      searchResults: searchResults ?? this.searchResults,
+      searching: searching ?? this.searching,
     );
   }
 }

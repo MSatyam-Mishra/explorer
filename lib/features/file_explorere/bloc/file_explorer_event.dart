@@ -41,5 +41,24 @@ class SetSelection extends FileExplorerEvent {
   SetSelection(this.items, {this.selectionMode = false});
 }
 
-/// Selects every entry in the current folder.
+/// Selects every entry shown (the search results while searching).
 class SelectAll extends FileExplorerEvent {}
+
+/// Shows the items under headings (or not, with [GroupBy.none]).
+class ChangeGroupBy extends FileExplorerEvent {
+  final GroupBy groupBy;
+  ChangeGroupBy(this.groupBy);
+}
+
+/// Opens the search box.
+class OpenSearch extends FileExplorerEvent {}
+
+/// What's typed in the search box: the folder's matching items show at
+/// once, then matches from its subfolders as they're found.
+class SearchChanged extends FileExplorerEvent {
+  final String query;
+  SearchChanged(this.query);
+}
+
+/// Closes the search box; the folder shows again.
+class CloseSearch extends FileExplorerEvent {}

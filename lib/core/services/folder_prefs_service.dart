@@ -9,6 +9,9 @@ enum SortOption { name, size, date, type }
 
 enum SortOrder { ascending, descending }
 
+/// Headings a folder's items are grouped under, as in File Explorer.
+enum GroupBy { none, name, date, type, size }
+
 class FolderPrefsService {
   static final FolderPrefsService _instance = FolderPrefsService._internal();
   factory FolderPrefsService() => _instance;
@@ -70,6 +73,19 @@ class FolderPrefsService {
 
     final map = jsonDecode(jsonString);
     return SortOrder.values[map['sortOrder'] ?? 0];
+  }
+
+  GroupBy getGroupBy(String path) {
+    final jsonString = _prefs.getString(_getPathKey(path));
+    if (jsonString == null) return GroupBy.none;
+    final index = jsonDecode(jsonString)['groupBy'];
+    return index is int && index < GroupBy.values.length
+        ? GroupBy.values[index]
+        : GroupBy.none;
+  }
+
+  Future<void> setGroupBy(String path, GroupBy groupBy) async {
+    await _updatePrefs(path, {'groupBy': groupBy.index});
   }
 
   Future<void> setViewMode(String path, ViewMode mode) async {
