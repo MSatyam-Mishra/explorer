@@ -20,5 +20,14 @@ class PasteFromClipboard extends ClipboardEvent {
   PasteFromClipboard(this.destinationPath);
 }
 
+/// Moves or copies [sources] into [destination] without the clipboard, as
+/// a drag and drop does.
+class TransferFiles extends ClipboardEvent {
+  final List<String> sources;
+  final String destination;
+  final bool move;
+  TransferFiles(this.sources, this.destination, {required this.move});
+}
+
 /// The shared clipboard changed (another window, or another app).
 class _ClipboardChanged extends ClipboardEvent {}

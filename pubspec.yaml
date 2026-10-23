@@ -78,6 +78,7 @@ dependencies:
   win32: 5.15.0
   wakelock_plus: 1.5.2
   media_kit_video: 2.0.1
+  super_drag_and_drop: 0.10.0-dev.2
   # quick_usb: ^0.4.0
 
 dev_dependencies:

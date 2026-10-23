@@ -31,6 +31,8 @@ class ClipboardPasteSuccess extends ClipboardState {
 
 class ClipboardPasteFailure extends ClipboardState {
   final String error;
-  final ClipboardReadyToPaste previousState;
-  ClipboardPasteFailure({required this.error, required this.previousState});
+
+  /// What was on the clipboard (null for a drop).
+  final ClipboardReadyToPaste? previousState;
+  ClipboardPasteFailure({required this.error, this.previousState});
 }

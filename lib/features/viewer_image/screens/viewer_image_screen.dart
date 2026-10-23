@@ -3,9 +3,11 @@ import 'dart:io';
 import 'package:explorer/core/files/file_types.dart';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/router/file_opener.dart';
+import 'package:explorer/core/services/image_text.dart';
 import 'package:explorer/features/viewer_image/image_codec.dart';
 import 'package:explorer/features/viewer_image/raw_image.dart';
 import 'package:explorer/features/viewer_image/screens/image_editor_screen.dart';
+import 'package:explorer/features/viewer_image/widgets/image_text_layer.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
 import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
@@ -39,10 +41,41 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   bool _showInfo = false;
   bool _changed = false;
 
+  /// Text found in the image shown ([_textPath]), and whether it's being
+  /// selected (the image then holds still).
+  ImageText? _text;
+  String? _textPath;
+  bool _textMode = false;
+
   @override
   void initState() {
     super.initState();
     _loadImages();
+    _readText();
+  }
+
+  /// Looks for text in the image shown, in the background.
+  Future<void> _readText() async {
+    if (!ImageTextReader.enabled) return;
+    final file = _current;
+    final text = await ImageTextReader.read(file);
+    if (!mounted || !p.equals(_current.path, file.path)) return;
+    setState(() {
+      _text = text;
+      _textPath = file.path;
+    });
+  }
+
+  void _toggleTextMode() => setState(() => _textMode = !_textMode);
+
+  Future<void> _copyText() async {
+    final text = _text;
+    if (text == null) return;
+    await Clipboard.setData(ClipboardData(text: text.text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Text copied')),
+    );
   }
 
   @override
@@ -121,6 +154,12 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
+    if (_textMode) {
+      // Keys go to the text being selected; Esc stops selecting.
+      if (key != LogicalKeyboardKey.escape) return KeyEventResult.ignored;
+      setState(() => _textMode = false);
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.pageUp ||
         key == LogicalKeyboardKey.arrowUp) {
@@ -215,13 +254,38 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         // controller (gallery listed, or reloaded after an edit) needs a new
         // gallery state.
         key: ObjectKey(_pageController),
-        scrollPhysics: const BouncingScrollPhysics(),
+        scrollPhysics: _textMode
+            ? const NeverScrollableScrollPhysics()
+            : const BouncingScrollPhysics(),
         pageController: _pageController,
         itemCount: _images.length,
         backgroundDecoration: const BoxDecoration(color: Colors.black),
         loadingBuilder: (context, event) => const ViewerLoading(),
         builder: (context, index) {
           final file = _images[index];
+          final text = _text;
+          if (text != null && _textPath == file.path) {
+            // Drawn at the size the text was read at, with the text on it.
+            return PhotoViewGalleryPageOptions.customChild(
+              childSize: text.size,
+              initialScale: PhotoViewComputedScale.contained,
+              minScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 4.0,
+              heroAttributes: PhotoViewHeroAttributes(tag: file.path),
+              disableGestures: _textMode,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image(
+                    image: ImageCodec.displayProviderFor(file, maxSide),
+                    fit: BoxFit.fill,
+                    gaplessPlayback: true,
+                  ),
+                  ImageTextLayer(text: text, active: _textMode),
+                ],
+              ),
+            );
+          }
           return PhotoViewGalleryPageOptions(
             imageProvider: ImageCodec.displayProviderFor(file, maxSide),
             initialScale: PhotoViewComputedScale.contained,
@@ -234,7 +298,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             ),
           );
         },
-        onPageChanged: (index) => setState(() => _currentIndex = index),
+        onPageChanged: (index) {
+          setState(() {
+            _currentIndex = index;
+            _text = null;
+            _textMode = false;
+          });
+          _readText();
+        },
     );
     final raw = RawImages.isRaw(_current.path);
     final arrows = Desktop.isDesktop && _images.length > 1;
@@ -281,6 +352,32 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             ),
           ),
         ],
+        // Text found: select it on the image, or copy all of it.
+        if (_text != null && _textPath == _current.path)
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: MediaQuery.paddingOf(context).bottom +
+                (_images.length > 1 || raw ? 56 : 16),
+            child: Center(
+              child: _OverlayPill(
+                children: [
+                  _PillButton(
+                    icon: LucideIcons.scanText,
+                    label: _textMode ? 'Done' : 'Select text',
+                    selected: _textMode,
+                    onPressed: _toggleTextMode,
+                  ),
+                  const _PillDivider(),
+                  _PillButton(
+                    icon: LucideIcons.copy,
+                    label: 'Copy all text',
+                    onPressed: _copyText,
+                  ),
+                ],
+              ),
+            ),
+          ),
         if (_images.length > 1 || raw)
           Positioned(
             left: 16,
@@ -440,6 +537,42 @@ class _OverlayPill extends StatelessWidget {
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
           child: Row(mainAxisSize: MainAxisSize.min, children: children),
+        ),
+      ),
+    );
+  }
+}
+
+/// A small text button inside an [_OverlayPill].
+class _PillButton extends StatelessWidget {
+  const _PillButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final color = selected ? colors.primary : colors.foreground;
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(999),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: color)),
+          ],
         ),
       ),
     );

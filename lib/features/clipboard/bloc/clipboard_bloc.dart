@@ -27,6 +27,7 @@ class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
     });
     on<_ClipboardChanged>(_onChanged);
     on<PasteFromClipboard>(_onPaste);
+    on<TransferFiles>(_onTransfer);
     _changes = clipboard.changes.listen((_) => add(_ClipboardChanged()));
     // What another window copied before this one opened.
     add(_ClipboardChanged());
@@ -84,17 +85,9 @@ class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
     if (current is! ClipboardReadyToPaste || _pasting) return;
     final move = current.operation == ClipboardOperation.cut;
     final sources = [for (final e in current.entities) e.path];
-    final verb = move ? 'Moving' : 'Copying';
-    taskProgressBloc.add(TaskStarted(
-      title: sources.length == 1
-          ? '$verb "${p.basename(sources.single)}"'
-          : '$verb ${sources.length} items',
-      initialMessage: 'Getting ready…',
-    ));
     _pasting = true;
     try {
-      final targets = await _pasteInIsolate(sources, event.destinationPath, move);
-      taskProgressBloc.add(TaskEnded());
+      final targets = await _transfer(sources, event.destinationPath, move);
       emit(ClipboardPasteSuccess(targets));
       if (move) {
         // Moved: nothing left to paste, in any window.
@@ -104,7 +97,6 @@ class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
         emit(ClipboardReadyToPaste(entities: current.entities, operation: current.operation, pasted: true));
       }
     } catch (e) {
-      taskProgressBloc.add(TaskEnded());
       emit(ClipboardPasteFailure(
         error: e is FileSystemException ? _describe(e) : '$e',
         previousState: current,
@@ -112,6 +104,35 @@ class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
       emit(current);
     } finally {
       _pasting = false;
+    }
+  }
+
+  Future<void> _onTransfer(TransferFiles event, Emitter<ClipboardState> emit) async {
+    if (event.sources.isEmpty) return;
+    final before = state;
+    try {
+      final targets = await _transfer(event.sources, event.destination, event.move);
+      emit(ClipboardPasteSuccess(targets));
+    } catch (e) {
+      emit(ClipboardPasteFailure(error: e is FileSystemException ? _describe(e) : '$e'));
+    }
+    // What's on the clipboard stays.
+    if (before is ClipboardReadyToPaste || before is ClipboardEmpty) emit(before);
+  }
+
+  /// Copies or moves with a progress card; returns where things went.
+  Future<List<String>> _transfer(List<String> sources, String destination, bool move) async {
+    final verb = move ? 'Moving' : 'Copying';
+    taskProgressBloc.add(TaskStarted(
+      title: sources.length == 1
+          ? '$verb "${p.basename(sources.single)}"'
+          : '$verb ${sources.length} items',
+      initialMessage: 'Getting ready…',
+    ));
+    try {
+      return await _pasteInIsolate(sources, destination, move);
+    } finally {
+      taskProgressBloc.add(TaskEnded());
     }
   }
 

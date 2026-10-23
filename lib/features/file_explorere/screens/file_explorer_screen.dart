@@ -15,6 +15,7 @@ import 'package:explorer/features/file_explorere/bloc/grouping.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_empty_state.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_header.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_menu.dart';
+import 'package:explorer/features/file_explorere/widgets/file_drag_drop.dart';
 import 'package:explorer/features/file_explorere/widgets/file_grid_item.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
 import 'package:explorer/features/file_explorere/widgets/paste_bar.dart';
@@ -652,6 +653,28 @@ class _FileExplorerUI extends StatelessWidget {
           child: _GroupHeading(group: group, side: side),
         );
 
+    void drop(List<String> paths, String folder, bool move) =>
+        context.read<ClipboardBloc>().add(TransferFiles(paths, folder, move: move));
+
+    // Every item can be dragged (with the rest of the selection); folders
+    // take drops.
+    Widget dragAndDrop(FileSystemEntity entity, Widget item) {
+      final target = entity is Directory
+          ? FileDropTarget(
+              folder: entity.path,
+              onDrop: (paths, move) => drop(paths, entity.path, move),
+              builder: (context, hovering) => DropHighlight(active: hovering, child: item),
+            )
+          : item;
+      return FileDragSource(
+        entity: entity,
+        selection: () => state.selectedItems.contains(entity)
+            ? [for (final e in state.displayEntities) if (state.selectedItems.contains(e)) e]
+            : const [],
+        child: target,
+      );
+    }
+
     final List<Widget> slivers;
     if (state.viewMode == ViewMode.grid || state.viewMode == ViewMode.gallery) {
       final gallery = state.viewMode == ViewMode.gallery;
@@ -680,7 +703,7 @@ class _FileExplorerUI extends StatelessWidget {
                   ),
             delegate: SliverChildBuilderDelegate((context, index) {
               final entity = group.entities[index];
-              return FileGridItem(
+              return dragAndDrop(entity, FileGridItem(
                 entity: entity,
                 displayName: state.labelFor(entity),
                 gallery: gallery,
@@ -689,7 +712,7 @@ class _FileExplorerUI extends StatelessWidget {
                 onTap: () => onTap(entity),
                 onLongPress: () => onLongPress(entity),
                 onSecondaryTapUp: onSecondaryTap(entity),
-              );
+              ));
             }, childCount: group.entities.length),
           ),
         ),
@@ -727,7 +750,7 @@ class _FileExplorerUI extends StatelessWidget {
             itemExtent: FileListItem.heightFor(style) + 2,
             delegate: SliverChildBuilderDelegate((context, index) {
               final entity = group.entities[index];
-              return FileListItem(
+              return dragAndDrop(entity, FileListItem(
                 entity: entity,
                 displayName: state.labelFor(entity),
                 location: locationOf(entity),
@@ -737,7 +760,7 @@ class _FileExplorerUI extends StatelessWidget {
                 onTap: () => onTap(entity),
                 onLongPress: () => onLongPress(entity),
                 onSecondaryTapUp: onSecondaryTap(entity),
-              );
+              ));
             }, childCount: group.entities.length),
           ),
         ),
@@ -746,7 +769,7 @@ class _FileExplorerUI extends StatelessWidget {
       ];
     }
 
-    final list = Scrollbar(
+    final scroller = Scrollbar(
       child: CustomScrollView(
         // Remembers each folder's scroll position when coming back up.
         key: PageStorageKey<String>('explorer:${state.path}'),
@@ -759,6 +782,15 @@ class _FileExplorerUI extends StatelessWidget {
         ],
       ),
     );
+    // Dropped on the space around the items: into this folder.
+    final list = ExplorerPaths.isWindowsRoots(state.path)
+        ? scroller
+        : FileDropTarget(
+            folder: state.path,
+            onDrop: (paths, move) => drop(paths, state.path, move),
+            builder: (context, hovering) =>
+                DropHighlight(active: hovering, radius: 0, child: scroller),
+          );
     return Listener(
       // Before the item's tap fires: was it a mouse or a finger?
       onPointerDown: (event) => _clicks.kind = event.kind,
