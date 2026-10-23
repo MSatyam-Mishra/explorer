@@ -1,138 +1,35 @@
 PODS:
-  - audio_session (0.0.1):
-    - FlutterMacOS
-  - file_picker (0.0.1):
-    - FlutterMacOS
   - flutter_inappwebview_macos (0.0.1):
     - FlutterMacOS
     - OrderedSet (~> 6.0.3)
   - FlutterMacOS (1.0.0)
-  - just_audio (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - local_auth_darwin (0.0.1):
-    - Flutter
+  - media_kit_video (0.0.1):
     - FlutterMacOS
   - OrderedSet (6.0.3)
-  - package_info_plus (0.0.1):
-    - FlutterMacOS
-  - path_provider_foundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - photo_manager (3.7.1):
-    - Flutter
-    - FlutterMacOS
-  - quill_native_bridge_macos (0.0.1):
-    - FlutterMacOS
-  - rar (0.2.1):
-    - FlutterMacOS
-    - UnrarKit (~> 2.9)
-  - rive_native (0.0.1):
-    - FlutterMacOS
-  - share_plus (0.0.1):
-    - FlutterMacOS
-  - shared_preferences_foundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - UnrarKit (2.10):
-    - UnrarKit/unrar-lib (= 2.10)
-  - UnrarKit/unrar-lib (2.10)
-  - url_launcher_macos (0.0.1):
-    - FlutterMacOS
-  - video_player_avfoundation (0.0.1):
-    - Flutter
-    - FlutterMacOS
-  - wakelock_plus (0.0.1):
-    - FlutterMacOS
-  - webview_flutter_wkwebview (0.0.1):
-    - Flutter
-    - FlutterMacOS
 
 DEPENDENCIES:
-  - audio_session (from `Flutter/ephemeral/.symlinks/plugins/audio_session/macos`)
-  - file_picker (from `Flutter/ephemeral/.symlinks/plugins/file_picker/macos`)
   - flutter_inappwebview_macos (from `Flutter/ephemeral/.symlinks/plugins/flutter_inappwebview_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
-  - just_audio (from `Flutter/ephemeral/.symlinks/plugins/just_audio/darwin`)
-  - local_auth_darwin (from `Flutter/ephemeral/.symlinks/plugins/local_auth_darwin/darwin`)
-  - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
-  - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
-  - photo_manager (from `Flutter/ephemeral/.symlinks/plugins/photo_manager/macos`)
-  - quill_native_bridge_macos (from `Flutter/ephemeral/.symlinks/plugins/quill_native_bridge_macos/macos`)
-  - rar (from `Flutter/ephemeral/.symlinks/plugins/rar/macos`)
-  - rive_native (from `Flutter/ephemeral/.symlinks/plugins/rive_native/macos`)
-  - share_plus (from `Flutter/ephemeral/.symlinks/plugins/share_plus/macos`)
-  - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
-  - url_launcher_macos (from `Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos`)
-  - video_player_avfoundation (from `Flutter/ephemeral/.symlinks/plugins/video_player_avfoundation/darwin`)
-  - wakelock_plus (from `Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos`)
-  - webview_flutter_wkwebview (from `Flutter/ephemeral/.symlinks/plugins/webview_flutter_wkwebview/darwin`)
+  - media_kit_video (from `Flutter/ephemeral/.symlinks/plugins/media_kit_video/macos`)
 
 SPEC REPOS:
   trunk:
     - OrderedSet
-    - UnrarKit
 
 EXTERNAL SOURCES:
-  audio_session:
-    :path: Flutter/ephemeral/.symlinks/plugins/audio_session/macos
-  file_picker:
-    :path: Flutter/ephemeral/.symlinks/plugins/file_picker/macos
   flutter_inappwebview_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/flutter_inappwebview_macos/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
-  just_audio:
-    :path: Flutter/ephemeral/.symlinks/plugins/just_audio/darwin
-  local_auth_darwin:
-    :path: Flutter/ephemeral/.symlinks/plugins/local_auth_darwin/darwin
-  package_info_plus:
-    :path: Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos
-  path_provider_foundation:
-    :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
-  photo_manager:
-    :path: Flutter/ephemeral/.symlinks/plugins/photo_manager/macos
-  quill_native_bridge_macos:
-    :path: Flutter/ephemeral/.symlinks/plugins/quill_native_bridge_macos/macos
-  rar:
-    :path: Flutter/ephemeral/.symlinks/plugins/rar/macos
-  rive_native:
-    :path: Flutter/ephemeral/.symlinks/plugins/rive_native/macos
-  share_plus:
-    :path: Flutter/ephemeral/.symlinks/plugins/share_plus/macos
-  shared_preferences_foundation:
-    :path: Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin
-  url_launcher_macos:
-    :path: Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos
-  video_player_avfoundation:
-    :path: Flutter/ephemeral/.symlinks/plugins/video_player_avfoundation/darwin
-  wakelock_plus:
-    :path: Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos
-  webview_flutter_wkwebview:
-    :path: Flutter/ephemeral/.symlinks/plugins/webview_flutter_wkwebview/darwin
+  media_kit_video:
+    :path: Flutter/ephemeral/.symlinks/plugins/media_kit_video/macos
 
 SPEC CHECKSUMS:
-  audio_session: 728ae3823d914f809c485d390274861a24b0904e
-  file_picker: e716a70a9fe5fd9e09ebc922d7541464289443af
   flutter_inappwebview_macos: bdf207b8f4ebd58e86ae06cd96b147de99a67c9b
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  just_audio: a42c63806f16995daf5b219ae1d679deb76e6a79
-  local_auth_darwin: fa4b06454df7df8e97c18d7ee55151c57e7af0de
+  media_kit_video: f5bdcbfaef003c02251e50d44bb741aa96fb8a1e
   OrderedSet: e539b66b644ff081c73a262d24ad552a69be3a94
-  package_info_plus: 12f1c5c2cfe8727ca46cbd0b26677728972d9a5b
-  path_provider_foundation: 2b6b4c569c0fb62ec74538f866245ac84301af46
-  photo_manager: 81954a1bf804b6e882d0453b3b6bc7fad7b47d3d
-  quill_native_bridge_macos: 3a5f378bc757eb92825193853020b759b56cbb2c
-  rar: 67b9043a062c23479ed4e0ce3e3f14701a9c4dd7
-  rive_native: c97de90db882c095f7e69393608f0b8b3dad49e9
-  share_plus: 1fa619de8392a4398bfaf176d441853922614e89
-  shared_preferences_foundation: fcdcbc04712aee1108ac7fda236f363274528f78
-  UnrarKit: 62f535c7a34ec52d2514b9b148f33dcfa9a9dc39
-  url_launcher_macos: c82c93949963e55b228a30115bd219499a6fe404
-  video_player_avfoundation: 7c6c11d8470e1675df7397027218274b6d2360b3
-  wakelock_plus: 9d63063ffb7af1c215209769067c57103bde719d
-  webview_flutter_wkwebview: a4af96a051138e28e29f60101d094683b9f82188
 
-PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
 
 COCOAPODS: 1.16.2
