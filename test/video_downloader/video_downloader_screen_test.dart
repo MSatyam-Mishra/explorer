@@ -5,6 +5,7 @@ import 'package:explorer/core/services/video_downloader/video_downloader_control
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_settings_screen.dart';
+import 'package:explorer/features/video_downloader/widgets/history_list.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -337,6 +338,103 @@ void main() {
     backend.holdUpdate!.complete();
     expect((await fetch).title, 'Test clip');
     expect(backend.fetchedDuringUpdate, [false]);
+  });
+
+  testWidgets('history: a playlist\'s downloads are in a folder named after it', (tester) async {
+    await pumpScreen(tester, const Size(390, 844), url: 'https://example.com/pl');
+    await tester.tap(find.text('I understand'));
+    await tester.pumpAndSettle();
+    final panel = find
+        .descendant(of: find.byType(CustomScrollView), matching: find.byType(Scrollable))
+        .first;
+    final download = find.text('Download 2 items');
+    await tester.scrollUntilVisible(download, 100, scrollable: panel);
+    await tester.ensureVisible(download);
+    await tester.pumpAndSettle();
+    await tester.tap(download);
+    await tester.pumpAndSettle();
+    expect(backend.specs, hasLength(2));
+
+    // Both finish. Moving them to the history reads the files (real I/O),
+    // so let real time pass between frames.
+    for (final spec in backend.specs) {
+      backend.emit(DownloadJob(
+        id: spec.id,
+        url: spec.url,
+        title: spec.title,
+        status: JobStatus.done,
+        createdAt: DateTime.now(),
+        filePath: p.join(spec.outputDir, '${spec.title}.mp4'),
+        meta: spec.meta,
+      ));
+    }
+    final controller = VideoDownloaderController.instance;
+    for (var i = 0; i < 40 && controller.history.length < 2; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(controller.history, hasLength(2));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+    expect(find.text('A playlist'), findsOneWidget);
+    expect(find.textContaining('2 downloads ·'), findsOneWidget);
+    expect(find.text('First'), findsNothing, reason: 'inside the folder');
+
+    await tester.tap(find.text('A playlist'));
+    await tester.pumpAndSettle();
+    expect(find.text('First'), findsOneWidget);
+    expect(find.text('Second'), findsOneWidget);
+    expect(VideoDownloaderController.instance.history.map((h) => h.playlist),
+        everyElement('A playlist'));
+
+    await tester.tap(find.text('Remove from history'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
+    await tester.pumpAndSettle();
+    expect(find.text('No downloads yet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  group('groupHistory', () {
+    HistoryEntry entry(String id, String path, {String? playlist}) => HistoryEntry(
+          id: id,
+          title: id,
+          url: 'https://example.com/$id',
+          filePath: path,
+          completedAt: DateTime(2026, 10, 23),
+          playlist: playlist,
+        );
+    final out = p.join('downloads', 'Explorer Videos');
+
+    test('gathers a playlist where its newest download is', () {
+      final items = groupHistory([
+        entry('single', p.join(out, 'single.mp4')),
+        entry('b2', p.join(out, 'B', 'b2.mp4'), playlist: 'B'),
+        entry('a2', p.join(out, 'A', 'a2.mp4'), playlist: 'A'),
+        entry('b1', p.join(out, 'B', 'b1.mp4'), playlist: 'B'),
+        entry('old', p.join(out, 'old.mp4')),
+      ], out);
+      expect(items, hasLength(4));
+      expect((items[0] as HistoryEntry).id, 'single');
+      expect((items[1] as HistoryFolder).name, 'B');
+      expect([for (final e in (items[1] as HistoryFolder).entries) e.id], ['b2', 'b1']);
+      expect((items[2] as HistoryFolder).name, 'A');
+      expect((items[3] as HistoryEntry).id, 'old');
+    });
+
+    test('earlier downloads in a playlist folder count as the playlist', () {
+      final items = groupHistory([
+        entry('x', p.join(out, 'Mix', 'x.mp4')),
+        entry('y', p.join(out, 'Mix', 'y.mp4')),
+        entry('elsewhere', p.join('somewhere', 'Else', 'z.mp4')),
+      ], out);
+      expect(items, hasLength(2));
+      expect((items[0] as HistoryFolder).name, 'Mix');
+      expect((items[0] as HistoryFolder).entries, hasLength(2));
+      expect((items[1] as HistoryEntry).id, 'elsewhere');
+    });
   });
 
   testWidgets('settings screen builds', (tester) async {

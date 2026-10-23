@@ -430,6 +430,7 @@ class VideoDownloaderController extends ChangeNotifier {
         sizeBytes: size,
         extractor: job.meta['extractor'] as String?,
         duration: duration is num ? duration.toDouble() : null,
+        playlist: job.meta['playlist'] as String?,
       );
       history.insert(0, entry);
       if (history.length > _maxHistory) history.removeRange(_maxHistory, history.length);
@@ -451,6 +452,14 @@ class VideoDownloaderController extends ChangeNotifier {
       if (await file.exists()) await file.delete();
       await backend.fileDeleted(entry.filePath).catchError((Object _) {});
     }
+  }
+
+  /// Removes [entries] (e.g. a playlist's) from the history; the files stay.
+  Future<void> removeHistoryEntries(Iterable<HistoryEntry> entries) async {
+    final ids = {for (final e in entries) e.id};
+    history.removeWhere((h) => ids.contains(h.id));
+    notifyListeners();
+    await _saveHistory();
   }
 
   Future<void> clearHistory() async {

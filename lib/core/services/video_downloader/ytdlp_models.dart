@@ -484,6 +484,7 @@ class HistoryEntry {
     this.sizeBytes,
     this.extractor,
     this.duration,
+    this.playlist,
   });
 
   final String id;
@@ -499,6 +500,9 @@ class HistoryEntry {
   final String? extractor;
   final double? duration;
 
+  /// The playlist it was downloaded from, if any.
+  final String? playlist;
+
   factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
         id: '${j['id']}',
         title: '${j['title'] ?? ''}',
@@ -510,6 +514,7 @@ class HistoryEntry {
         sizeBytes: _int(j['sizeBytes']),
         extractor: _str(j['extractor']),
         duration: _double(j['duration']),
+        playlist: _str(j['playlist']),
       );
 
   Map<String, Object?> toJson() => {
@@ -523,6 +528,7 @@ class HistoryEntry {
         'sizeBytes': sizeBytes,
         'extractor': extractor,
         'duration': duration,
+        'playlist': playlist,
       };
 }
 
