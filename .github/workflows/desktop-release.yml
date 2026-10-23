@@ -115,8 +115,8 @@ jobs:
           ref: ${{ env.REF }}
       - name: Install Linux build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev patchelf tesseract-ocr tesseract-ocr-eng
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libmpv-dev patchelf tesseract-ocr tesseract-ocr-eng
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -206,8 +206,8 @@ jobs:
       - run: tar -xf bundle.tar && tar -xf portable.tar
       - name: Install packaging tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ruby-dev rpm xvfb
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y ruby-dev rpm xvfb
           sudo gem install --no-document fpm
       - run: bash packaging/linux/make-packages.sh "${TAG#v}" bundle portable dist
 
@@ -218,7 +218,7 @@ jobs:
           # starts outlives the check and holds the step open.
           running() { local status=0; dbus-run-session -- xvfb-run -a timeout -k 10 20 "$@" || status=$?; [ "$status" = 124 ]; }
           # GL and Mesa drivers and sound: a desktop has them, the runner lacks them.
-          sudo apt-get install -y dbus-daemon libegl1 libgles2 libgl1 libegl-mesa0 libgl1-mesa-dri libgtk-3-0t64 libpulse0 libasound2t64 libpipewire-0.3-0t64
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y dbus-daemon libegl1 libgles2 libgl1 libegl-mesa0 libgl1-mesa-dri libgtk-3-0t64 libpulse0 libasound2t64 libpipewire-0.3-0t64
           # First the AppImage and the archive, with no libmpv on the
           # system: they must bring their own.
           chmod +x dist/*.AppImage
@@ -230,7 +230,7 @@ jobs:
             tar-check/explorer/tesseract/tesseract test/fixtures/ocr_invoice.png stdout | tee ocr.txt
           grep -q 'Invoice 2041' ocr.txt
           # Then the .deb, which installs the system's libmpv.
-          sudo apt-get install -y ./dist/*.deb
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y --no-install-recommends ./dist/*.deb
           running explorer
           sudo apt-get remove -y explorer
           rpm -qip dist/*.rpm
@@ -253,8 +253,8 @@ jobs:
           name: linux-bundle
       - name: Install Flatpak tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder xvfb
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 install -y flatpak flatpak-builder xvfb
           # Ubuntu 24.04 stops the user namespaces flatpak-builder's sandbox needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
