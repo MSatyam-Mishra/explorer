@@ -10,12 +10,23 @@ abstract final class Desktop {
   static bool get isDesktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
-  /// Windows and Linux play video and audio with media_kit (libmpv, with
-  /// FFmpeg's decoders): video in DesktopVideoPlayer, audio through
-  /// just_audio, which has no implementation there of its own. macOS keeps
-  /// the AVFoundation players.
+  /// Windows, Linux and macOS play video and audio with media_kit (libmpv,
+  /// with FFmpeg's decoders): video in DesktopVideoPlayer, audio through
+  /// just_audio. just_audio has no implementation of its own on Windows and
+  /// Linux, and on macOS AVFoundation can't open MKV, WebM, AVI, Ogg, Opus
+  /// or WMA.
   static void initMedia() {
-    if (!Platform.isWindows && !Platform.isLinux) return;
+    if (!isDesktop) return;
+    if (Platform.isMacOS) {
+      // Mpv.framework ships inside the app (media_kit_libs_macos_video).
+      // Should it be missing, keep the AVFoundation players.
+      try {
+        MediaKit.ensureInitialized();
+      } catch (_) {
+        return;
+      }
+      _macMediaKit = true;
+    }
     String? libmpv;
     if (Platform.isLinux) {
       // The AppImage, the Flatpak and the archives carry their own libmpv
@@ -28,14 +39,23 @@ abstract final class Desktop {
       );
       if (File(bundled).existsSync()) libmpv = bundled;
     }
-    // Doesn't throw without libmpv: playback then reports an error instead.
+    // Throws when libmpv can't be found (the packages ship it, or depend on
+    // the system's). On macOS it's already loaded, so this does nothing.
     MediaKit.ensureInitialized(libmpv: libmpv);
     JustAudioMediaKit.ensureInitialized(
       windows: true,
       linux: true,
+      macOS: true,
       libmpv: libmpv,
     );
   }
+
+  /// Whether videos play in DesktopVideoPlayer (media_kit) rather than
+  /// video_player: always on Windows and Linux, where video_player has no
+  /// implementation, and on macOS once [initMedia] has loaded libmpv.
+  static bool get mediaKitVideo =>
+      Platform.isWindows || Platform.isLinux || _macMediaKit;
+  static bool _macMediaKit = false;
 
   /// Whether files can be shared with other apps (share_plus shares only
   /// text on Linux).
@@ -49,13 +69,46 @@ abstract final class Desktop {
   /// Opens another Explorer window showing [folder], or viewing [file]
   /// (over its folder). Each window is its own process, so it keeps working
   /// if another one closes.
-  static Future<void> openWindow({String? folder, String? file}) =>
-      launcher(Platform.resolvedExecutable, [
+  static Future<void> openWindow({String? folder, String? file}) {
+    final (executable, args) = windowCommand(
+      Platform.resolvedExecutable,
+      [
         if (file != null)
           file
         else if (folder != null)
           '$_folderFlag$folder',
-      ]);
+      ],
+      macOS: Platform.isMacOS,
+    );
+    return launcher(executable, args);
+  }
+
+  /// How [openWindow] starts [executable] with [args]. On macOS a new
+  /// window goes through LaunchServices (`open -n`, a new instance of the
+  /// app), so it comes to the front: the bare binary inside Explorer.app
+  /// would open behind the current window.
+  @visibleForTesting
+  static (String, List<String>) windowCommand(
+    String executable,
+    List<String> args, {
+    required bool macOS,
+  }) {
+    if (macOS) {
+      // <bundle>.app/Contents/MacOS/<name>
+      final macosDir = p.posix.dirname(executable);
+      final contents = p.posix.dirname(macosDir);
+      final bundle = p.posix.dirname(contents);
+      if (p.posix.basename(macosDir) == 'MacOS' &&
+          p.posix.basename(contents) == 'Contents' &&
+          p.posix.extension(bundle) == '.app') {
+        return (
+          '/usr/bin/open',
+          ['-n', bundle, if (args.isNotEmpty) ...['--args', ...args]],
+        );
+      }
+    }
+    return (executable, args);
+  }
 
   /// Starts a window; tests replace it.
   @visibleForTesting

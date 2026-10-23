@@ -38,6 +38,7 @@ abstract final class FileIcons {
   static const folderAsset = '$_base/glass/Folder.svg';
 
   static final _cache = <(String, FileIconStyle, bool), FileIconSpec>{};
+  static final _packageCache = <(String, FileIconStyle, bool), FileIconSpec>{};
 
   /// [dark]: on a dark background, which picks the `_dark` variants of
   /// logos that would otherwise be black.
@@ -56,6 +57,45 @@ abstract final class FileIcons {
       () => _resolve(ext, FileTypes.kindOf(path), style, dark),
     );
   }
+
+  /// Icon for a macOS package (an app, installer or document package),
+  /// which Finder shows as one item rather than a folder: Xcode's logo for
+  /// Xcode projects, otherwise a page labelled with the extension ("APP",
+  /// "PKG") in the colour of what it holds.
+  static FileIconSpec forPackage(
+    String path,
+    FileIconStyle style, {
+    bool dark = false,
+  }) {
+    final ext = FileTypes.extensionOf(path);
+    return _packageCache.putIfAbsent((ext, style, dark), () {
+      if (_xcodePackages.contains(ext)) return AssetFileIcon(_logo('xcode', dark));
+      return _labelled(ext, _packageKinds[ext] ?? FileKind.package, style);
+    });
+  }
+
+  /// Packages Xcode opens.
+  static const _xcodePackages = {
+    'xcodeproj', 'xcworkspace', 'playground', 'xcarchive',
+  };
+
+  /// Document packages coloured like their kind of document; apps,
+  /// installers and plug-ins are [FileKind.package]. Their names ("Keynote
+  /// presentation") are in `EntityFormat.kind`.
+  static const _packageKinds = {
+    'rtfd': FileKind.richText,
+    'pages': FileKind.word,
+    'numbers': FileKind.spreadsheet,
+    'key': FileKind.presentation,
+    'photoslibrary': FileKind.image,
+    'photolibrary': FileKind.image,
+    'musiclibrary': FileKind.audio,
+    'logicx': FileKind.audio,
+    'band': FileKind.audio,
+    'imovielibrary': FileKind.video,
+    'theater': FileKind.video,
+    'fcpbundle': FileKind.video,
+  };
 
   static String _logo(String name, bool dark) {
     final variant = dark && kProgrammingIcons.contains('${name}_dark')
@@ -82,6 +122,12 @@ abstract final class FileIcons {
     if (styled != null) return styled;
     // Binaries with a tool logo (APK, DLL, ISO, databases…).
     if (codeLogo != null) return AssetFileIcon(_logo(codeLogo, dark));
+    return _labelled(ext, kind, style);
+  }
+
+  /// A page labelled with a short [ext] in [kind]'s colour, or [kind]'s
+  /// category icon for long or missing extensions.
+  static FileIconSpec _labelled(String ext, FileKind kind, FileIconStyle style) {
     final color = Color(_colorFor(kind));
     if (ext.isNotEmpty && ext.length <= 5) {
       return LabelFileIcon(
@@ -216,12 +262,17 @@ class FileIcon extends StatelessWidget {
     required this.path,
     this.size = 40,
     this.isDirectory = false,
+    this.isPackage = false,
     this.style,
   });
 
   final String path;
   final double size;
   final bool isDirectory;
+
+  /// A macOS package (an app, installer or document package), drawn like
+  /// a file with [FileIcons.forPackage]. [isDirectory] wins over it.
+  final bool isPackage;
 
   /// Defaults to the style chosen in Options.
   final FileIconStyle? style;
@@ -233,7 +284,10 @@ class FileIcon extends StatelessWidget {
         this.style ??
         context.select<ThemeCubit, FileIconStyle>((c) => c.state.fileIconStyle);
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return switch (FileIcons.forFile(path, style, dark: dark)) {
+    final spec = isPackage
+        ? FileIcons.forPackage(path, style, dark: dark)
+        : FileIcons.forFile(path, style, dark: dark);
+    return switch (spec) {
       // icon_2 pages are tinted at ~9% opacity and vanish on dark
       // backgrounds; give them the white page they have in light mode.
       AssetFileIcon(:final asset) when dark && asset.contains('/icon_2/') =>

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:explorer/core/services/video_downloader/downloader_backend.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
@@ -45,13 +46,25 @@ class FakeBackend extends VideoDownloaderBackend {
   /// Holds the engine download until completed (or cancelled).
   Completer<void>? holdDownload;
 
+  /// Whether FFmpeg is found.
+  bool ffmpeg = true;
+
+  /// Holds the next status: what it says is what was found when asked.
+  Completer<void>? holdStatus;
+
   @override
-  Future<BackendStatus> status() async => BackendStatus(
-        ready: engine?.installed ?? true,
-        needsSetup: !(engine?.installed ?? true),
-        hasFfmpeg: true,
-        engine: engine,
-      );
+  Future<BackendStatus> status() async {
+    final found = BackendStatus(
+      ready: engine?.installed ?? true,
+      needsSetup: !(engine?.installed ?? true),
+      hasFfmpeg: ffmpeg,
+      engine: engine,
+    );
+    final hold = holdStatus;
+    holdStatus = null;
+    await hold?.future;
+    return found;
+  }
 
   @override
   Future<void> prepare({void Function(double? progress, String message)? onProgress}) async {
@@ -436,6 +449,73 @@ void main() {
       expect((items[1] as HistoryEntry).id, 'elsewhere');
     });
   });
+
+  testWidgets('macOS: reopening the downloader finds FFmpeg installed since', (tester) async {
+    SharedPreferences.setMockInitialValues({'video_downloader.rights_accepted': true});
+    backend.ffmpeg = false;
+    await pumpScreen(tester, const Size(390, 844));
+    final controller = VideoDownloaderController.instance;
+    expect(controller.hasFfmpeg, isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+    backend.ffmpeg = true; // brew install ffmpeg
+    await pumpScreen(tester, const Size(390, 844));
+    expect(controller.hasFfmpeg, isTrue);
+    expect(tester.takeException(), isNull);
+  }, skip: !Platform.isMacOS);
+
+  testWidgets('macOS: reopening asks for less once FFmpeg is installed', (tester) async {
+    SharedPreferences.setMockInitialValues({'video_downloader.rights_accepted': true});
+    backend
+      ..engine = missingEngine
+      ..ffmpeg = false;
+    await pumpScreen(tester, const Size(390, 844));
+    expect(find.textContaining('50 MB, Wi-Fi recommended'), findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(const SizedBox());
+    backend
+      ..ffmpeg = true // brew install ffmpeg: the engine needs no FFmpeg now
+      ..engine = const EngineInfo(installed: false, downloadBytes: 36000000, diskBytes: 60000000);
+    await pumpScreen(tester, const Size(390, 844));
+    expect(find.textContaining('36 MB, Wi-Fi recommended'), findsOneWidget);
+    expect(VideoDownloaderController.instance.hasFfmpeg, isTrue);
+    expect(tester.takeException(), isNull);
+  }, skip: !Platform.isMacOS);
+
+  testWidgets('macOS: an engine download that ends while reopening stays done', (tester) async {
+    SharedPreferences.setMockInitialValues({'video_downloader.rights_accepted': true});
+    backend
+      ..engine = missingEngine
+      ..ffmpeg = false
+      ..holdDownload = Completer<void>();
+    await pumpScreen(tester, const Size(390, 844));
+    await tester.tap(find.widgetWithText(FilledButton, 'Download'));
+    // A spinner runs while downloading, so no pumpAndSettle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final controller = VideoDownloaderController.instance;
+    expect(controller.engineState, EngineState.preparing);
+
+    // Reopened while downloading; the download ends while FFmpeg is
+    // looked for again.
+    await tester.pumpWidget(const SizedBox());
+    backend.ffmpeg = true;
+    final status = backend.holdStatus = Completer<void>();
+    await tester.pumpWidget(_app(const VideoDownloaderScreen()));
+    await tester.pump();
+    backend.holdDownload!.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(controller.engineState, EngineState.ready);
+    status.complete();
+    await tester.pumpAndSettle();
+    expect(controller.engine!.installed, isTrue);
+    expect(controller.hasFfmpeg, isTrue);
+    expect(find.text('Download the video engine to start'), findsNothing);
+    expect(tester.takeException(), isNull);
+  }, skip: !Platform.isMacOS);
 
   testWidgets('settings screen builds', (tester) async {
     final controller = VideoDownloaderController.instance;

@@ -46,11 +46,80 @@ abstract final class EntityFormat {
 
   static String size(int bytes) => filesize(bytes, 1);
 
-  static String kind(FileSystemEntity entity) => entity is Directory
-      ? 'Folder'
-      : FileTypes.describe(FileTypes.kindOf(entity.path));
+  /// "Folder", "PDF document"…; on macOS "Application", "Installer
+  /// package" or "Package" for packages, as in Finder.
+  static String kind(FileSystemEntity entity) {
+    if (_looksLikePackage(entity)) {
+      return _packageKinds[FileTypes.extensionOf(entity.path)] ?? 'Package';
+    }
+    return entity is Directory
+        ? 'Folder'
+        : FileTypes.describe(FileTypes.kindOf(entity.path));
+  }
 
-  /// "2 KB · Today, 2:05 PM" for files, the date for folders.
+  /// Whether [entity] is a macOS package (an app, installer or document
+  /// package): a folder that shows, sorts and opens like a file, as in
+  /// Finder. Goes by the name, so it costs no I/O.
+  static bool isPackage(FileSystemEntity entity) =>
+      Platform.isMacOS &&
+      entity is Directory &&
+      FileTypes.isMacPackage(entity.path);
+
+  /// Whether [entity] gets a package's icon and kind: a macOS package, or
+  /// an installer file (a flat .pkg), which macOS treats the same way.
+  static bool _looksLikePackage(FileSystemEntity entity) =>
+      isPackage(entity) ||
+      (Platform.isMacOS &&
+          entity is File &&
+          FileTypes.macInstaller.contains(FileTypes.extensionOf(entity.path)));
+
+  /// What Finder calls each of [FileTypes.macPackage] and
+  /// [FileTypes.macInstaller]; one added there needs a name here too.
+  static const _packageKinds = {
+    // Apps, extensions and plug-ins
+    'app': 'Application',
+    'appex': 'App extension',
+    'bundle': 'Bundle',
+    'plugin': 'Plug-in',
+    'kext': 'Kernel extension',
+    'prefpane': 'Settings pane',
+    'qlgenerator': 'Quick Look generator',
+    'mdimporter': 'Spotlight importer',
+    'saver': 'Screen saver',
+    'wdgt': 'Widget',
+    'xpc': 'XPC service',
+    'component': 'Audio plug-in',
+    'scptd': 'Script bundle',
+    'workflow': 'Automator workflow',
+    'action': 'Automator action',
+    // Documents and libraries
+    'rtfd': 'Rich text with attachments',
+    'pages': 'Pages document',
+    'numbers': 'Numbers spreadsheet',
+    'key': 'Keynote presentation',
+    'photoslibrary': 'Photos library',
+    'photolibrary': 'iPhoto library',
+    'musiclibrary': 'Music library',
+    'imovielibrary': 'iMovie library',
+    'theater': 'iMovie Theater',
+    'fcpbundle': 'Final Cut Pro library',
+    'logicx': 'Logic Pro project',
+    'band': 'GarageBand project',
+    'xcarchive': 'Xcode archive',
+    'xcodeproj': 'Xcode project',
+    'xcworkspace': 'Xcode workspace',
+    'playground': 'Xcode playground',
+    'docset': 'Documentation set',
+    'mlpackage': 'Core ML package',
+    'sparsebundle': 'Disk image',
+    'download': 'Safari download',
+    // Installers
+    'pkg': 'Installer package',
+    'mpkg': 'Installer package',
+  };
+
+  /// "2 KB · Today, 2:05 PM" for files, the date for folders and packages
+  /// (whose size would need adding up what's inside).
   static String summary(FileSystemEntity entity, FileStat stat) {
     final modified = date(stat.modified);
     return entity is Directory ? modified : '${size(stat.size)} · $modified';
@@ -104,7 +173,8 @@ class _EntityStatBuilderState extends State<EntityStatBuilder> {
 
 /// [FileIcon] / [FolderIcon] in an exact [size]×[size] box. The folder SVG
 /// is wider than tall and would otherwise be laid out 1.26× wider than
-/// [size], pushing folder names out of line with file names.
+/// [size], pushing folder names out of line with file names. macOS
+/// packages get a file-like icon, as in Finder.
 class EntityIcon extends StatelessWidget {
   const EntityIcon({super.key, required this.entity, this.size = 40});
 
@@ -118,7 +188,8 @@ class EntityIcon extends StatelessWidget {
       child: FileIcon(
         path: entity.path,
         size: size,
-        isDirectory: entity is Directory,
+        isDirectory: entity is Directory && !EntityFormat.isPackage(entity),
+        isPackage: EntityFormat._looksLikePackage(entity),
       ),
     );
   }

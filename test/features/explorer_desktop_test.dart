@@ -19,6 +19,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/themed_app.dart';
 
+/// Ctrl, or Cmd on macOS.
+final commandKey =
+    Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
+
 /// Mouse and keyboard in the file list, as on a desktop (the tests run on
 /// a desktop OS, so the desktop menus apply).
 void main() {
@@ -44,6 +48,18 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
       await tester.pump(const Duration(milliseconds: 50));
     }
+  }
+
+  /// Settles until [finder] finds something, for up to 100 rounds (about
+  /// 10 s of real time; menus built from real file or system checks, like
+  /// Convert to, take a while), then lets menu animations finish.
+  Future<void> waitFor(WidgetTester tester, Finder finder) async {
+    for (var i = 0; i < 100 && finder.evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(finder, findsWidgets, reason: 'not there after 100 rounds (~10 s real time)');
+    await tester.pump(const Duration(milliseconds: 300));
   }
 
   Future<FileExplorerBloc> open(WidgetTester tester) async {
@@ -99,9 +115,9 @@ void main() {
 
     await click(tester, 'alpha.txt');
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(commandKey);
     await click(tester, 'gamma.txt');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(commandKey);
     expect(state().selectedItems.map((e) => p.basename(e.path)), unorderedEquals(['alpha.txt', 'gamma.txt']));
     expect(state().isSelectionMode, isTrue, reason: 'several: the selection bar');
 
@@ -118,9 +134,9 @@ void main() {
     await tester.pump();
     expect(state().selectedItems, isEmpty);
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(commandKey);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(commandKey);
     await tester.pump();
     expect(state().selectedItems, hasLength(4));
   });
@@ -133,7 +149,7 @@ void main() {
     for (final label in ['Open', 'Open with…', 'Copy', 'Rename', 'Properties', 'Delete']) {
       expect(find.text(label), findsWidgets, reason: label);
     }
-    expect(find.text('Ctrl+C'), findsOneWidget);
+    expect(find.text(Platform.isMacOS ? '⌘C' : 'Ctrl+C'), findsOneWidget);
     expect(row(tester, 'beta.txt').isSelected, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump(const Duration(milliseconds: 300));
@@ -181,9 +197,9 @@ void main() {
     final bloc = await open(tester);
     FileExplorerLoaded state() => bloc.state as FileExplorerLoaded;
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(commandKey);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(commandKey);
     await tester.pump();
     expect(find.byType(TextField), findsOneWidget);
 
@@ -234,11 +250,10 @@ void main() {
     }
 
     await click(tester, 'photo.png', buttons: kSecondaryButton);
-    await settle(tester);
+    await waitFor(tester, find.text('Convert to'));
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.moveTo(tester.getCenter(find.text('Convert to')));
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.pump(const Duration(milliseconds: 300));
+    await waitFor(tester, find.text('JPEG'));
     expect(find.text('PNG'), findsNothing, reason: "the picture's own format");
     for (final label in ['JPEG', 'WebP', 'HEIC', 'TIFF', 'ICO (icon)', 'SVG']) {
       expect(find.text(label), findsOneWidget, reason: label);
@@ -249,9 +264,9 @@ void main() {
 
     await tester.pump(const Duration(seconds: 1));
     await click(tester, 'photo.png', buttons: kSecondaryButton);
-    await settle(tester);
+    await waitFor(tester, find.text('Resize…'));
     await tester.tap(find.text('Resize…'));
-    await settle(tester);
+    await waitFor(tester, find.text('Now 400 × 200 px'));
     expect(find.text('Now 400 × 200 px'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextField, 'Width'), '100');
     await tester.pump();
@@ -271,17 +286,26 @@ void main() {
     addTearDown(() => Desktop.launcher = original);
     await open(tester);
 
-    await tester.tap(find.byTooltip('New window (Ctrl+N)'));
+    await tester.tap(find.byTooltip(Platform.isMacOS ? 'New window (⌘N)' : 'New window (Ctrl+N)'));
     await tester.pump();
     expect(launched.last, ['--folder=${root.path}']);
 
     await click(tester, 'alpha.txt');
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(commandKey);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(commandKey);
     await tester.pump();
     expect(launched, hasLength(2));
     expect(launched.last, ['--folder=${root.path}']);
+
+    if (Platform.isMacOS) {
+      // Control isn't the command key there: Control+N does nothing.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(launched, hasLength(2));
+    }
 
     Future<void> openInNewWindow(String name) async {
       await tester.pump(const Duration(milliseconds: 400));

@@ -6,6 +6,7 @@ import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/features/file_explorere/bloc/folder_search.dart';
 import 'package:explorer/features/file_explorere/bloc/grouping.dart';
+import 'package:explorer/features/file_explorere/widgets/entity_meta.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
@@ -371,38 +372,48 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
     }
   }
 
-  /// Sorts with folders first. Each entry's key is computed once (size/date
-  /// via async stat calls) instead of inside the comparator, which used to
-  /// make O(n log n) synchronous stat calls on the UI isolate.
+  /// Sorts with folders first; macOS packages (apps…) sort among the
+  /// files, as in Finder. Each entry's key is computed once (size/date via
+  /// async stat calls) instead of inside the comparator, which used to make
+  /// O(n log n) synchronous stat calls on the UI isolate.
   Future<List<FileSystemEntity>> _sortEntities(
     List<FileSystemEntity> entities,
     SortOption option,
     SortOrder order, {
     Map<String, String> pathLabels = const {},
   }) async {
+    final folders = [
+      for (final e in entities) e is Directory && !EntityFormat.isPackage(e),
+    ];
     final List<Comparable<Object>> keys;
     switch (option) {
       case SortOption.name:
         keys = [for (final e in entities) _sortKey(e, pathLabels)];
       case SortOption.size:
-        // Folder sizes would need a full traversal; they sort as 0.
+        // Folder and package sizes would need a full traversal. Folders
+        // sort as 0; packages as -1, so their unknown size sorts at the
+        // small end (like Finder's "--") without mixing with empty files.
         final stats = await Future.wait([
           for (final e in entities)
             e is File ? _statOrNull(e) : Future<FileStat?>.value(null),
         ]);
-        keys = [for (final s in stats) s?.size ?? 0];
+        keys = [
+          for (var i = 0; i < entities.length; i++)
+            entities[i] is Directory && !folders[i] ? -1 : stats[i]?.size ?? 0,
+        ];
       case SortOption.date:
         final stats = await Future.wait(entities.map(_statOrNull));
         keys = [for (final s in stats) s?.modified.millisecondsSinceEpoch ?? 0];
       case SortOption.type:
         keys = [
-          for (final e in entities) e is Directory ? 'dir' : p.extension(e.path),
+          for (var i = 0; i < entities.length; i++)
+            folders[i] ? 'dir' : p.extension(entities[i].path),
         ];
     }
     final indices = List<int>.generate(entities.length, (i) => i);
     indices.sort((i, j) {
-      final aIsDir = entities[i] is Directory;
-      final bIsDir = entities[j] is Directory;
+      final aIsDir = folders[i];
+      final bIsDir = folders[j];
       if (aIsDir && !bIsDir) return -1;
       if (!aIsDir && bIsDir) return 1;
       final comparison = keys[i].compareTo(keys[j]);

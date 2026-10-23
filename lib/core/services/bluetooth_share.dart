@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 /// Sends files over Bluetooth with the system's own tool: the Bluetooth
-/// File Transfer wizard on Windows (what File Explorer's Send to uses), or
-/// bluetooth-sendto (GNOME) / blueman-sendto on Linux. Phones send through
-/// the share sheet.
+/// File Transfer wizard on Windows (what File Explorer's Send to uses),
+/// bluetooth-sendto (GNOME) / blueman-sendto on Linux, or Bluetooth File
+/// Exchange on macOS. Phones send through the share sheet.
 abstract final class BluetoothShare {
   static String? _tool;
   static bool _looked = false;
@@ -27,6 +27,14 @@ abstract final class BluetoothShare {
           }
         }
       }
+    } else if (Platform.isMacOS) {
+      for (final dir in const [
+        '/System/Applications/Utilities',
+        '/Applications/Utilities',
+      ]) {
+        final app = p.join(dir, 'Bluetooth File Exchange.app');
+        if (Directory(app).existsSync()) return _tool = app;
+      }
     }
     return _tool;
   }
@@ -35,6 +43,10 @@ abstract final class BluetoothShare {
 
   /// Opens the tool with [files] chosen; it asks for the device.
   static Future<void> send(List<String> files) async {
-    await Process.start(tool!, files, mode: ProcessStartMode.detached);
+    // Bluetooth File Exchange is an app: it takes the files through open.
+    final (command, args) = Platform.isMacOS
+        ? ('/usr/bin/open', ['-a', tool!, ...files])
+        : (tool!, files);
+    await Process.start(command, args, mode: ProcessStartMode.detached);
   }
 }

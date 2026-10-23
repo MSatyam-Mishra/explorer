@@ -23,5 +23,5 @@ void main() {
     expect(dropMoves(null, sameDrive, fromThisApp: false), isTrue);
     if (Platform.isWindows) expect(dropMoves(here, otherDrive, fromThisApp: true), isTrue);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-  });
+  }, skip: Platform.isMacOS); // Finder's rules there: drag_drop_macos_test.dart.
 }

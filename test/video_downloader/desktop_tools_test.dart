@@ -28,11 +28,13 @@ List<int> _archive(String asset, Map<String, String> files) {
 }
 
 /// A tiny HTTP server: serves [files], drops the first download of each
-/// archive halfway through, and honours Range requests.
+/// archive halfway through, honours Range requests, and answers [redirects]
+/// with a 307.
 class _Server {
-  _Server(this.files);
+  _Server(this.files, {this.redirects = const {}});
 
   final Map<String, List<int>> files;
+  final Map<String, String> redirects;
   final ranges = <String>[];
   final _dropped = <String>{};
   late final ServerSocket _socket;
@@ -55,7 +57,11 @@ class _Server {
           .skip(1)
           .join();
       final body = files[path];
-      if (body == null) {
+      final redirect = redirects[path];
+      if (redirect != null) {
+        client.write('HTTP/1.1 307 Temporary Redirect\r\nLocation: $redirect\r\n'
+            'Content-Length: 0\r\nConnection: close\r\n\r\n');
+      } else if (body == null) {
         client.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
       } else if (range.isNotEmpty) {
         ranges.add('$path $range');
@@ -89,29 +95,48 @@ void main() {
   final ffmpegAsset = DesktopTools.ffmpegAsset();
   final denoAsset = DesktopTools.denoAsset();
   final supported = ffmpegAsset != null && denoAsset != null;
+  // macOS: ffmpeg and ffprobe come as two zips from a build folder that
+  // the "latest" link redirects to.
+  final mac = Platform.isMacOS;
 
   late Directory dir;
   late _Server server;
   late List<int> ffmpegArchive;
+  late List<int> ffprobeArchive;
   late List<int> denoArchive;
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('desktop_tools_test');
-    ffmpegArchive = _archive(ffmpegAsset!, {
-      'ffmpeg-master-latest/bin/${_exe('ffmpeg')}': 'ffmpeg',
-      'ffmpeg-master-latest/bin/${_exe('ffprobe')}': 'ffprobe',
-      'ffmpeg-master-latest/bin/${_exe('ffplay')}': 'ffplay',
-      'ffmpeg-master-latest/doc/ffmpeg.html': 'docs',
-    });
+    if (mac) {
+      ffmpegArchive = _archive('ffmpeg.zip', {'ffmpeg': 'ffmpeg'});
+      ffprobeArchive = _archive('ffprobe.zip', {'ffprobe': 'ffprobe'});
+    } else {
+      ffmpegArchive = _archive(ffmpegAsset!, {
+        'ffmpeg-master-latest/bin/${_exe('ffmpeg')}': 'ffmpeg',
+        'ffmpeg-master-latest/bin/${_exe('ffprobe')}': 'ffprobe',
+        'ffmpeg-master-latest/bin/${_exe('ffplay')}': 'ffplay',
+        'ffmpeg-master-latest/doc/ffmpeg.html': 'docs',
+      });
+      ffprobeArchive = const [];
+    }
     denoArchive = _archive(denoAsset!, {_exe('deno'): 'deno'});
     server = _Server({
-      ffmpegAsset: ffmpegArchive,
-      'checksums.sha256':
-          utf8.encode('${'0' * 64}  other.zip\n${_sha256(ffmpegArchive)}  $ffmpegAsset\n'),
+      if (mac) ...{
+        'download/b1/ffmpeg.zip': ffmpegArchive,
+        'download/b1/ffmpeg.zip.sha256': utf8.encode('${_sha256(ffmpegArchive)}  ffmpeg.zip\n'),
+        'download/b1/ffprobe.zip': ffprobeArchive,
+        'download/b1/ffprobe.zip.sha256': utf8.encode('${_sha256(ffprobeArchive)}  ffprobe.zip\n'),
+      } else ...{
+        ffmpegAsset!: ffmpegArchive,
+        'checksums.sha256':
+            utf8.encode('${'0' * 64}  other.zip\n${_sha256(ffmpegArchive)}  $ffmpegAsset\n'),
+      },
       denoAsset: denoArchive,
       // Deno's Windows checksums come as PowerShell Get-FileHash output.
       '$denoAsset.sha256sum': utf8.encode(
           '\r\nAlgorithm : SHA256\r\nHash      : ${_sha256(denoArchive).toUpperCase()}\r\n'),
+    }, redirects: {
+      if (mac) '$ffmpegAsset/ffmpeg.zip': '/download/b1/ffmpeg.zip',
     });
     await server.start();
   });
@@ -136,9 +161,15 @@ void main() {
     expect(File(p.join(t.ffmpeg.parent.path, _exe('ffplay'))).existsSync(), isFalse);
     expect(t.hasDeno, isTrue);
     expect(await t.deno.readAsString(), 'deno');
-    // Both downloads broke halfway and continued from there.
-    expect(server.ranges, hasLength(2));
-    expect(progress.last, ffmpegArchive.length);
+    // Every download broke halfway and continued from there.
+    expect(server.ranges, hasLength(mac ? 3 : 2));
+    expect(progress.last, ffmpegArchive.length + ffprobeArchive.length);
+    for (final (before, after) in [for (var i = 1; i < progress.length; i++) (progress[i - 1], progress[i])]) {
+      expect(after, greaterThanOrEqualTo(before), reason: 'progress only grows');
+    }
+    if (!Platform.isWindows) {
+      expect((await t.ffmpeg.stat()).mode & 0x49, 0x49, reason: 'executable');
+    }
     // Only bin/ is kept, and no temporary folders are left.
     expect(dir.listSync().map((e) => p.basename(e.path)).toSet(), {'ffmpeg', 'deno'});
     expect(Directory(p.join(dir.path, 'ffmpeg')).listSync().map((e) => p.basename(e.path)), ['bin']);
@@ -146,6 +177,23 @@ void main() {
     await t.remove();
     expect(t.hasFfmpeg || t.hasDeno, isFalse);
   }, skip: !supported);
+
+  test('macOS: a damaged ffprobe installs no FFmpeg', () async {
+    server.files['download/b1/ffprobe.zip'] = [...ffprobeArchive, 0];
+    await expectLater(tools().installFfmpeg(), throwsA(isA<DownloaderException>()));
+    expect(tools().hasFfmpeg, isFalse);
+    expect(dir.listSync(), isEmpty);
+  }, skip: !supported || !mac);
+
+  test('finds programs on PATH and in the folders given', () async {
+    final folder = await Directory(p.join(dir.path, 'tools')).create();
+    expect(DesktopTools.which('explorer-test-tool', alsoIn: [folder.path]), isNull);
+    final tool = await File(p.join(folder.path, _exe('explorer-test-tool'))).writeAsString('');
+    expect(DesktopTools.which('explorer-test-tool', alsoIn: ['', folder.path]), tool.path);
+    if (Platform.isMacOS) {
+      expect(DesktopTools.macosToolFolders, contains('/opt/homebrew/bin'));
+    }
+  });
 
   test('a cancelled or damaged download installs nothing', () async {
     final t = tools();

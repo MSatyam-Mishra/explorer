@@ -167,12 +167,17 @@ abstract final class LsSettingsStore {
       return (preferred, false);
     }
 
+    // macOS asks before an app uses ~/Documents, and a declined prompt
+    // would stop LocalSend from starting, so it uses Application Support,
+    // which needs no permission.
     Directory? base;
-    try {
-      base = Platform.isAndroid
-          ? await getExternalStorageDirectory()
-          : await getApplicationDocumentsDirectory();
-    } catch (_) {}
+    if (!Platform.isMacOS) {
+      try {
+        base = Platform.isAndroid
+            ? await getExternalStorageDirectory()
+            : await getApplicationDocumentsDirectory();
+      } catch (_) {}
+    }
     base ??= await getApplicationSupportDirectory();
     final fallback = p.join(base.path, 'LocalSend');
     await Directory(fallback).create(recursive: true);

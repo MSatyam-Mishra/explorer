@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:explorer/core/files/file_types.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:path/path.dart' as p;
 
@@ -31,8 +32,9 @@ class NameMatcher {
 
 /// Items inside [root]'s subfolders (not its own items, which the caller
 /// already filters) whose names match [query], in batches as they're found.
-/// Hidden items are skipped unless [showHidden]. Stops after [limit]
-/// matches, or when the stream is cancelled.
+/// Hidden items are skipped unless [showHidden]. On macOS packages (apps,
+/// document packages) can match but aren't searched inside, as in Finder.
+/// Stops after [limit] matches, or when the stream is cancelled.
 Stream<List<FileSystemEntity>> searchSubfolders(
   String root,
   String query, {
@@ -71,6 +73,10 @@ Stream<List<FileSystemEntity>> searchSubfolders(
 Future<void> _search((SendPort, String, String, bool, int) args) async {
   final (port, root, query, showHidden, limit) = args;
   final matcher = NameMatcher(query);
+  // Goes by the name: no extra I/O per folder.
+  final skipPackages = Platform.isMacOS;
+  bool searchInside(Directory dir) =>
+      !(skipPackages && FileTypes.isMacPackage(dir.path));
   var batch = <(String, bool)>[];
   var sent = DateTime.now();
   var found = 0;
@@ -78,7 +84,7 @@ Future<void> _search((SendPort, String, String, bool, int) args) async {
   final pending = <Directory>[];
   try {
     for (final entity in Directory(root).listSync(followLinks: false)) {
-      if (entity is Directory && (showHidden || !LocalFileRepository.isHidden(entity.path))) {
+      if (entity is Directory && searchInside(entity) && (showHidden || !LocalFileRepository.isHidden(entity.path))) {
         pending.add(entity);
       }
     }
@@ -96,7 +102,7 @@ Future<void> _search((SendPort, String, String, bool, int) args) async {
       final name = p.basename(entity.path);
       if (!showHidden && LocalFileRepository.isHidden(entity.path)) continue;
       final isDirectory = entity is Directory;
-      if (isDirectory) pending.add(entity);
+      if (isDirectory && searchInside(entity)) pending.add(entity);
       if (matcher.matches(name)) {
         batch.add((entity.path, isDirectory));
         if (++found >= limit) break;

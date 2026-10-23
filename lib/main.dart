@@ -9,6 +9,7 @@ import 'package:explorer/core/platform/window_effects.dart';
 import 'package:explorer/core/theme/theme_preferences.dart';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/platform/macos_open_files.dart';
 import 'package:explorer/shared/widgets/tasks_view.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/build_features.dart';
@@ -25,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:window_manager/window_manager.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
 
@@ -40,10 +42,14 @@ void main(List<String> args) async {
   await WindowEffects.init(enabled: (await ThemePreferences.load()).windowEffect);
 
   // Desktop: a new window (or the system) can pass a folder to show or a
-  // file to open.
-  final launch = Desktop.isDesktop
+  // file to open. On macOS, Finder sends them as events instead (Open With,
+  // drops on the Dock icon).
+  var launch = Desktop.isDesktop
       ? Desktop.parseArgs(args)
       : (folder: null, file: null);
+  if (MacosOpenFiles.supported) {
+    launch = await MacosOpenFiles.launchTarget(launch);
+  }
   ExplorerPaths.startFolder = launch.folder;
   final launchFile = launch.file;
   if (launchFile != null) {
@@ -68,6 +74,17 @@ void main(List<String> args) async {
   // behaves as usual.
   final startItem = launchItem is IncomingRoute ? null : launchItem;
   runApp(App(launchItem: startItem));
+  // macOS: a window opened for a folder or a file (from Finder or another
+  // Explorer window) comes to the front once it's up, rather than staying
+  // behind the app that asked for it.
+  if (Platform.isMacOS &&
+      !Platform.environment.containsKey('FLUTTER_TEST') &&
+      (launch.folder != null || launch.file != null)) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
   if (launchItem is IncomingRoute) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _navigatorKey.currentState?.push(

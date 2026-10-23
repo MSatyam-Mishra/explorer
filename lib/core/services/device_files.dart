@@ -97,7 +97,7 @@ abstract final class DeviceFiles {
       ];
     }
     final roots = _desktopRoots();
-    return Isolate.run(() => _walk(roots, extensions));
+    return Isolate.run(() => walk(roots, extensions));
   }
 
   /// Files with [extensions] under the user's home [folders] ("Pictures",
@@ -114,7 +114,7 @@ abstract final class DeviceFiles {
       for (final name in folders)
         if (Directory(p.join(home, name)).existsSync()) p.join(home, name),
     ];
-    return Isolate.run(() => _walk(roots, extensions));
+    return Isolate.run(() => walk(roots, extensions));
   }
 
   static List<String> _desktopRoots() {
@@ -127,8 +127,14 @@ abstract final class DeviceFiles {
     ];
   }
 
-  static List<DeviceFile> _walk(List<String> roots, Set<String> extensions) {
+  /// Files with [extensions] under [roots], newest first. Skips hidden
+  /// items and node_modules, and on macOS what's inside packages (apps,
+  /// document packages), as Finder does. It blocks: callers run it in an
+  /// isolate.
+  @visibleForTesting
+  static List<DeviceFile> walk(List<String> roots, Set<String> extensions) {
     const limit = 50000;
+    final skipPackages = Platform.isMacOS;
     final found = <DeviceFile>[];
     var seen = 0;
     final pending = [for (final r in roots) Directory(r)];
@@ -145,7 +151,10 @@ abstract final class DeviceFiles {
         final name = p.basename(entity.path);
         if (name.startsWith('.') || name == 'node_modules') continue;
         if (entity is Directory) {
-          pending.add(entity);
+          // Goes by the name: no extra I/O per folder.
+          if (!(skipPackages && FileTypes.isMacPackage(name))) {
+            pending.add(entity);
+          }
         } else if (entity is File &&
             extensions.contains(FileTypes.extensionOf(name))) {
           try {

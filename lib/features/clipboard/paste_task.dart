@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/core/platform/macos_files.dart';
 import 'package:path/path.dart' as p;
 
 /// How far a paste is: bytes copied of [total], and the file being copied.
@@ -17,7 +18,8 @@ class PasteProgress {
 /// Nothing is overwritten: a name that's taken gets " (2)", " (3)"…, and a
 /// copy into its own folder becomes "name - Copy". A move renames when it
 /// can and copies then deletes across drives. Files keep their modified
-/// time.
+/// time; on macOS files and folders also keep their permissions, extended
+/// attributes and ACLs, as in Finder.
 Future<List<String>> pasteEntities(
   List<String> sources,
   String destination, {
@@ -132,7 +134,11 @@ Future<void> _copy(String source, String target, void Function(String name, int 
       await for (final entity in Directory(source).list(followLinks: false)) {
         await _copy(entity.path, p.join(target, p.basename(entity.path)), progress);
       }
+      // After the contents, so a read-only or locked folder can still be
+      // filled, and its modified time stays.
+      MacosFiles.copyMetadata(source, target);
     case FileSystemEntityType.link:
+      // A link to the same place; copyMetadata would follow it, so not here.
       await Link(target).create(await Link(source).target());
     case FileSystemEntityType.file:
       await _copyFile(File(source), File(target), progress);
@@ -158,4 +164,7 @@ Future<void> _copyFile(File source, File target, void Function(String name, int 
   } on FileSystemException {
     // Some file systems don't allow it; the copy is still good.
   }
+  // macOS: permissions (an app's or script's executable bit), extended
+  // attributes and ACLs. Does nothing elsewhere.
+  MacosFiles.copyMetadata(source.path, target.path);
 }

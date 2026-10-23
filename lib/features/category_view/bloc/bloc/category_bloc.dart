@@ -1,7 +1,6 @@
 import 'dart:io';
 
-import 'package:explorer/core/files/file_types.dart';
-import 'package:explorer/core/services/device_files.dart';
+import 'package:explorer/features/category_view/home_media.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
@@ -21,6 +20,25 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
   static int _length(Map<DateTime, List<dynamic>> groups) =>
       groups.values.fold(0, (sum, list) => sum + list.length);
 
+  /// Two newest-first lists of (time, item) merged into groups by day,
+  /// newest first.
+  @visibleForTesting
+  static Map<DateTime, List<dynamic>> mergeByDay(
+    List<(DateTime, Object)> a,
+    List<(DateTime, Object)> b,
+  ) {
+    final groups = <DateTime, List<dynamic>>{};
+    var i = 0, j = 0;
+    while (i < a.length || j < b.length) {
+      final (t, item) =
+          j >= b.length || (i < a.length && !a[i].$1.isBefore(b[j].$1))
+          ? a[i++]
+          : b[j++];
+      (groups[DateTime(t.year, t.month, t.day)] ??= []).add(item);
+    }
+    return groups;
+  }
+
   CategoryBloc() : super(CategoryLoading()) {
     on<LoadCategoryAssets>(_onLoadCategoryAssets);
   }
@@ -30,6 +48,9 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
     Emitter<CategoryState> emit,
   ) async {
     emit(CategoryLoading());
+    // macOS: the search for loose videos, which runs while the library
+    // loads.
+    Future<void>? looseVideos;
     try {
       // A folder: its files grouped by day.
       if (event.type == RequestType.common) {
@@ -63,20 +84,12 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
         return; // Exit after handling this case
       }
       // Windows and Linux have no media library (photo_manager): look
-      // through the user's Pictures, Videos or Music folders instead.
-      if (Platform.isWindows || Platform.isLinux) {
-        final (folders, extensions) = switch (event.type) {
-          RequestType.image => (
-            const ['Pictures', 'Downloads', 'Desktop'],
-            {...FileTypes.image, ...FileTypes.rasterImage, ...FileTypes.cameraRaw},
-          ),
-          RequestType.video => (
-            const ['Videos', 'Downloads', 'Desktop'],
-            FileTypes.video,
-          ),
-          _ => (const ['Music', 'Downloads'], FileTypes.audio),
-        };
-        final files = await DeviceFiles.findInHome(folders, extensions);
+      // through the user's Pictures, Videos or Music folders instead. The
+      // macOS Photos library holds no audio, so audio comes from there too.
+      if (Platform.isWindows ||
+          Platform.isLinux ||
+          (Platform.isMacOS && event.type == RequestType.audio)) {
+        final files = await HomeMedia.find(event.type);
         final groups = <DateTime, List<dynamic>>{};
         for (final file in files) {
           final m = file.modified;
@@ -92,6 +105,31 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
       final cached = _mediaCache[event.type];
       if (cached != null) emit(CategoryLoaded(cached));
 
+      // macOS: loose videos in Movies, Downloads and Desktop as well,
+      // merged with the library by date. They're searched for while the
+      // library loads: they show at once if nothing is on screen yet, and
+      // join the library's next page otherwise. Photos keeps its copies
+      // inside its own library, which isn't searched, so they aren't listed
+      // twice.
+      var loose = const <(DateTime, Object)>[];
+      if (Platform.isMacOS && event.type == RequestType.video) {
+        looseVideos = HomeMedia.find(event.type).then((files) {
+          loose = [for (final file in files) (file.modified, File(file.path))];
+          if (loose.isNotEmpty && state is! CategoryLoaded && !emit.isDone) {
+            emit(CategoryLoaded(mergeByDay(const [], loose)));
+          }
+        }, onError: (Object _) {});
+      }
+      Map<DateTime, List<dynamic>> withLoose(
+        Map<DateTime, List<dynamic>> groups,
+      ) => loose.isEmpty
+          ? _snapshot(groups)
+          : mergeByDay([
+              for (final list in groups.values)
+                for (final AssetEntity asset in list)
+                  (asset.createDateTime, asset),
+            ], loose);
+
       // Only the "all" album: listing every album too would repeat each
       // photo once per album it's in.
       final albums = await PhotoManager.getAssetPathList(
@@ -104,8 +142,12 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
         ),
       );
       if (albums.isEmpty) {
-        _mediaCache[event.type] = const {};
-        emit(CategoryLoaded(const {}));
+        await looseVideos;
+        final result = loose.isEmpty
+            ? const <DateTime, List<dynamic>>{}
+            : mergeByDay(const [], loose);
+        _mediaCache[event.type] = result;
+        emit(CategoryLoaded(result));
         return;
       }
       final album = albums.first;
@@ -123,18 +165,22 @@ class CategoryBloc extends Bloc<CategoryEvent, CategoryState> {
         }
         start = end;
         pageSize = 1000;
-        // Keep the cached list until the new one has caught up with it.
-        if (cached == null || start >= total || start >= _length(cached)) {
-          emit(CategoryLoaded(_snapshot(groups)));
+        // Keep the cached list until the new one has caught up with it
+        // (the full list is shown below in any case).
+        if (cached == null || start + loose.length >= _length(cached)) {
+          emit(CategoryLoaded(withLoose(groups)));
         }
       }
+      await looseVideos;
       if (!emit.isDone && !isClosed) {
-        final result = _snapshot(groups);
+        final result = withLoose(groups);
         _mediaCache[event.type] = result;
         emit(CategoryLoaded(result));
       }
     } catch (e) {
-      // Keep showing what's already loaded.
+      // Keep showing what's already loaded. On macOS the loose videos may
+      // still turn up and show on their own.
+      if (state is! CategoryLoaded) await looseVideos;
       if (state is! CategoryLoaded && !emit.isDone) {
         emit(CategoryError(e.toString()));
       }

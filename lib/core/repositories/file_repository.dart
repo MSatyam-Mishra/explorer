@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/platform/macos_files.dart';
 import 'package:explorer/core/platform/windows_locations.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:ffi/ffi.dart';
@@ -46,10 +47,12 @@ class LocalFileRepository implements FileRepository {
     return [for (final e in entries) if (!isHidden(e.path)) e];
   }
 
-  /// Dotfiles, and on Windows files marked hidden or system
-  /// (`$Recycle.Bin`, `pagefile.sys`, `desktop.ini`...).
+  /// Dotfiles, on Windows files marked hidden or system
+  /// (`$Recycle.Bin`, `pagefile.sys`, `desktop.ini`...), and on macOS what
+  /// Finder hides (`~/Library`, `/usr`, `/bin`...). Works in any isolate.
   static bool isHidden(String path) {
     if (p.basename(path).startsWith('.')) return true;
+    if (Platform.isMacOS) return MacosFiles.isHidden(path);
     if (!Platform.isWindows) return false;
     final name = path.toNativeUtf16();
     try {

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/services/device_files.dart';
+import 'package:explorer/features/category_view/home_media.dart';
 import 'package:explorer/features/sidebar/model/category_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -58,6 +59,25 @@ class SidebarBloc extends Bloc<SidebarEvent, SidebarState> {
       }
     }
 
+    // macOS: the Photos library has no audio, and Video also lists loose
+    // files, so count what those categories show. Those folders are
+    // searched while Documents and Archives are counted.
+    Future<void> countHomeMedia() async {
+      try {
+        final found = await Future.wait([
+          HomeMedia.find(RequestType.audio),
+          HomeMedia.find(RequestType.video),
+        ]);
+        counts
+          ..['Audio'] = found[0].length
+          ..['Video'] = (counts['Video'] ?? 0) + found[1].length;
+        publish();
+      } catch (e) {
+        debugPrint('Sidebar: home media counts failed: $e');
+      }
+    }
+
+    final homeMedia = Platform.isMacOS ? countHomeMedia() : null;
     for (final (name, group) in const [
       ('Documents', DeviceFileGroup.documents),
       ('Archives', DeviceFileGroup.archives),
@@ -69,6 +89,7 @@ class SidebarBloc extends Bloc<SidebarEvent, SidebarState> {
         debugPrint('Sidebar: $name count failed: $e');
       }
     }
+    await homeMedia;
   }
 
   static List<Category> _categories(Map<String, int> counts) => [

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:archive/archive_io.dart';
+import 'package:explorer/core/files/file_types.dart';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/services/bluetooth_share.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
@@ -39,15 +40,53 @@ class FileActionsService {
     return Platform.isMacOS ? '⌘$key' : 'Ctrl+$key';
   }
 
+  /// The delete shortcut: the Delete key, or ⌘⌫ on macOS (Finder's Move to
+  /// Trash; a Mac's delete key is backspace).
+  static String get deleteShortcut => Platform.isMacOS ? '⌘⌫' : 'Delete';
+
+  /// Whether [entity] is a macOS package (an app, plug-in or document
+  /// package): a folder that opens like a file, as in Finder.
+  static bool isPackage(FileSystemEntity entity) =>
+      Platform.isMacOS && entity is Directory && FileTypes.isMacPackage(entity.path);
+
+  /// Whether macOS opens [entity] itself, as Finder does: a package, or an
+  /// installer file (.pkg), which opens in Installer.
+  static bool opensWithMac(FileSystemEntity entity) =>
+      isPackage(entity) ||
+      (Platform.isMacOS &&
+          entity is File &&
+          FileTypes.macInstaller.contains(FileTypes.extensionOf(entity.path)));
+
+  /// Starts macOS's `open` for a package; tests replace it.
+  @visibleForTesting
+  static Future<bool> Function(String path) packageLauncher =
+      (path) async => (await Process.run('/usr/bin/open', [path])).exitCode == 0;
+
+  /// Opens [entity] with macOS (launches an app, opens a document package
+  /// in its app, an installer in Installer), as a double-click in Finder
+  /// does.
+  Future<void> openPackage(BuildContext context, FileSystemEntity entity) async {
+    var opened = false;
+    try {
+      opened = await packageLauncher(entity.path);
+    } catch (_) {}
+    if (!opened && context.mounted) {
+      _toast(context, "Couldn't open ${p.basename(entity.path)}");
+    }
+  }
+
   /// Desktop right-click menu for [entity] at [position], with the actions
-  /// of [showFileOptionsMenu]. [onOpen] opens it as a click would.
+  /// of [showFileOptionsMenu]. [onOpen] opens it as a click would;
+  /// [onShowContents] browses inside a macOS package.
   Future<void> showContextMenu(
     BuildContext context,
     FileSystemEntity entity,
     Offset position, {
     required VoidCallback onOpen,
+    VoidCallback? onShowContents,
   }) async {
     final isFile = entity is File;
+    final package = isPackage(entity);
     final images = ImageActions.imagesIn([entity]);
     final imageEntries = images.isEmpty ? const <PopupMenuEntry<Object>>[] : await ImageActions.menuEntries(context, images);
     if (!context.mounted) return;
@@ -58,9 +97,14 @@ class FileActionsService {
         ExplorerMenu.item(context,
             value: _EntityAction.open,
             label: 'Open',
-            icon: isFile ? LucideIcons.fileInput : LucideIcons.folderOpen,
+            icon: isFile || package ? LucideIcons.fileInput : LucideIcons.folderOpen,
             shortcut: 'Enter'),
-        if (Desktop.isDesktop)
+        if (package && onShowContents != null)
+          ExplorerMenu.item(context,
+              value: _EntityAction.showContents,
+              label: 'Show package contents',
+              icon: LucideIcons.packageOpen),
+        if (Desktop.isDesktop && !package)
           ExplorerMenu.item(context,
               value: _EntityAction.newWindow,
               label: 'Open in new window',
@@ -109,7 +153,7 @@ class FileActionsService {
             label: 'Delete',
             icon: LucideIcons.trash2,
             destructive: true,
-            shortcut: 'Delete'),
+            shortcut: deleteShortcut),
       ],
     );
     if (action == null || !context.mounted) return;
@@ -118,6 +162,8 @@ class FileActionsService {
     switch (action as _EntityAction) {
       case _EntityAction.open:
         onOpen();
+      case _EntityAction.showContents:
+        onShowContents?.call();
       case _EntityAction.newWindow:
         await (isFile
             ? Desktop.openWindow(file: entity.path)
@@ -666,11 +712,13 @@ class FileActionsService {
     // Show a loading indicator
     _toast(context, 'Zipping folder for sharing…');
 
-    final tempDir = await getTemporaryDirectory();
-    final zipPath = p.join(tempDir.path, '${p.basename(directory.path)}.zip');
+    Directory? shareDir;
+    var shared = false;
     final encoder = ZipFileEncoder();
 
     try {
+      shareDir = await newShareDir(await getTemporaryDirectory());
+      final zipPath = p.join(shareDir.path, '${p.basename(directory.path)}.zip');
       encoder.create(zipPath);
       await for (final entity in directory.list(
         recursive: true,
@@ -678,10 +726,10 @@ class FileActionsService {
       )) {
         if (entity is File) {
           final relativePath = p.relative(entity.path, from: directory.path);
-          encoder.addFile(entity, relativePath);
+          await encoder.addFile(entity, relativePath);
         }
       }
-      encoder.close();
+      await encoder.close();
 
       // Share the created ZIP file
       await SharePlus.instance.share(ShareParams(
@@ -689,16 +737,65 @@ class FileActionsService {
         text: 'Sharing folder: ${p.basename(directory.path)}',
         sharePositionOrigin: origin,
       ));
+      shared = true;
     } catch (e) {
-      if (!context.mounted) return;
-      _toast(context, "Couldn't zip the folder: ${_reason(e)}");
+      if (context.mounted) {
+        _toast(context, "Couldn't zip the folder: ${_reason(e)}");
+      }
     } finally {
-      // Clean up the temporary file
-      final tempFile = File(zipPath);
-      if (await tempFile.exists()) {
-        await tempFile.delete();
+      // share() returns once an app is chosen. On macOS the app reads the
+      // zip later (AirDrop waits for a device to accept), so it stays until
+      // a later share sweeps it.
+      if (shareDir != null && (!Platform.isMacOS || !shared)) {
+        try {
+          await shareDir.delete(recursive: true);
+        } catch (_) {}
       }
     }
+  }
+
+  /// Shared folders are zipped into folders under this one in the
+  /// temporary directory.
+  static const _shareDirName = 'explorer_share';
+
+  /// Zips kept from a share this long ago are no longer being read.
+  static const _shareKeep = Duration(hours: 1);
+
+  /// A new folder under [temp] for one shared folder's zip. Zips of shares
+  /// older than an hour are swept first; newer ones may still be zipping
+  /// or waiting to be read.
+  @visibleForTesting
+  static Future<Directory> newShareDir(Directory temp, {DateTime? now}) async {
+    final root = await Directory(p.join(temp.path, _shareDirName))
+        .create(recursive: true);
+    final cutoff = (now ?? DateTime.now()).subtract(_shareKeep);
+    try {
+      await for (final entity in root.list()) {
+        try {
+          if (await _untouchedSince(entity, cutoff)) {
+            await entity.delete(recursive: true);
+          }
+        } catch (_) {
+          // A zip another app still has open (Windows) stays behind.
+        }
+      }
+    } catch (_) {}
+    return root.createTemp('share');
+  }
+
+  /// Whether [entity] and what is directly in it last changed before
+  /// [cutoff].
+  static Future<bool> _untouchedSince(
+    FileSystemEntity entity,
+    DateTime cutoff,
+  ) async {
+    if (!(await entity.stat()).modified.isBefore(cutoff)) return false;
+    if (entity is Directory) {
+      await for (final child in entity.list()) {
+        if (!(await child.stat()).modified.isBefore(cutoff)) return false;
+      }
+    }
+    return true;
   }
 
   static void _toast(BuildContext context, String message) {
@@ -1077,6 +1174,7 @@ enum ShareMethod { web, ftp, localSend, bluetooth, apps }
 
 enum _EntityAction {
   open,
+  showContents,
   newWindow,
   openWith,
   copy,

@@ -7,6 +7,11 @@ abstract class ClipboardState {}
 
 class ClipboardEmpty extends ClipboardState {}
 
+/// Nothing copied in Explorer, but another app (Finder) copied files. On
+/// macOS reading them may make the system ask the user first, so they're
+/// read when the user pastes.
+class ClipboardOtherAppFiles extends ClipboardEmpty {}
+
 class ClipboardReadyToPaste extends ClipboardState {
   /// What was copied or cut, in any window (or another app).
   final List<FileSystemEntity> entities;
@@ -32,7 +37,8 @@ class ClipboardPasteSuccess extends ClipboardState {
 class ClipboardPasteFailure extends ClipboardState {
   final String error;
 
-  /// What was on the clipboard (null for a drop).
+  /// What was on the clipboard (null for a drop, or when nothing on it
+  /// could be read).
   final ClipboardReadyToPaste? previousState;
   ClipboardPasteFailure({required this.error, this.previousState});
 }

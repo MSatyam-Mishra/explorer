@@ -44,7 +44,7 @@ abstract final class ImageActions {
   /// "Convert to ▸" (every format but the pictures' own) and "Resize…".
   static Future<List<PopupMenuEntry<Object>>> menuEntries(BuildContext context, List<String> images) async {
     final targets = ImageFormat.targetsFor(images);
-    final support = {for (final f in targets) f: await ImageConverter.support(f)};
+    final support = await ImageConverter.menuSupport(targets);
     if (!context.mounted) return const [];
     return [
       ExplorerMenu.submenu<Object>(
@@ -87,7 +87,7 @@ abstract final class ImageActions {
   /// Phones: the formats in a sheet, then the conversion.
   static Future<void> chooseFormat(BuildContext context, List<String> images) async {
     final targets = ImageFormat.targetsFor(images);
-    final support = {for (final f in targets) f: await ImageConverter.support(f)};
+    final support = await ImageConverter.menuSupport(targets);
     if (!context.mounted) return;
     final format = await AppSheet.show<ImageFormat>(
       context,

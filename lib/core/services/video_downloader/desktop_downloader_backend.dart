@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -55,8 +56,7 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
       _tools ??= _Tools.find(await _downloadedTools());
 
   /// The engine's parts this computer needs: yt-dlp always, FFmpeg and Deno
-  /// unless the system has them (or there's no download for them, as for
-  /// FFmpeg on macOS).
+  /// unless the system has them (or there's no download for this computer).
   Future<List<_Part>> _parts() async {
     final installer = await _ytDlp();
     final downloaded = await _downloadedTools();
@@ -74,6 +74,7 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
           (downloaded.hasFfmpeg || tools.ffmpeg == null))
         _Part(
           'FFmpeg',
+          site: DesktopTools.ffmpegSite,
           installed: downloaded.hasFfmpeg,
           downloadBytes: DesktopTools.ffmpegDownloadBytes,
           diskBytes: DesktopTools.ffmpegDiskBytes,
@@ -97,10 +98,27 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
       ? names.join()
       : '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
 
+  /// Where [parts] come from.
+  static String _source(List<_Part> parts) => sourceText(
+        [for (final part in parts) if (part.site == null) part.name],
+        [for (final part in parts) ?part.site],
+      );
+
+  /// "the GitHub pages of yt-dlp and Deno", then other [sites] (FFmpeg's on
+  /// macOS) after a comma, so they don't read as GitHub pages.
+  @visibleForTesting
+  static String sourceText(List<String> fromGitHub, List<String> sites) {
+    if (fromGitHub.isEmpty) return _list(sites);
+    final pages = 'the GitHub pages of ${_list(fromGitHub)}';
+    return sites.isEmpty ? pages : '$pages, and from ${_list(sites)}';
+  }
+
   @override
   Future<BackendStatus> status() async {
     final installer = await _ytDlp();
-    final tools = await _findTools();
+    // Looked for again each time: FFmpeg may have been installed since
+    // (on a Mac, with Homebrew).
+    final tools = _tools = _Tools.find(await _downloadedTools());
     final parts = await _parts();
     final missing = parts.where((part) => !part.installed).toList();
     return BackendStatus(
@@ -122,7 +140,7 @@ class DesktopDownloaderBackend extends VideoDownloaderBackend {
         downloadBytes: missing.fold(0, (sum, part) => sum + part.downloadBytes),
         diskBytes: parts.fold(0, (sum, part) => sum + part.diskBytes),
         contents: _list([for (final part in parts) part.name]),
-        source: 'the GitHub pages of ${_list([for (final part in parts) part.name])}',
+        source: _source(parts),
       ),
     );
   }
@@ -478,13 +496,11 @@ class _DesktopJob {
       );
 }
 
-/// FFmpeg and a JavaScript runtime (yt-dlp needs one for YouTube), looked
-/// up on PATH and in the usual install folders: apps started from the
-/// macOS Finder don't get the shell's PATH.
 /// A part of the desktop video engine.
 class _Part {
   _Part(
     this.name, {
+    this.site,
     required this.installed,
     required this.downloadBytes,
     required this.diskBytes,
@@ -492,6 +508,9 @@ class _Part {
   });
 
   final String name;
+
+  /// Where it's downloaded from when that isn't its GitHub page.
+  final String? site;
   final bool installed;
   final int downloadBytes;
   final int diskBytes;
@@ -501,6 +520,9 @@ class _Part {
   ) install;
 }
 
+/// FFmpeg and a JavaScript runtime (yt-dlp needs one for YouTube), looked
+/// up on PATH and in the usual install folders: apps started from the
+/// macOS Finder don't get the shell's PATH.
 class _Tools {
   const _Tools({this.ffmpeg, this.jsRuntime, this.ffmpegDownloaded = false});
 
@@ -534,23 +556,13 @@ class _Tools {
     return _Tools(ffmpeg: ffmpeg, jsRuntime: js, ffmpegDownloaded: ffmpegDownloaded);
   }
 
+  /// [name] on PATH (and Homebrew's folders on macOS), else where Linux
+  /// packages and WinGet put programs.
   static String? which(String name) {
-    final env = Platform.environment;
-    final dirs = <String>[
-      ...?(env['PATH'] ?? env['Path'])?.split(Platform.isWindows ? ';' : ':'),
-      if (Platform.isMacOS) ...['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin'],
+    final local = Platform.environment['LOCALAPPDATA'];
+    return DesktopTools.which(name, alsoIn: [
       if (Platform.isLinux) ...['/usr/local/bin', '/usr/bin', '/snap/bin'],
-      if (Platform.isWindows && env['LOCALAPPDATA'] != null)
-        p.join(env['LOCALAPPDATA']!, 'Microsoft', 'WinGet', 'Links'),
-    ];
-    final names = Platform.isWindows ? ['$name.exe'] : [name];
-    for (final dir in dirs) {
-      if (dir.trim().isEmpty) continue;
-      for (final n in names) {
-        final candidate = p.join(dir.trim(), n);
-        if (File(candidate).existsSync()) return candidate;
-      }
-    }
-    return null;
+      if (Platform.isWindows && local != null) p.join(local, 'Microsoft', 'WinGet', 'Links'),
+    ]);
   }
 }

@@ -77,7 +77,9 @@ class FormatSupport {
 /// everywhere. WebP and HEIC use Android's own encoders; on Windows and
 /// Linux WebP and AVIF use FFmpeg (the one the video downloader fetches,
 /// or the system's), HEIC uses Windows' HEIF encoder or Linux's heif-enc.
-/// Pictures are turned upright first. Nothing is overwritten unless asked.
+/// macOS reads HEIC and AVIF and writes HEIC (and AVIF on newer versions)
+/// itself, with sips; FFmpeg does the rest. Pictures are turned upright
+/// first. Nothing is overwritten unless asked.
 abstract final class ImageConverter {
   static const _android = MethodChannel('explorer/image_convert');
 
@@ -106,8 +108,18 @@ abstract final class ImageConverter {
           return const FormatSupport(SupportKind.unavailable, "Android can't write AVIF yet.");
       }
     }
+    final found = ffmpeg();
+    if (Platform.isMacOS) {
+      // sips and FFmpeg are asked at the same time, so the first menu
+      // waits for one of them, not both.
+      final encoders = found.then<Set<String>>((exe) => exe == null ? const {} : _encodersOf(exe));
+      final (writable, _) = await (_macWritable(), encoders).wait;
+      if (writable.contains(format.extension)) return const FormatSupport(SupportKind.ready);
+    }
+    final exe = await found;
+    final hasEncoder = exe != null && await _encoder(exe, format) != null;
     if (format == ImageFormat.heic) {
-      if (await ffmpeg() != null) return const FormatSupport(SupportKind.ready);
+      if (hasEncoder) return const FormatSupport(SupportKind.ready);
       if (Platform.isWindows) {
         // Trying Windows' encoder takes a moment: the menu doesn't wait.
         if (_heicWindows == null) {
@@ -118,15 +130,40 @@ abstract final class ImageConverter {
       } else if (_which('heif-enc') != null) {
         return const FormatSupport(SupportKind.ready);
       }
-      return DesktopTools.ffmpegAsset() == null
-          ? const FormatSupport(SupportKind.unavailable, 'Needs FFmpeg.')
-          : const FormatSupport(SupportKind.needsFfmpeg);
+      return _withoutFfmpeg(format, exe);
     }
     // WebP and AVIF on computers: FFmpeg.
-    if (await ffmpeg() != null) return const FormatSupport(SupportKind.ready);
-    return DesktopTools.ffmpegAsset() == null
+    if (hasEncoder) return const FormatSupport(SupportKind.ready);
+    return _withoutFfmpeg(format, exe);
+  }
+
+  /// How long a menu on a Mac waits for the first answer from sips and
+  /// FFmpeg.
+  static const _menuWait = Duration(milliseconds: 200);
+
+  /// [support] for each of [formats], for a menu. On a Mac the first menu
+  /// waits only a moment for sips and FFmpeg to say what they write; until
+  /// they have, their formats are offered, and [support] is asked again
+  /// when one is chosen.
+  static Future<Map<ImageFormat, FormatSupport>> menuSupport(List<ImageFormat> formats) async {
+    if (!Platform.isMacOS) return {for (final f in formats) f: await support(f)};
+    const offered = FormatSupport(SupportKind.ready);
+    final answers = await Future.wait([
+      for (final f in formats) support(f).timeout(_menuWait, onTimeout: () => offered),
+    ]);
+    return Map.fromIterables(formats, answers);
+  }
+
+  /// No FFmpeg here writes [format] ([found] lacks its encoder): offer the
+  /// app's FFmpeg, unless there's no download for this computer or it's
+  /// the one [found].
+  static Future<FormatSupport> _withoutFfmpeg(ImageFormat format, String? found) async {
+    if (DesktopTools.ffmpegAsset() != null && (found == null || found != await _ownFfmpeg())) {
+      return const FormatSupport(SupportKind.needsFfmpeg);
+    }
+    return found == null
         ? const FormatSupport(SupportKind.unavailable, 'Needs FFmpeg.')
-        : const FormatSupport(SupportKind.needsFfmpeg);
+        : FormatSupport(SupportKind.unavailable, 'Needs FFmpeg with ${format.label}.');
   }
 
   // ---- FFmpeg ----
@@ -135,32 +172,75 @@ abstract final class ImageConverter {
         Directory(p.join((await getApplicationSupportDirectory()).path, 'video_downloader')),
       );
 
-  /// FFmpeg: the app's (whose encoders are known), else the system's.
+  /// FFmpeg: the app's (whose encoders are known), else the system's. On
+  /// macOS Homebrew's ffmpeg-full comes before its ffmpeg: it has the WebP
+  /// and AOM encoders, but isn't linked into Homebrew's bin.
   static Future<String?> ffmpeg() async {
     if (debugFfmpeg != null) return debugFfmpeg;
     if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) return null;
+    final own = await _ownFfmpeg();
+    if (own != null) return own;
+    if (Platform.isMacOS) {
+      for (final brew in const ['/opt/homebrew', '/usr/local']) {
+        final full = '$brew/opt/ffmpeg-full/bin/ffmpeg';
+        if (File(full).existsSync()) return full;
+      }
+    }
+    return _which('ffmpeg');
+  }
+
+  /// The FFmpeg the app downloaded, if it did.
+  static Future<String?> _ownFfmpeg() async {
     try {
       final own = (await desktopTools()).ffmpeg;
       if (own.existsSync()) return own.path;
     } catch (_) {
       // No app data folder (tests).
     }
-    return _which('ffmpeg');
+    return null;
   }
 
   @visibleForTesting
   static String? debugFfmpeg;
 
-  static String? _which(String name) {
-    final dirs = (Platform.environment['PATH'] ?? Platform.environment['Path'] ?? '')
-        .split(Platform.isWindows ? ';' : ':');
-    for (final dir in dirs) {
-      if (dir.trim().isEmpty) continue;
-      final candidate = p.join(dir, Platform.isWindows ? '$name.exe' : name);
-      if (File(candidate).existsSync()) return candidate;
+  static String? _which(String name) => DesktopTools.which(name);
+
+  /// The encoder [exe] writes [format] with; null when it has none. Only
+  /// the Mac's FFmpeg is asked: Homebrew's ffmpeg has no WebP or AOM
+  /// encoder. AVIF falls back to SVT-AV1.
+  static Future<String?> _encoder(String exe, ImageFormat format) async {
+    final wanted = switch (format) {
+      ImageFormat.webp => const ['libwebp'],
+      ImageFormat.avif => const ['libaom-av1', 'libsvtav1'],
+      _ => const ['libx265'],
+    };
+    if (!Platform.isMacOS) return wanted.first;
+    final has = await _encodersOf(exe);
+    for (final name in wanted) {
+      if (has.contains(name)) return name;
     }
     return null;
   }
+
+  static final _encoders = <String, Future<Set<String>>>{};
+
+  /// What `ffmpeg -encoders` lists, asked once per FFmpeg (an upgrade
+  /// links a new one).
+  static Future<Set<String>> _encodersOf(String exe) {
+    var key = exe;
+    try {
+      key = File(exe).resolveSymbolicLinksSync();
+    } catch (_) {}
+    return _encoders[key] ??= Process.run(exe, ['-hide_banner', '-encoders'])
+        .then((r) => parseEncoders('${r.stdout}'), onError: (Object _) => <String>{});
+  }
+
+  /// The encoder names in `ffmpeg -encoders` output.
+  @visibleForTesting
+  static Set<String> parseEncoders(String output) => {
+        for (final m in RegExp(r'^ [VAS][A-Z.]{5} +(\S+)', multiLine: true).allMatches(output))
+          if (m.group(1) != '=') m.group(1)!,
+      };
 
   // ---- Jobs ----
 
@@ -293,17 +373,30 @@ abstract final class ImageConverter {
     // Pictures the app can't read itself (HEIC, AVIF) are read by the
     // system first.
     var input = source;
+    var pngExif = false;
     if (!_dartReadable(source)) {
       input = p.join(temp, 'in.png');
-      await _decodeExternally(source, input, onProcess);
+      pngExif = await _decodeExternally(source, input, onProcess);
     }
     final dart = _dartFormats.contains(target);
+    final mac = !dart && Platform.isMacOS && (await _macWritable()).contains(target.extension);
+    // SVT-AV1 (Homebrew's FFmpeg) writes no alpha plane: that AVIF goes on
+    // white, like JPEG.
+    final svt = target == ImageFormat.avif && !mac && await _ffmpegEncoder(target) == 'libsvtav1';
     final staged = dart ? out : p.join(temp, 'stage.png');
-    final size = await Isolate.run(() => _dartStage(input, staged, dart ? target : ImageFormat.png, resize));
+    final size = await Isolate.run(() => _dartStage(input, staged, dart ? target : ImageFormat.png, resize,
+        pngExif: pngExif, flatten: svt));
     if (dart) return size;
+    if (mac) {
+      await _macImaging(staged, out, target.extension, onProcess);
+      return size;
+    }
     switch (target) {
       case ImageFormat.webp:
         await _ffmpeg(['-i', staged, '-c:v', 'libwebp', '-quality', '90', '-pix_fmt', 'yuva420p', '-frames:v', '1', out], onProcess);
+      case ImageFormat.avif when svt:
+        await _ffmpeg(['-i', staged, '-pix_fmt', 'yuv420p', '-c:v', 'libsvtav1', '-crf', '28', '-preset', '6', '-frames:v', '1', out],
+            onProcess);
       case ImageFormat.avif:
         await _ffmpeg([
           '-i', staged,
@@ -312,7 +405,7 @@ abstract final class ImageConverter {
           '-c:v', 'libaom-av1', '-still-picture', '1', '-crf', '28', '-b:v', '0', '-cpu-used', '6', out,
         ], onProcess);
       case ImageFormat.heic:
-        if (await ffmpeg() != null) {
+        if (await _ffmpegEncoder(ImageFormat.heic) != null) {
           // HEVC from FFmpeg, in a HEIF file of our own (FFmpeg writes no
           // HEIF). 4:2:0 needs even sides: an odd last row/column is cut.
           final hevc = p.join(temp, 'out.hevc');
@@ -340,25 +433,48 @@ abstract final class ImageConverter {
   static bool _dartReadable(String path) =>
       !const {'heic', 'heif', 'avif'}.contains(p.extension(path).toLowerCase().replaceFirst('.', ''));
 
-  static Future<void> _decodeExternally(String source, String png, void Function(Process)? onProcess) async {
+  /// The encoder the FFmpeg in use writes [format] with.
+  static Future<String?> _ffmpegEncoder(ImageFormat format) async {
+    final exe = await ffmpeg();
+    return exe == null ? null : _encoder(exe, format);
+  }
+
+  /// Writes [source] as PNG to [png]. Returns true when the pixels are
+  /// still as stored, with the orientation in the PNG's eXIf chunk (sips).
+  static Future<bool> _decodeExternally(String source, String png, void Function(Process)? onProcess) async {
     if (Platform.isAndroid) {
       final ok = await _android.invokeMethod<bool>('decode', {'path': source, 'out': png});
       if (ok != true) throw const ConvertException("Couldn't read the image.");
-      return;
+      return false;
     }
     if (Platform.isWindows) {
       try {
-        return await _windowsImaging(source, png, 'png', onProcess);
+        await _windowsImaging(source, png, 'png', onProcess);
+        return false;
       } on ConvertException {
         // No HEIF/AV1 extension: try FFmpeg.
       }
     }
+    if (Platform.isMacOS) {
+      try {
+        await _macImaging(source, png, 'png', onProcess);
+        return true;
+      } on ConvertException {
+        // AVIF before macOS 13: try FFmpeg.
+      }
+    }
     if (await ffmpeg() != null) {
-      return _ffmpeg(['-i', source, '-frames:v', '1', png], onProcess);
+      await _ffmpeg(['-i', source, '-frames:v', '1', png], onProcess);
+      return false;
     }
     final heifDec = _which('heif-dec') ?? _which('heif-convert');
-    if (heifDec != null) return _run(heifDec, [source, png], onProcess);
-    throw const ConvertException("This computer can't read HEIC or AVIF pictures (no FFmpeg).");
+    if (heifDec != null) {
+      await _run(heifDec, [source, png], onProcess);
+      return false;
+    }
+    throw ConvertException(Platform.isMacOS
+        ? "macOS couldn't read this picture."
+        : "This computer can't read HEIC or AVIF pictures (no FFmpeg).");
   }
 
   static Future<void> _ffmpeg(List<String> args, void Function(Process)? onProcess) async {
@@ -379,6 +495,39 @@ abstract final class ImageConverter {
       final text = errors.toString().trim().split('\n').last;
       throw ConvertException(text.isEmpty ? '${p.basename(exe)} failed ($code)' : text);
     }
+  }
+
+  // ---- macOS imaging (sips, which uses ImageIO): HEIC/AVIF in and out ----
+
+  static const _sips = '/usr/bin/sips';
+
+  static Future<Set<String>>? _macFormats;
+
+  /// The formats sips writes here ('heic'; 'avif' on newer macOS).
+  static Future<Set<String>> _macWritable() => _macFormats ??= Process.run(_sips, ['--formats'])
+      .then((r) => parseSipsWritable('${r.stdout}'), onError: (Object _) => <String>{});
+
+  /// The writable formats in `sips --formats` output.
+  @visibleForTesting
+  static Set<String> parseSipsWritable(String output) => {
+        for (final m in RegExp(r'^\S+\s+(\w+)\s+Writable\s*$', multiLine: true).allMatches(output)) m.group(1)!,
+      };
+
+  /// Writes [input] as [format] ('png', 'heic' or 'avif') to [output]. sips
+  /// keeps the picture's orientation as a tag, and can end without an
+  /// error while writing nothing, so the output is checked.
+  static Future<void> _macImaging(String input, String output, String format, void Function(Process)? onProcess) async {
+    try {
+      await _run(_sips, [
+        '-s', 'format', format,
+        if (format != 'png') ...['-s', 'formatOptions', '90'],
+        input, '--out', output,
+      ], onProcess);
+      if (await File(output).exists()) return;
+    } on ConvertException {
+      // Said below.
+    }
+    throw ConvertException(format == 'png' ? "macOS couldn't read this picture." : "macOS couldn't write ${format.toUpperCase()}.");
   }
 
   // ---- Windows imaging (WinRT): HEIC/AVIF in, HEIC out ----
@@ -464,12 +613,18 @@ class ConvertException implements Exception {
 }
 
 /// In a background isolate: reads [input], turns it upright, resizes it and
-/// writes it as [format] to [output]. Returns the size written.
-(int, int) _dartStage(String input, String output, ImageFormat format, ResizeSpec? resize) {
+/// writes it as [format] to [output]. Returns the size written. With
+/// [pngExif] the orientation is read from the PNG's eXIf chunk, which the
+/// decoder skips; [flatten] puts the picture on white.
+(int, int) _dartStage(String input, String output, ImageFormat format, ResizeSpec? resize,
+    {bool pngExif = false, bool flatten = false}) {
   final bytes = File(input).readAsBytesSync();
   var image = img.decodeNamedImage(input, bytes) ?? img.decodeImage(bytes);
   if (image == null) throw const ConvertException("Couldn't read the image.");
+  final orientation = pngExif ? _pngOrientation(bytes) : null;
+  if (orientation != null) image.exif.imageIfd.orientation = orientation;
   image = img.bakeOrientation(image);
+  if (flatten) image = _flatten(image);
   if (image.format != img.Format.uint8 || image.hasPalette) {
     image = image.convert(format: img.Format.uint8, numChannels: image.hasAlpha ? 4 : 3);
   }
@@ -495,6 +650,22 @@ class ConvertException implements Exception {
   };
   File(output).writeAsBytesSync(encoded, flush: true);
   return format == ImageFormat.ico ? (256, 256) : (image.width, image.height);
+}
+
+/// The orientation in a PNG's eXIf chunk (before its pixels), if any.
+int? _pngOrientation(Uint8List png) {
+  final data = ByteData.sublistView(png);
+  var at = 8;
+  while (at + 8 <= png.length) {
+    final length = data.getUint32(at);
+    final type = String.fromCharCodes(png, at + 4, at + 8);
+    if (type == 'IDAT' || at + 12 + length > png.length) return null;
+    if (type == 'eXIf') {
+      return img.ExifData.fromInputBuffer(img.InputBuffer(png.sublist(at + 8, at + 8 + length))).imageIfd.orientation;
+    }
+    at += 12 + length;
+  }
+  return null;
 }
 
 /// JPEG has no transparency: put the picture on white.

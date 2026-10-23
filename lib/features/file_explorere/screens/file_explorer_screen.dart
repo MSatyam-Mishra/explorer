@@ -46,6 +46,9 @@ final _clicks = _Clicks();
 
 class _Clicks {
   PointerDeviceKind kind = PointerDeviceKind.touch;
+
+  /// Where the last pointer went down, for menus opened by Control-click.
+  Offset position = Offset.zero;
   String? lastPath;
   DateTime lastTime = DateTime(0);
   String? anchorPath;
@@ -59,6 +62,11 @@ class _Clicks {
 bool get _commandPressed => Platform.isMacOS
     ? HardwareKeyboard.instance.isMetaPressed
     : HardwareKeyboard.instance.isControlPressed;
+
+/// A Control-click on macOS, which right-clicks there (one-button mice,
+/// trackpads without secondary click).
+bool get _controlClick =>
+    Platform.isMacOS && _clicks.mouse && HardwareKeyboard.instance.isControlPressed;
 
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
@@ -355,7 +363,8 @@ class _FileExplorerUI extends StatelessWidget {
     } else if (command && key == LogicalKeyboardKey.keyX && selected.isNotEmpty) {
       clipboard.add(CutToClipboard(selected));
     } else if (command && key == LogicalKeyboardKey.keyV) {
-      if (clipboard.state is ClipboardReadyToPaste && inFolder) {
+      // On macOS files another app copied are looked at only now.
+      if ((clipboard.canPaste || Platform.isMacOS) && inFolder) {
         clipboard.add(PasteFromClipboard(state.path));
       }
     } else if (command && keys.isShiftPressed && key == LogicalKeyboardKey.keyN) {
@@ -377,7 +386,10 @@ class _FileExplorerUI extends StatelessWidget {
       }
     } else if (command && key == LogicalKeyboardKey.keyI && single != null) {
       fileActionsService.showInfoSheet(single, context);
-    } else if (key == LogicalKeyboardKey.delete && selected.isNotEmpty) {
+    } else if ((key == LogicalKeyboardKey.delete ||
+            // ⌘⌫ on macOS, where the delete key is backspace.
+            (Platform.isMacOS && command && key == LogicalKeyboardKey.backspace)) &&
+        selected.isNotEmpty) {
       fileActionsService.deleteFiles(context, selected);
     } else if (key == LogicalKeyboardKey.f2 && single != null) {
       fileActionsService.showRenameDialog(context, single);
@@ -385,9 +397,11 @@ class _FileExplorerUI extends StatelessWidget {
       bloc.add(ToggleSelectionMode(enable: false));
     } else if (key == LogicalKeyboardKey.escape && state.searchOpen) {
       bloc.add(CloseSearch());
-    } else if (key == LogicalKeyboardKey.backspace ||
+    } else if ((key == LogicalKeyboardKey.backspace && !Platform.isMacOS) ||
         (keys.isAltPressed && key == LogicalKeyboardKey.arrowLeft) ||
-        (command && key == LogicalKeyboardKey.arrowUp)) {
+        (command && key == LogicalKeyboardKey.arrowUp) ||
+        // ⌘[ goes back up on macOS; backspace there is the delete key.
+        (Platform.isMacOS && command && key == LogicalKeyboardKey.bracketLeft)) {
       final parent = ExplorerPaths.parentOf(state.path);
       if (parent == null) return KeyEventResult.ignored;
       bloc.add(LoadDirectory(parent));
@@ -628,9 +642,15 @@ class _FileExplorerUI extends StatelessWidget {
       return p.equals(dir, state.path) ? null : p.relative(dir, from: state.path);
     }
 
-    void onTap(FileSystemEntity e) => _clicks.mouse
-        ? _handleClick(context, state, e)
-        : _handleTap(context, state, e);
+    void onTap(FileSystemEntity e) {
+      if (_controlClick) {
+        _showItemMenu(context, state, e, _clicks.position);
+      } else if (_clicks.mouse) {
+        _handleClick(context, state, e);
+      } else {
+        _handleTap(context, state, e);
+      }
+    }
     void onLongPress(FileSystemEntity e) => _handleLongPress(context, state, e);
     GestureTapUpCallback? onSecondaryTap(FileSystemEntity e) {
       if (Desktop.isDesktop) {
@@ -657,9 +677,9 @@ class _FileExplorerUI extends StatelessWidget {
         context.read<ClipboardBloc>().add(TransferFiles(paths, folder, move: move));
 
     // Every item can be dragged (with the rest of the selection); folders
-    // take drops.
+    // take drops, but not macOS packages (apps), which would be damaged.
     Widget dragAndDrop(FileSystemEntity entity, Widget item) {
-      final target = entity is Directory
+      final target = entity is Directory && !FileActionsService.isPackage(entity)
           ? FileDropTarget(
               folder: entity.path,
               onDrop: (paths, move) => drop(paths, entity.path, move),
@@ -792,12 +812,16 @@ class _FileExplorerUI extends StatelessWidget {
                 DropHighlight(active: hovering, radius: 0, child: scroller),
           );
     return Listener(
-      // Before the item's tap fires: was it a mouse or a finger?
-      onPointerDown: (event) => _clicks.kind = event.kind,
+      // Before the item's tap fires: was it a mouse or a finger, and where?
+      onPointerDown: (event) => _clicks
+        ..kind = event.kind
+        ..position = event.position,
       child: GestureDetector(
         // Only where no item took the click: the space around them.
         onTap: () {
-          if (_clicks.mouse && state.selectedItems.isNotEmpty) {
+          if (_controlClick) {
+            _showFolderMenu(context, state, _clicks.position);
+          } else if (_clicks.mouse && state.selectedItems.isNotEmpty) {
             bloc.add(ToggleSelectionMode(enable: false));
           }
         },
@@ -810,19 +834,23 @@ class _FileExplorerUI extends StatelessWidget {
     );
   }
 
-  /// Opens a folder or file, as a tap does.
+  /// Opens a folder or file, as a tap does. macOS packages (apps, document
+  /// packages) and installers open with the system, as in Finder.
   Future<void> _open(
     BuildContext context,
     FileExplorerLoaded state,
     FileSystemEntity entity,
   ) async {
     final bloc = context.read<FileExplorerBloc>();
-    if (entity is Directory) {
+    if (entity is Directory && !FileActionsService.isPackage(entity)) {
       bloc.add(LoadDirectory(entity.path));
       return;
     }
     if (state.selectedItems.isNotEmpty) {
       bloc.add(ToggleSelectionMode(enable: false));
+    }
+    if (FileActionsService.opensWithMac(entity)) {
+      return fileActionsService.openPackage(context, entity);
     }
     final result = await FileOpener.open(context, entity as File);
     // Only re-list when the viewer changed the folder (saved a copy...).
@@ -897,6 +925,8 @@ class _FileExplorerUI extends StatelessWidget {
       entity,
       position,
       onOpen: () => _open(context, state, entity),
+      onShowContents: () =>
+          context.read<FileExplorerBloc>().add(LoadDirectory(entity.path)),
     );
   }
 
@@ -949,7 +979,7 @@ class _FileExplorerUI extends StatelessWidget {
             label: 'Delete',
             icon: LucideIcons.trash2,
             destructive: true,
-            shortcut: 'Delete'),
+            shortcut: FileActionsService.deleteShortcut),
       ],
     );
     if (action == null || !context.mounted) return;
@@ -982,7 +1012,8 @@ class _FileExplorerUI extends StatelessWidget {
     final bloc = context.read<FileExplorerBloc>();
     final clipboard = context.read<ClipboardBloc>();
     final inFolder = !ExplorerPaths.isWindowsRoots(state.path);
-    final canPaste = inFolder && clipboard.state is ClipboardReadyToPaste;
+    // Also files another app copied (macOS), read when pasting.
+    final canPaste = inFolder && clipboard.canPaste;
     final action = await ExplorerMenu.showAt<Object>(
       context,
       position,
@@ -1175,7 +1206,10 @@ class _FolderSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final folders = entities.whereType<Directory>().length;
+    // macOS packages (apps) count as files, as Finder shows them.
+    final folders = entities
+        .where((e) => e is Directory && !FileActionsService.isPackage(e))
+        .length;
     final files = entities.length - folders;
     final parts = [
       if (folders > 0) '$folders ${folders == 1 ? 'folder' : 'folders'}',

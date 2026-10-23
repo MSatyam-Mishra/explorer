@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:explorer/core/platform/desktop.dart';
+import 'package:explorer/core/platform/macos_files.dart';
+import 'package:explorer/core/platform/macos_writable.dart';
 import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -115,6 +117,9 @@ class _FileDropTargetState extends State<FileDropTarget> {
         final allowed = event.session.allowedOperations;
         final wanted = move ? DropOperation.move : DropOperation.copy;
         if (allowed.contains(wanted)) return wanted;
+        // macOS narrows a drag's operations by the keys held, and Cmd
+        // leaves none that read here; drags from this app allow both.
+        if (Platform.isMacOS && allowed.isEmpty && sources.isNotEmpty) return wanted;
         return allowed.contains(DropOperation.copy) ? DropOperation.copy : DropOperation.none;
       },
       onPerformDrop: (event) async {
@@ -156,9 +161,22 @@ class _FileDropTargetState extends State<FileDropTarget> {
 
 /// Whether dropping [source] into [destination] moves it, as in File
 /// Explorer: Ctrl copies, Shift moves; otherwise a move on the same drive
-/// and a copy to another one. Files from other apps are copied.
+/// and a copy to another one. Files from other apps are copied. On macOS
+/// it's as in Finder: Option copies, Cmd moves, and otherwise a move within
+/// a volume and a copy to another one; what can't be taken from its folder
+/// (a read-only volume, a folder that isn't the user's) is always copied.
 bool dropMoves(String? source, String destination, {required bool fromThisApp}) {
   final keys = HardwareKeyboard.instance;
+  if (Platform.isMacOS) {
+    if (keys.isAltPressed) return false;
+    // The system volume shares its device id with the user's, so this
+    // comes before the volume check.
+    if (source != null && macosCanWriteIn(p.dirname(source)) == false) return false;
+    if (keys.isMetaPressed) return true;
+    if (!fromThisApp || source == null) return false;
+    // "/." so a folder that's a link counts where it points.
+    return MacosFiles.sameVolume(source, p.join(destination, '.')) ?? false;
+  }
   if (keys.isControlPressed || keys.isMetaPressed) return false;
   if (keys.isShiftPressed) return true;
   if (!fromThisApp || source == null) return false;

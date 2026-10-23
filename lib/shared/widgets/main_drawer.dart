@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:explorer/core/app_licenses.dart';
@@ -304,6 +305,12 @@ class _SidebarHeader extends StatelessWidget {
   }
 }
 
+/// Whether a /Volumes entry on macOS is a drive to list: hidden and system
+/// entries (.timemachine, com.apple.TimeMachine.localsnapshots) aren't.
+@visibleForTesting
+bool isListedMacVolume(String name) =>
+    !name.startsWith('.') && !name.startsWith('com.apple.');
+
 /// Linux and macOS: the home folder, the whole file system and mounted
 /// drives (USB sticks, other disks).
 class _UnixStorageSection extends StatefulWidget {
@@ -314,7 +321,30 @@ class _UnixStorageSection extends StatefulWidget {
 }
 
 class _UnixStorageSectionState extends State<_UnixStorageSection> {
-  late final List<Directory> _volumes = _findVolumes();
+  late List<Directory> _volumes = _findVolumes();
+
+  /// macOS: lists /Volumes again when a drive or disk image is mounted or
+  /// ejected.
+  StreamSubscription<FileSystemEvent>? _volumeWatch;
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isMacOS && !Platform.environment.containsKey('FLUTTER_TEST')) {
+      _volumeWatch = Directory('/Volumes').watch().listen(
+        (_) {
+          if (mounted) setState(() => _volumes = _findVolumes());
+        },
+        onError: (Object e) => debugPrint('Volumes watch failed: $e'),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _volumeWatch?.cancel();
+    super.dispose();
+  }
 
   static List<Directory> _findVolumes() {
     final user = Platform.environment['USER'];
@@ -325,7 +355,11 @@ class _UnixStorageSectionState extends State<_UnixStorageSection> {
     for (final parent in parents) {
       try {
         for (final entity in Directory(parent).listSync(followLinks: false)) {
-          if (entity is Directory) found.add(entity);
+          if (entity is Directory &&
+              (!Platform.isMacOS ||
+                  isListedMacVolume(p.basename(entity.path)))) {
+            found.add(entity);
+          }
         }
       } on FileSystemException {
         // Missing or unreadable.

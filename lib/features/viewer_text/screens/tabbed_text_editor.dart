@@ -193,10 +193,18 @@ class _TabbedTextEditorScreenState extends State<TabbedTextEditorScreen> {
         bindings: {
           const SingleActivator(LogicalKeyboardKey.keyS, control: true): _saveCurrent,
           const SingleActivator(LogicalKeyboardKey.keyS, meta: true): _saveCurrent,
-          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
-              _current.key.currentState?.toggleFind(),
-          const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
-              _current.key.currentState?.toggleFind(replace: true),
+          // macOS: ⌘F, and ⌥⌘F to replace (⌘H hides the app).
+          if (Platform.isMacOS) ...{
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
+                _current.key.currentState?.toggleFind(),
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true, alt: true):
+                () => _current.key.currentState?.toggleFind(replace: true),
+          } else ...{
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+                _current.key.currentState?.toggleFind(),
+            const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
+                _current.key.currentState?.toggleFind(replace: true),
+          },
         },
         child: ExplorerScaffold(
           title: p.basename(_current.file.path),

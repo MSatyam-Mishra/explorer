@@ -5,6 +5,7 @@ import 'package:explorer/core/platform/background_mode.dart';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/services/background_tasks.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
+import 'package:explorer/features/viewer_office/common/viewer_ui.dart' show showViewerConfirm;
 import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -14,6 +15,39 @@ import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 /// window was closed (see [BackgroundMode]).
 class TasksView extends StatelessWidget {
   const TasksView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // macOS: Quit anyway asks first in a dialog. The view sits above the
+    // app's navigator (hidden behind it), so it gets one of its own.
+    if (Platform.isMacOS) {
+      return HeroControllerScope.none(
+        child: Navigator(
+          onGenerateRoute: (settings) => PageRouteBuilder<void>(
+            settings: settings,
+            pageBuilder: (context, _, _) => const _TasksPage(),
+          ),
+        ),
+      );
+    }
+    return const _TasksPage();
+  }
+}
+
+class _TasksPage extends StatelessWidget {
+  const _TasksPage();
+
+  /// macOS: quits once the user agrees to stop what's still running.
+  Future<void> _quitAnyway(BuildContext context, int running) async {
+    final quit = await showViewerConfirm(
+      context,
+      title: running == 1 ? 'Quit and stop 1 task?' : 'Quit and stop $running tasks?',
+      message: "Copies, conversions and downloads that haven't finished stop where they are.",
+      confirmLabel: 'Quit',
+      destructive: true,
+    );
+    if (quit) await BackgroundMode.instance.quit();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -99,10 +133,18 @@ class TasksView extends StatelessWidget {
                   child: Row(
                     children: [
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: BackgroundMode.instance.close,
-                          child: Text(running == 0 ? 'Quit' : (Platform.isWindows ? 'Hide' : 'Close')),
-                        ),
+                        // macOS: Close would only show this view again
+                        // (as the first Cmd+Q does), so it quits instead.
+                        child: Platform.isMacOS && running > 0
+                            ? OutlinedButton.icon(
+                                onPressed: () => _quitAnyway(context, running),
+                                icon: const Icon(LucideIcons.power, size: 16),
+                                label: const Text('Quit anyway'),
+                              )
+                            : OutlinedButton(
+                                onPressed: BackgroundMode.instance.close,
+                                child: Text(running == 0 ? 'Quit' : (Platform.isWindows ? 'Hide' : 'Close')),
+                              ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(

@@ -32,8 +32,8 @@ class ImageText {
   /// Windows' OCR JSON (see [ImageTextReader]).
   static ImageText? fromWindowsJson(String json) => fromMap(jsonDecode(json));
 
-  /// `{w, h, lines: [{t, words: [{t, x, y, w, h}]}]}`, from Windows' OCR or
-  /// Android's ML Kit.
+  /// `{w, h, lines: [{t, words: [{t, x, y, w, h}]}]}`, from Windows' OCR,
+  /// Android's ML Kit or macOS's Vision.
   static ImageText? fromMap(Object? data) {
     if (data is! Map || data['error'] != null) return null;
     List<Object?> list(Object? value) => value is List ? value : [if (value != null) value];
@@ -69,10 +69,11 @@ class ImageText {
 
 /// Finds the text in images on the device: Windows' own OCR
 /// (Windows.Media.Ocr, as the Photos app uses), ML Kit from Google Play
-/// services on Android, and Tesseract on Linux (the app's copy, else the
-/// system's).
+/// services on Android, Apple's Vision on macOS (as Live Text uses), and
+/// Tesseract on Linux (the app's copy, else the system's).
 abstract final class ImageTextReader {
-  static const _android = MethodChannel('explorer/image_text');
+  /// Android's and macOS's native side.
+  static const _native = MethodChannel('explorer/image_text');
 
   static final _cache = <String, ImageText?>{};
   static String? _tesseract;
@@ -83,7 +84,7 @@ abstract final class ImageTextReader {
   static bool get enabled => supported && !Platform.environment.containsKey('FLUTTER_TEST');
 
   static bool get supported {
-    if (Platform.isWindows || Platform.isAndroid) return true;
+    if (Platform.isWindows || Platform.isAndroid || Platform.isMacOS) return true;
     if (Platform.isLinux) return _tesseractPath != null;
     return false;
   }
@@ -121,8 +122,8 @@ abstract final class ImageTextReader {
     try {
       text = Platform.isWindows
           ? await _windows(file.path)
-          : Platform.isAndroid
-              ? ImageText.fromMap(await _android.invokeMethod<Object?>('read', {'path': file.path}))
+          : Platform.isAndroid || Platform.isMacOS
+              ? ImageText.fromMap(await _native.invokeMethod<Object?>('read', {'path': file.path}))
               : await _linux(file.path);
     } catch (_) {
       text = null;

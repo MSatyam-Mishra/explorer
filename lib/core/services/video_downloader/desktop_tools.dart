@@ -12,17 +12,20 @@ import 'downloader_backend.dart';
 /// Programs the desktop video downloader downloads into [directory] when the
 /// computer doesn't have them:
 /// * FFmpeg, which merges video and audio and converts to MP3, from
-///   yt-dlp's FFmpeg builds (patched for yt-dlp);
+///   yt-dlp's FFmpeg builds (patched for yt-dlp), or on macOS from Martin
+///   Riedl's signed builds (ffmpeg.martin-riedl.de);
 /// * Deno, the JavaScript runtime yt-dlp needs for YouTube.
 /// yt-dlp itself comes from YtDlpInstaller. Each download is checked
 /// against the SHA-256 sums its project publishes.
 class DesktopTools {
   DesktopTools(
     this.directory, {
-    this.ffmpegBase =
-        'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download',
+    String? ffmpegBase,
     this.denoBase = 'https://github.com/denoland/deno/releases/latest/download',
-  });
+  }) : ffmpegBase = ffmpegBase ??
+            (Platform.isMacOS
+                ? 'https://ffmpeg.martin-riedl.de/redirect/latest'
+                : 'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download');
 
   final Directory directory;
 
@@ -32,8 +35,30 @@ class DesktopTools {
 
   static String _exe(String name) => Platform.isWindows ? '$name.exe' : name;
 
-  /// yt-dlp's FFmpeg build for this computer; null where there is none
-  /// (macOS: install FFmpeg with Homebrew).
+  /// Homebrew's (Apple silicon, then Intel) and MacPorts' program folders.
+  static const macosToolFolders = ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin'];
+
+  /// Finds the program [name] on PATH, then in [alsoIn]. Apps opened from
+  /// the macOS Finder or Dock get only launchd's short PATH
+  /// (/usr/bin:/bin:/usr/sbin:/sbin), so there [macosToolFolders] are
+  /// searched too.
+  static String? which(String name, {Iterable<String> alsoIn = const []}) {
+    final env = Platform.environment;
+    final dirs = <String>[
+      ...?(env['PATH'] ?? env['Path'])?.split(Platform.isWindows ? ';' : ':'),
+      if (Platform.isMacOS) ...macosToolFolders,
+      ...alsoIn,
+    ];
+    for (final dir in dirs) {
+      if (dir.trim().isEmpty) continue;
+      final candidate = p.join(dir.trim(), _exe(name));
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  /// The FFmpeg build for this computer (yt-dlp's archive, or on macOS the
+  /// build's folder below [ffmpegBase]); null where there is none.
   static String? ffmpegAsset() {
     final abi = Abi.current();
     return switch (abi) {
@@ -41,9 +66,15 @@ class DesktopTools {
       Abi.windowsArm64 => 'ffmpeg-master-latest-winarm64-gpl-shared.zip',
       Abi.linuxX64 => 'ffmpeg-master-latest-linux64-gpl.tar.xz',
       Abi.linuxArm64 => 'ffmpeg-master-latest-linuxarm64-gpl.tar.xz',
+      Abi.macosArm64 => 'macos/arm64/release',
+      Abi.macosX64 => 'macos/amd64/release',
       _ => null,
     };
   }
+
+  /// Where FFmpeg is downloaded from when that isn't GitHub, for the
+  /// question before downloading.
+  static String? get ffmpegSite => Platform.isMacOS ? 'ffmpeg.martin-riedl.de' : null;
 
   /// Deno's release for this computer.
   static String? denoAsset() => switch (Abi.current()) {
@@ -58,8 +89,19 @@ class DesktopTools {
 
   /// About how much each download is and takes once unpacked, for the
   /// question before downloading (the real sizes come with the download).
-  static int get ffmpegDownloadBytes => Platform.isWindows ? 92000000 : 157000000;
-  static int get ffmpegDiskBytes => Platform.isWindows ? 180000000 : 280000000;
+  static int get ffmpegDownloadBytes {
+    if (Platform.isWindows) return 92000000;
+    // macOS: ffmpeg and ffprobe, a zip each.
+    if (Platform.isMacOS) return Abi.current() == Abi.macosX64 ? 68000000 : 57000000;
+    return 157000000;
+  }
+
+  static int get ffmpegDiskBytes {
+    if (Platform.isWindows) return 180000000;
+    if (Platform.isMacOS) return Abi.current() == Abi.macosX64 ? 190000000 : 133000000;
+    return 280000000;
+  }
+
   static const denoDownloadBytes = 42000000;
   static const denoDiskBytes = 115000000;
 
@@ -80,21 +122,26 @@ class DesktopTools {
     if (asset == null) {
       throw const DownloaderException(
           'Explorer has no FFmpeg download for this computer. Install FFmpeg '
-          '(on a Mac: brew install ffmpeg) and reopen the downloader.');
+          'and reopen the downloader.');
     }
-    final sums = await _getText(Uri.parse('$ffmpegBase/checksums.sha256'));
-    final expected = _hashFor(sums, asset);
-    if (expected == null) {
-      throw DownloaderException('The FFmpeg builds list no checksum for $asset.');
+    final List<_Download> downloads;
+    if (Platform.isMacOS) {
+      downloads = await _macFfmpegDownloads(asset);
+    } else {
+      final sums = await _getText(Uri.parse('$ffmpegBase/checksums.sha256'));
+      final expected = _hashFor(sums, asset);
+      if (expected == null) {
+        throw DownloaderException('The FFmpeg builds list no checksum for $asset.');
+      }
+      downloads = [(url: Uri.parse('$ffmpegBase/$asset'), sha256: expected)];
     }
     await _install(
       name: 'FFmpeg',
-      url: Uri.parse('$ffmpegBase/$asset'),
-      asset: asset,
-      sha256: expected,
+      downloads: downloads,
       target: _ffmpegDir,
       // The archive holds ffmpeg-…/bin, doc, include, lib: keep bin, but
       // not ffplay (a player; in the static Linux build another ~130 MB).
+      // The macOS zips hold the program alone.
       pick: (unpacked) async {
         final exe = await _find(unpacked, _exe('ffmpeg'));
         if (exe == null) return null;
@@ -106,6 +153,21 @@ class DesktopTools {
       onProgress: onProgress,
       isCancelled: isCancelled,
     );
+  }
+
+  /// macOS: ffmpeg and ffprobe (yt-dlp uses both), a zip each. The
+  /// "latest" link redirects to the build's folder, which also holds each
+  /// zip's .sha256, so both come from the same build.
+  Future<List<_Download>> _macFfmpegDownloads(String asset) async {
+    final build = await _redirectTarget(Uri.parse('$ffmpegBase/$asset/ffmpeg.zip'));
+    return [
+      for (final zip in const ['ffmpeg.zip', 'ffprobe.zip'])
+        (
+          url: build.resolve(zip),
+          sha256: _hashFor(await _getText(build.resolve('$zip.sha256')), zip) ??
+              (throw DownloaderException('The FFmpeg build lists no checksum for $zip.')),
+        ),
+    ];
   }
 
   Future<void> installDeno({
@@ -124,9 +186,7 @@ class DesktopTools {
     }
     await _install(
       name: 'Deno',
-      url: Uri.parse('$denoBase/$asset'),
-      asset: asset,
-      sha256: expected,
+      downloads: [(url: Uri.parse('$denoBase/$asset'), sha256: expected)],
       target: _denoDir,
       pick: (unpacked) async => unpacked,
       into: null,
@@ -142,14 +202,13 @@ class DesktopTools {
     }
   }
 
-  /// Downloads [url] (checked against [sha256]), unpacks it and moves the
-  /// folder [pick] chooses to [target] (or [target]/[into]), replacing what
-  /// was there only once everything worked.
+  /// Downloads [downloads] (each checked against its sum), unpacks them
+  /// into one folder and moves the folder [pick] chooses to [target] (or
+  /// [target]/[into]), replacing what was there only once everything
+  /// worked.
   Future<void> _install({
     required String name,
-    required Uri url,
-    required String asset,
-    required String sha256,
+    required List<_Download> downloads,
     required Directory target,
     required Future<Directory?> Function(Directory unpacked) pick,
     required String? into,
@@ -159,12 +218,24 @@ class DesktopTools {
     await directory.create(recursive: true);
     final work = await directory.createTemp('.download-');
     try {
-      final archive = File(p.join(work.path, asset));
-      await _download(url, archive, sha256,
-          name: name, onProgress: onProgress, isCancelled: isCancelled);
       final unpacked = Directory(p.join(work.path, 'unpacked'));
       await unpacked.create();
-      await _extract(archive, unpacked);
+      // Several downloads show as one: the ones still to come are taken to
+      // be about as big as the current one (as ffmpeg and ffprobe are).
+      var done = 0;
+      for (final (index, download) in downloads.indexed) {
+        final left = downloads.length - index - 1;
+        final archive = File(p.join(work.path, p.basename(download.url.path)));
+        await _download(download.url, archive, download.sha256,
+            name: name,
+            onProgress: onProgress == null
+                ? null
+                : (received, total) =>
+                    onProgress(done + received, total == null ? null : done + total * (1 + left)),
+            isCancelled: isCancelled);
+        done += await archive.length();
+        await _extract(archive, unpacked);
+      }
       final picked = await pick(unpacked);
       if (picked == null) {
         throw DownloaderException("The $name download didn't contain the program.");
@@ -304,11 +375,35 @@ class DesktopTools {
       }
       return body;
     } on SocketException catch (e) {
-      throw DownloaderException("Couldn't reach GitHub: ${e.message}");
+      throw DownloaderException("Couldn't reach ${_site(url)}: ${e.message}");
     } finally {
       client.close(force: true);
     }
   }
+
+  /// Where [url] redirects to (a "latest" link). Asked with GET: the
+  /// server doesn't always answer HEAD.
+  static Future<Uri> _redirectTarget(Uri url) async {
+    final client = _client();
+    try {
+      final request = await client.getUrl(url);
+      request.followRedirects = false;
+      final response = await request.close();
+      await response.drain<void>();
+      final location = response.headers.value(HttpHeaders.locationHeader);
+      if (!response.isRedirect || location == null) {
+        throw DownloaderException(
+            "Couldn't find the latest FFmpeg build (the server said ${response.statusCode}).");
+      }
+      return url.resolve(location);
+    } on SocketException catch (e) {
+      throw DownloaderException("Couldn't reach ${_site(url)}: ${e.message}");
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static String _site(Uri url) => url.host.endsWith('github.com') ? 'GitHub' : url.host;
 
   /// The hash for [asset] in a `hash  name` checksum list.
   static String? _hashFor(String sums, String asset) {
@@ -321,3 +416,6 @@ class DesktopTools {
     return null;
   }
 }
+
+/// A file to download and the SHA-256 it must have.
+typedef _Download = ({Uri url, String sha256});

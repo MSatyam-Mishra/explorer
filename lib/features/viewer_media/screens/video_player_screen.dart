@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:chewie/chewie.dart';
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/features/viewer_kit/viewer_kit.dart';
 import 'package:explorer/shared/widgets/docked_glossy_top_bar.dart';
 import 'package:explorer/shared/widgets/explorer_scaffold.dart';
@@ -21,8 +22,9 @@ class VideoPlayerScreen extends StatefulWidget {
 
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   /// Windows and Linux use media_kit's own player (video_player has no
-  /// implementation there).
-  static bool get _desktop => Platform.isWindows || Platform.isLinux;
+  /// implementation there), and so does macOS, where AVFoundation can't
+  /// open MKV, WebM or AVI.
+  static bool get _desktop => Desktop.mediaKitVideo;
 
   VideoPlayerController? _videoPlayerController;
   ChewieController? _chewieController;

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:explorer/core/router/file_opener.dart';
+import 'package:explorer/core/services/video_downloader/downloader_backend.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/core/services/video_downloader/ytdlp_models.dart';
 import 'package:explorer/shared/layout/adaptive_layout.dart';
@@ -59,15 +60,43 @@ class _VideoDownloaderScreenState extends State<VideoDownloaderScreen> {
   }
 
   Future<void> _init() async {
+    final reopened = _controller.isStarted;
     await _controller.start();
     if (!mounted || !_controller.isSupported) return;
-    if (!await _beforeUse()) return;
+    if (reopened && Platform.isMacOS) await _refreshFfmpeg();
+    if (!mounted || !await _beforeUse()) return;
     final url = widget.initialUrl?.trim();
     if (url != null && url.isNotEmpty) {
       await _panelKey.currentState?.fetch();
     } else if (Platform.isAndroid) {
       // Start yt-dlp now so the first fetch is quick.
       unawaited(_controller.ensureReady().catchError((Object _) {}));
+    }
+  }
+
+  /// Looks for FFmpeg again: it may have been installed (on a Mac, with
+  /// Homebrew) since the downloader was last open, so the engine may need
+  /// less. Once the engine download was agreed to, it reports the engine
+  /// itself: only what's said about FFmpeg changes then.
+  Future<void> _refreshFfmpeg() async {
+    if (_controller.backendStatus == null) return;
+    try {
+      final now = await _controller.backend.status();
+      // Read after the wait: the engine download may have finished meanwhile.
+      final current = _controller.backendStatus;
+      if (!mounted || current == null) return;
+      setState(() => _controller.backendStatus = _controller.engineAllowed
+          ? BackendStatus(
+              ready: current.ready,
+              needsSetup: current.needsSetup,
+              hasFfmpeg: now.hasFfmpeg,
+              ffmpegNote: now.ffmpegNote,
+              setupNote: current.setupNote,
+              engine: current.engine,
+            )
+          : now);
+    } catch (_) {
+      // Keep what was found before.
     }
   }
 

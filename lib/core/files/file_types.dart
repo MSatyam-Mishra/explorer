@@ -122,6 +122,31 @@ abstract final class FileTypes {
   static const font = {'ttf', 'otf'};
   static const package = {'apk', 'exe', 'msi', 'dmg', 'deb', 'rpm', 'appx'};
 
+  /// Installer files macOS opens in Installer. Elsewhere a .pkg is often
+  /// something else (a game package), so they stay unknown in [kindOf].
+  static const macInstaller = {'pkg', 'mpkg'};
+
+  /// Folders macOS shows and opens as one item, as Finder does: apps,
+  /// plug-ins and document packages. Frameworks and .lproj folders are
+  /// ordinary folders there.
+  static const macPackage = {
+    // Apps, extensions and plug-ins
+    'app', 'appex', 'bundle', 'plugin', 'kext', 'prefpane', 'qlgenerator',
+    'mdimporter', 'saver', 'wdgt', 'xpc', 'component', 'scptd', 'workflow',
+    'action',
+    // Documents and libraries
+    'rtfd', 'pages', 'numbers', 'key', 'photoslibrary', 'photolibrary',
+    'musiclibrary', 'imovielibrary', 'theater', 'fcpbundle', 'logicx', 'band',
+    'xcarchive', 'xcodeproj', 'xcworkspace', 'playground', 'docset',
+    'mlpackage', 'sparsebundle', 'download',
+    // Installers kept as folders (older .pkg and .mpkg)
+    'pkg', 'mpkg',
+  };
+
+  /// Whether a folder at [path] is a macOS package, going by its name.
+  /// Callers check that they are on macOS.
+  static bool isMacPackage(String path) => macPackage.contains(extensionOf(path));
+
   static const code = {
     // Web
     'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'css', 'scss', 'sass', 'less',

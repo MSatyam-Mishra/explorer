@@ -7,10 +7,10 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:open_filex/open_filex.dart';
 
-/// Windows and Linux: plays [file] with media_kit (libmpv), which decodes
-/// whatever FFmpeg can (MKV, HEVC, AV1, VP9, old AVI and WMV...) with
-/// hardware decoding where available. Desktop controls: seek bar, volume,
-/// fullscreen, and keys (Space, ←/→, ↑/↓, F, M).
+/// Windows, Linux and macOS: plays [file] with media_kit (libmpv), which
+/// decodes whatever FFmpeg can (MKV, HEVC, AV1, VP9, old AVI and WMV...)
+/// with hardware decoding where available. Desktop controls: seek bar,
+/// volume, fullscreen, and keys (Space, ←/→, ↑/↓, F, M).
 class DesktopVideoPlayer extends StatefulWidget {
   const DesktopVideoPlayer({super.key, required this.file});
 
