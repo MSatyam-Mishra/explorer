@@ -3,8 +3,10 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
+#include <string>
 
 #include "win32_window.h"
 
@@ -28,6 +30,16 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // The notification-area icon shown while work goes on with the window
+  // closed ("explorer/tray": show, hide, notify; it sends clicked, open,
+  // quit).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> tray_channel_;
+  bool tray_visible_ = false;
+  void ShowTray(const std::wstring& tooltip);
+  void HideTray();
+  void NotifyTray(const std::wstring& title, const std::wstring& text);
+  void ShowTrayMenu();
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

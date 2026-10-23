@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/core/services/background_tasks.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -216,6 +218,50 @@ void main() {
     bloc.add(ChangeGroupBy(GroupBy.none));
     await settle(tester);
     expect((bloc.state as FileExplorerLoaded).groups, isEmpty);
+  });
+
+  testWidgets('right-click a picture: Convert to and Resize', (tester) async {
+    final photo = p.join(root.path, 'photo.png');
+    await tester.runAsync(() => File(photo).writeAsBytes(img.encodePng(img.Image(width: 400, height: 200))));
+    addTearDown(BackgroundTasks.instance.reset);
+    await open(tester);
+
+    Future<void> waitForTasks() async {
+      for (var i = 0; i < 100 && (i < 2 || BackgroundTasks.instance.hasRunning); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    await click(tester, 'photo.png', buttons: kSecondaryButton);
+    await settle(tester);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.moveTo(tester.getCenter(find.text('Convert to')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('PNG'), findsNothing, reason: "the picture's own format");
+    for (final label in ['JPEG', 'WebP', 'HEIC', 'TIFF', 'ICO (icon)', 'SVG']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+    await tester.tap(find.text('JPEG'));
+    await waitForTasks();
+    expect(File(p.join(root.path, 'photo.jpg')).existsSync(), isTrue);
+
+    await tester.pump(const Duration(seconds: 1));
+    await click(tester, 'photo.png', buttons: kSecondaryButton);
+    await settle(tester);
+    await tester.tap(find.text('Resize…'));
+    await settle(tester);
+    expect(find.text('Now 400 × 200 px'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Width'), '100');
+    await tester.pump();
+    expect(find.widgetWithText(TextField, '50'), findsOneWidget, reason: 'height follows');
+    await tester.tap(find.widgetWithText(FilledButton, 'Resize'));
+    await waitForTasks();
+    final resized = File(p.join(root.path, 'photo (100×50).png'));
+    expect(resized.existsSync(), isTrue);
+    final decoded = await tester.runAsync(() async => img.decodePng(await resized.readAsBytes()));
+    expect([decoded!.width, decoded.height], [100, 50]);
   });
 
   testWidgets('new windows: header button, Ctrl+N, folders and files', (tester) async {

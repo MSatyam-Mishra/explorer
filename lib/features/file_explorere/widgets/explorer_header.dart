@@ -620,6 +620,7 @@ class _SearchFieldState extends State<_SearchField> {
 class ExplorerSelectionHeader extends StatelessWidget {
   const ExplorerSelectionHeader({
     super.key,
+    this.hasImages = false,
     required this.count,
     required this.total,
     required this.onClose,
@@ -634,6 +635,9 @@ class ExplorerSelectionHeader extends StatelessWidget {
   final int count;
   final int total;
   final bool wide;
+
+  /// Pictures are selected: convert and resize them.
+  final bool hasImages;
   final VoidCallback onClose;
   final VoidCallback onShare;
   final VoidCallback onSendNearby;
@@ -726,6 +730,21 @@ class ExplorerSelectionHeader extends StatelessWidget {
                           icon: LucideIcons.scissors,
                         ),
                       ],
+                      if (hasImages) ...[
+                        ExplorerMenu.divider(),
+                        ExplorerMenu.item(
+                          anchor,
+                          value: SelectionMenuAction.convert,
+                          label: 'Convert to…',
+                          icon: LucideIcons.fileImage,
+                        ),
+                        ExplorerMenu.item(
+                          anchor,
+                          value: SelectionMenuAction.resize,
+                          label: 'Resize…',
+                          icon: LucideIcons.scaling,
+                        ),
+                      ],
                       if (single) ...[
                         ExplorerMenu.item(
                           anchor,
@@ -768,4 +787,6 @@ enum SelectionMenuAction {
   rename,
   properties,
   allActions,
+  convert,
+  resize,
 }

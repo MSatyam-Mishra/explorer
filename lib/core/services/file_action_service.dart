@@ -6,6 +6,7 @@ import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/entity_meta.dart';
 import 'package:explorer/features/file_explorere/widgets/explorer_menu.dart';
+import 'package:explorer/features/file_explorere/widgets/image_actions.dart';
 import 'package:explorer/features/file_explorere/widgets/info_row.dart';
 import 'package:explorer/shared/ui/app_ui.dart';
 
@@ -47,6 +48,9 @@ class FileActionsService {
     required VoidCallback onOpen,
   }) async {
     final isFile = entity is File;
+    final images = ImageActions.imagesIn([entity]);
+    final imageEntries = images.isEmpty ? const <PopupMenuEntry<Object>>[] : await ImageActions.menuEntries(context, images);
+    if (!context.mounted) return;
     final action = await ExplorerMenu.showAt<Object>(
       context,
       position,
@@ -66,6 +70,10 @@ class FileActionsService {
               value: _EntityAction.openWith,
               label: 'Open with…',
               icon: LucideIcons.squareArrowOutUpRight),
+        if (imageEntries.isNotEmpty) ...[
+          ExplorerMenu.divider(),
+          ...imageEntries,
+        ],
         ExplorerMenu.divider(),
         ExplorerMenu.item(context,
             value: _EntityAction.copy,
@@ -106,6 +114,7 @@ class FileActionsService {
     );
     if (action == null || !context.mounted) return;
     if (action is ShareMethod) return shareVia(context, action, [entity]);
+    if (await ImageActions.handle(context, action, images)) return;
     switch (action as _EntityAction) {
       case _EntityAction.open:
         onOpen();
@@ -249,6 +258,19 @@ class FileActionsService {
                   label: 'Share',
                   onTap: () => run(() => share(context, entity)),
                 ),
+              if (ImageActions.imagesIn([entity]).isNotEmpty) ...[
+                _SheetAction(
+                  icon: LucideIcons.fileImage,
+                  label: 'Convert to…',
+                  detail: 'PNG, JPEG, WebP, HEIC…',
+                  onTap: () => run(() => ImageActions.chooseFormat(context, [entity.path])),
+                ),
+                _SheetAction(
+                  icon: LucideIcons.scaling,
+                  label: 'Resize…',
+                  onTap: () => run(() => ImageActions.resize(context, [entity.path])),
+                ),
+              ],
               _SheetAction(
                 icon: LucideIcons.radio,
                 label: 'Send nearby',

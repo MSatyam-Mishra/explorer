@@ -1,8 +1,42 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+#include <shellapi.h>
+
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "resource.h"
+
+namespace {
+
+constexpr UINT kTrayMessage = WM_APP + 1;
+constexpr UINT kTrayId = 1;
+constexpr UINT kMenuTasks = 1;
+constexpr UINT kMenuOpen = 2;
+constexpr UINT kMenuQuit = 3;
+
+std::wstring Utf16(const std::string& utf8) {
+  if (utf8.empty()) return std::wstring();
+  int length = MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
+                                   static_cast<int>(utf8.size()), nullptr, 0);
+  std::wstring out(length, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                      out.data(), length);
+  return out;
+}
+
+std::wstring Argument(const flutter::EncodableValue* arguments,
+                      const char* key) {
+  const auto* map = std::get_if<flutter::EncodableMap>(arguments);
+  if (!map) return std::wstring();
+  auto found = map->find(flutter::EncodableValue(key));
+  if (found == map->end()) return std::wstring();
+  const auto* text = std::get_if<std::string>(&found->second);
+  return text ? Utf16(*text) : std::wstring();
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -27,6 +61,29 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  tray_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "explorer/tray",
+          &flutter::StandardMethodCodec::GetInstance());
+  tray_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto& method = call.method_name();
+        if (method == "show") {
+          ShowTray(Argument(call.arguments(), "tooltip"));
+        } else if (method == "hide") {
+          HideTray();
+        } else if (method == "notify") {
+          NotifyTray(Argument(call.arguments(), "title"),
+                     Argument(call.arguments(), "text"));
+        } else {
+          result->NotImplemented();
+          return;
+        }
+        result->Success();
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -39,7 +96,68 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::ShowTray(const std::wstring& tooltip) {
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.hWnd = GetHandle();
+  data.uID = kTrayId;
+  data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+  data.uCallbackMessage = kTrayMessage;
+  data.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
+  wcsncpy_s(data.szTip, tooltip.c_str(), _TRUNCATE);
+  if (tray_visible_) {
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+    return;
+  }
+  Shell_NotifyIconW(NIM_ADD, &data);
+  data.uVersion = NOTIFYICON_VERSION_4;
+  Shell_NotifyIconW(NIM_SETVERSION, &data);
+  tray_visible_ = true;
+}
+
+void FlutterWindow::HideTray() {
+  if (!tray_visible_) return;
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.hWnd = GetHandle();
+  data.uID = kTrayId;
+  Shell_NotifyIconW(NIM_DELETE, &data);
+  tray_visible_ = false;
+}
+
+void FlutterWindow::NotifyTray(const std::wstring& title,
+                               const std::wstring& text) {
+  if (!tray_visible_) return;
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.hWnd = GetHandle();
+  data.uID = kTrayId;
+  data.uFlags = NIF_INFO;
+  data.dwInfoFlags = NIIF_INFO;
+  wcsncpy_s(data.szInfoTitle, title.c_str(), _TRUNCATE);
+  wcsncpy_s(data.szInfo, text.c_str(), _TRUNCATE);
+  Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void FlutterWindow::ShowTrayMenu() {
+  HMENU menu = CreatePopupMenu();
+  AppendMenuW(menu, MF_STRING, kMenuTasks, L"Show tasks");
+  AppendMenuW(menu, MF_STRING, kMenuOpen, L"Open Explorer");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, kMenuQuit, L"Quit");
+  POINT cursor;
+  GetCursorPos(&cursor);
+  // The menu closes when clicked elsewhere only if the window is in front.
+  SetForegroundWindow(GetHandle());
+  UINT chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                               cursor.x, cursor.y, 0, GetHandle(), nullptr);
+  DestroyMenu(menu);
+  const char* method = chosen == kMenuTasks  ? "clicked"
+                       : chosen == kMenuOpen ? "open"
+                       : chosen == kMenuQuit ? "quit"
+                                             : nullptr;
+  if (method && tray_channel_) tray_channel_->InvokeMethod(method, nullptr);
+}
+
 void FlutterWindow::OnDestroy() {
+  HideTray();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -65,6 +183,20 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case kTrayMessage:
+      switch (LOWORD(lparam)) {
+        case WM_LBUTTONUP:
+        case NIN_SELECT:
+        case NIN_KEYSELECT:
+        case NIN_BALLOONUSERCLICK:
+          if (tray_channel_) tray_channel_->InvokeMethod("clicked", nullptr);
+          return 0;
+        case WM_CONTEXTMENU:
+        case WM_RBUTTONUP:
+          ShowTrayMenu();
+          return 0;
+      }
+      return 0;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

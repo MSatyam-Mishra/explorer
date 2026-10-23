@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:explorer/core/build_features.dart';
+import 'package:explorer/core/services/background_tasks.dart';
 import 'package:explorer/core/services/video_downloader/video_downloader_controller.dart';
 import 'package:explorer/features/video_downloader/screens/video_downloader_screen.dart';
 import 'package:explorer/features/video_downloader/widgets/downloader_text.dart';
@@ -46,6 +49,19 @@ class _ProgressDockState extends State<ProgressDock> {
   static bool _hidden = false;
   bool _peek = false;
 
+  /// Shows a finished task a little longer (errors longer), then rebuilds
+  /// without it.
+  Timer? _expiry;
+
+  static Duration _shownFor(BackgroundTask t) =>
+      t.status == TaskStatus.failed ? const Duration(seconds: 20) : const Duration(seconds: 6);
+
+  @override
+  void dispose() {
+    _expiry?.cancel();
+    super.dispose();
+  }
+
   VideoDownloaderController? get _downloads =>
       kVideoDownloaderEnabled && VideoDownloaderController.instance.isStarted
           ? VideoDownloaderController.instance
@@ -53,8 +69,31 @@ class _ProgressDockState extends State<ProgressDock> {
 
   List<DockTask> _tasks(BuildContext context) {
     final downloads = _downloads;
+    final now = DateTime.now();
+    Duration? nextExpiry;
+    final background = <DockTask>[];
+    for (final t in BackgroundTasks.instance.all) {
+      if (!t.isRunning) {
+        final left = _shownFor(t) - now.difference(t.finished!);
+        if (left <= Duration.zero) continue;
+        if (nextExpiry == null || left < nextExpiry) nextExpiry = left;
+      }
+      background.add(DockTask(
+        title: t.title,
+        message: t.message,
+        progress: t.isRunning ? t.progress : (t.status == TaskStatus.done ? 1 : null),
+        onCancel: t.canCancel ? t.cancel : null,
+      ));
+    }
+    _expiry?.cancel();
+    if (nextExpiry != null) {
+      _expiry = Timer(nextExpiry, () {
+        if (mounted) setState(() {});
+      });
+    }
     return [
       ?widget.fileTask,
+      ...background,
       if (downloads != null) ...[
         if (downloads.engineState == EngineState.preparing)
           DockTask(
@@ -93,12 +132,10 @@ class _ProgressDockState extends State<ProgressDock> {
   @override
   Widget build(BuildContext context) {
     final downloads = _downloads;
-    final content = downloads == null
-        ? _build(context)
-        : ListenableBuilder(
-            listenable: downloads,
-            builder: (context, _) => _build(context),
-          );
+    final content = ListenableBuilder(
+      listenable: Listenable.merge([BackgroundTasks.instance, ?downloads]),
+      builder: (context, _) => _build(context),
+    );
     return Positioned(
       left: 16,
       right: 16,

@@ -112,6 +112,8 @@ dependencies {
     // Text in images (image viewer): ML Kit text recognition from Google
     // Play services, whose model isn't in the APK.
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    // HEIC writing (image conversion), with the phone's HEVC encoder.
+    implementation("androidx.heifwriter:heifwriter:1.1.0")
 
     // Video downloader: yt-dlp with Python, QuickJS and FFmpeg for Android
     // (GPL-3.0; https://github.com/yausername/youtubedl-android, maintained

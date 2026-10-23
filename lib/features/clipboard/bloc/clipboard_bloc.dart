@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:bloc/bloc.dart';
+import 'package:explorer/core/services/background_tasks.dart';
 import 'package:explorer/core/services/file_clipboard.dart';
 import 'package:explorer/features/clipboard/paste_task.dart';
 import 'package:explorer/features/tasks/bloc/task_progress_bloc.dart';
@@ -123,18 +124,26 @@ class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
   /// Copies or moves with a progress card; returns where things went.
   Future<List<String>> _transfer(List<String> sources, String destination, bool move) async {
     final verb = move ? 'Moving' : 'Copying';
-    taskProgressBloc.add(TaskStarted(
-      title: sources.length == 1
-          ? '$verb "${p.basename(sources.single)}"'
-          : '$verb ${sources.length} items',
-      initialMessage: 'Getting ready…',
-    ));
+    final title = sources.length == 1
+        ? '$verb "${p.basename(sources.single)}"'
+        : '$verb ${sources.length} items';
+    taskProgressBloc.add(TaskStarted(title: title, initialMessage: 'Getting ready…'));
+    _task = BackgroundTasks.instance.start(title, message: 'Getting ready…');
     try {
-      return await _pasteInIsolate(sources, destination, move);
+      final targets = await _pasteInIsolate(sources, destination, move);
+      _task!.outputs.addAll(targets);
+      BackgroundTasks.instance.finish(_task!, message: 'Done: ${p.basename(destination)}');
+      return targets;
+    } catch (e) {
+      BackgroundTasks.instance.fail(_task!, e is FileSystemException ? _describe(e) : '$e');
+      rethrow;
     } finally {
       taskProgressBloc.add(TaskEnded());
+      _task = null;
     }
   }
+
+  BackgroundTask? _task;
 
   Future<List<String>> _pasteInIsolate(List<String> sources, String destination, bool move) async {
     final port = ReceivePort();
@@ -151,6 +160,7 @@ class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
             progress: total > 0 ? done / total : 1,
             message: name.isEmpty ? 'Finishing…' : name,
           ));
+          _task?.update(progress: total > 0 ? done / total : 1, message: name.isEmpty ? 'Finishing…' : name);
         case List<String> targets:
           result.complete(targets);
         case (String message, String? path):

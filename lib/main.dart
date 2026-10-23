@@ -4,8 +4,10 @@ import 'dart:io';
 
 import 'package:explorer/core/app/app_bloc_observer.dart';
 import 'package:explorer/core/app_licenses.dart';
+import 'package:explorer/core/platform/background_mode.dart';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
+import 'package:explorer/shared/widgets/tasks_view.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/core/build_features.dart';
 import 'package:explorer/core/services/incoming_files.dart';
@@ -30,6 +32,8 @@ void main(List<String> args) async {
   registerAppLicenses();
   if (kVideoDownloaderEnabled) registerVideoDownloaderLicenses();
   Desktop.initMedia();
+  // Closing the window while work goes on leaves a Tasks view (desktop).
+  await BackgroundMode.instance.init();
 
   // Desktop: a new window (or the system) can pass a folder to show or a
   // file to open.
@@ -112,8 +116,28 @@ class App extends StatelessWidget {
                 GlobalCupertinoLocalizations.delegate,
                 GlobalWidgetsLocalizations.delegate,
               ],
-              builder: (context, child) =>
-                  ShadAppBuilder(child: child ?? const SizedBox.shrink()),
+              builder: (context, child) => ShadAppBuilder(
+                child: ListenableBuilder(
+                  listenable: BackgroundMode.instance,
+                  // The app stays as it was behind the Tasks view.
+                  builder: (context, _) {
+                    final tasksOnly = BackgroundMode.instance.tasksOnly;
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Offstage(
+                          offstage: tasksOnly,
+                          child: TickerMode(
+                            enabled: !tasksOnly,
+                            child: child ?? const SizedBox.shrink(),
+                          ),
+                        ),
+                        if (tasksOnly) const TasksView(),
+                      ],
+                    );
+                  },
+                ),
+              ),
               home: launchItem == null
                   ? const FileExplorerScreen()
                   : _screenFor(launchItem!, launchedForIt: true),

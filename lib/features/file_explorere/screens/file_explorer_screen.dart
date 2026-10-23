@@ -18,6 +18,7 @@ import 'package:explorer/features/file_explorere/widgets/explorer_menu.dart';
 import 'package:explorer/features/file_explorere/widgets/file_drag_drop.dart';
 import 'package:explorer/features/file_explorere/widgets/file_grid_item.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
+import 'package:explorer/features/file_explorere/widgets/image_actions.dart';
 import 'package:explorer/features/file_explorere/widgets/paste_bar.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
 import 'package:explorer/features/network/screens/file_server_screen.dart';
@@ -256,17 +257,8 @@ class _FileExplorerUI extends StatelessWidget {
             ),
           ),
         // Copying, moving and video downloads; can be tucked away.
-        ProgressDock(
-          fileTask: taskState is TaskInProgress
-              ? DockTask(
-                  title: taskState.title,
-                  message: taskState.message,
-                  progress: taskState.progress.isFinite
-                      ? taskState.progress
-                      : null,
-                )
-              : null,
-        ),
+        // Copies, conversions and downloads (all background tasks).
+        const ProgressDock(),
       ],
     );
 
@@ -417,7 +409,9 @@ class _FileExplorerUI extends StatelessWidget {
     if (isSelectionMode && fileExplorerState is FileExplorerLoaded) {
       final selected = fileExplorerState.selectedItems.toList();
       void exitSelection() => bloc.add(ToggleSelectionMode(enable: false));
+      final images = ImageActions.imagesIn(selected);
       return ExplorerSelectionHeader(
+        hasImages: images.isNotEmpty,
         count: selected.length,
         total: fileExplorerState.visibleEntities.length,
         wide: docked,
@@ -455,6 +449,12 @@ class _FileExplorerUI extends StatelessWidget {
             case SelectionMenuAction.allActions:
               exitSelection();
               fileActionsService.showFileOptionsMenu(context, selected.first);
+            case SelectionMenuAction.convert:
+              exitSelection();
+              ImageActions.chooseFormat(context, images);
+            case SelectionMenuAction.resize:
+              exitSelection();
+              ImageActions.resize(context, images);
           }
         },
       );
@@ -907,6 +907,9 @@ class _FileExplorerUI extends StatelessWidget {
   ) async {
     final bloc = context.read<FileExplorerBloc>();
     final selected = state.selectedItems.toList();
+    final images = ImageActions.imagesIn(selected);
+    final imageEntries = images.isEmpty ? const <PopupMenuEntry<Object>>[] : await ImageActions.menuEntries(context, images);
+    if (!context.mounted) return;
     final action = await ExplorerMenu.showAt<Object>(
       context,
       position,
@@ -923,6 +926,10 @@ class _FileExplorerUI extends StatelessWidget {
             icon: LucideIcons.scissors,
             shortcut: FileActionsService.shortcut('X')),
         ExplorerMenu.divider(),
+        if (imageEntries.isNotEmpty) ...[
+          ...imageEntries,
+          ExplorerMenu.divider(),
+        ],
         fileActionsService.shareSubmenu(context, selected),
         ExplorerMenu.item(context,
             value: 'zip',
@@ -949,6 +956,7 @@ class _FileExplorerUI extends StatelessWidget {
     if (action is ShareMethod) {
       return fileActionsService.shareVia(context, action, selected);
     }
+    if (await ImageActions.handle(context, action, images)) return;
     switch (action) {
       case 'copy':
         context.read<ClipboardBloc>().add(CopyToClipboard(selected));
