@@ -31,10 +31,18 @@ class FileServerScreen extends StatefulWidget {
     super.key,
     required this.initialFolder,
     this.protocol = ShareProtocol.http,
+    this.only,
+    this.startNow = false,
   });
 
   final String initialFolder;
   final ShareProtocol protocol;
+
+  /// Share just these items of [initialFolder] (read-only), not all of it.
+  final List<String>? only;
+
+  /// Start sharing right away (chosen from a Share menu).
+  final bool startNow;
 
   @override
   State<FileServerScreen> createState() => _FileServerScreenState();
@@ -56,6 +64,12 @@ class _FileServerScreenState extends State<FileServerScreen> {
   StreamSubscription<String>? _receivedSub;
 
   bool get _running => _http != null || _ftp != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.startNow) WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+  }
 
   List<String> get _urls => _http?.urls ?? _ftp?.urls ?? const [];
 
@@ -89,6 +103,7 @@ class _FileServerScreenState extends State<FileServerScreen> {
           theme: webThemeFor(settings.colorTheme),
           deviceName: await LsSettingsStore.deviceModel(),
           allowUploads: _allowChanges,
+          only: widget.only,
         );
         _receivedSub = server.received.listen(_onReceived);
         _http = server;
@@ -99,6 +114,7 @@ class _FileServerScreenState extends State<FileServerScreen> {
           allowChanges: _allowChanges,
           username: _requirePassword ? _username : null,
           password: _requirePassword ? _password : null,
+          only: widget.only,
         );
         _receivedSub = server.received.listen(_onReceived);
         _ftp = server;
@@ -188,6 +204,8 @@ class _FileServerScreenState extends State<FileServerScreen> {
   }
 
   String get _folderLabel {
+    final only = widget.only;
+    if (only != null) return only.length == 1 ? p.basename(only.single) : '${only.length} items';
     if (Platform.isAndroid && _folder == ExplorerPaths.androidInternalStorage) {
       return 'Internal storage';
     }
@@ -222,7 +240,10 @@ class _FileServerScreenState extends State<FileServerScreen> {
               ),
               children: [
                 Text(
-                  'Share a folder with computers and phones on the same Wi-Fi.',
+                  widget.only == null
+                      ? 'Share a folder with computers and phones on the same Wi-Fi.'
+                      : 'Share ${widget.only!.length == 1 ? 'it' : 'them'} with computers and '
+                          'phones on the same Wi-Fi. Nothing else in the folder can be opened.',
                   style: text.bodyMedium?.copyWith(
                     color: context.colors.mutedForeground,
                   ),
@@ -260,7 +281,7 @@ class _FileServerScreenState extends State<FileServerScreen> {
                 _FolderCard(
                   label: _folderLabel,
                   path: _folder,
-                  onChange: running ? null : _pickFolder,
+                  onChange: running || widget.only != null ? null : _pickFolder,
                 ),
                 if (running) ...[
                   const SizedBox(height: 16),
@@ -276,6 +297,7 @@ class _FileServerScreenState extends State<FileServerScreen> {
                   ),
                 ],
                 const SizedBox(height: 8),
+                if (widget.only == null)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   value: _allowChanges,

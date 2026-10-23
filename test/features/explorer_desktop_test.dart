@@ -5,6 +5,7 @@ import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
 import 'package:explorer/features/file_explorere/widgets/file_list_item.dart';
+import 'package:explorer/features/network/screens/file_server_screen.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -141,6 +142,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Refresh'), findsOneWidget);
     expect(find.text('Open in new window'), findsOneWidget);
+  });
+
+  testWidgets('right-click Share offers ways to share; a file is shared alone', (tester) async {
+    await open(tester);
+    await click(tester, 'beta.txt', buttons: kSecondaryButton);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Share file'), findsOneWidget);
+
+    // Hovering opens the submenu beside it.
+    // (The right-click above left the mouse added.)
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.moveTo(tester.getCenter(find.text('Share file')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    for (final label in ['Web link on Wi-Fi (HTTP)', 'FTP server', 'LocalSend (nearby devices)']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+
+    await tester.tap(find.text('Web link on Wi-Fi (HTTP)'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    final screen = tester.widget<FileServerScreen>(find.byType(FileServerScreen));
+    expect(screen.initialFolder, root.path);
+    expect(screen.only, [p.join(root.path, 'beta.txt')]);
+    expect(screen.startNow, isTrue);
   });
 
   testWidgets('new windows: header button, Ctrl+N, folders and files', (tester) async {

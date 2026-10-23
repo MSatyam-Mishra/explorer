@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:explorer/shared/ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
@@ -115,6 +117,16 @@ abstract final class ExplorerMenu {
     );
   }
 
+  /// A row that opens [items] beside it (on hover with a mouse, or when
+  /// chosen); what's picked there closes the whole menu with its value.
+  static PopupMenuEntry<T> submenu<T>(
+    BuildContext context, {
+    required String label,
+    required List<PopupMenuEntry<T>> items,
+    IconData? icon,
+  }) =>
+      _Submenu<T>(label: label, icon: icon, items: items);
+
   /// Muted heading inside a menu ("Sort by").
   static PopupMenuItem<T> label<T>(BuildContext context, String text) {
     return PopupMenuItem<T>(
@@ -126,4 +138,93 @@ abstract final class ExplorerMenu {
   }
 
   static PopupMenuEntry<T> divider<T>() => const PopupMenuDivider(height: 9);
+}
+
+class _Submenu<T> extends PopupMenuEntry<T> {
+  const _Submenu({required this.label, required this.items, this.icon});
+
+  final String label;
+  final IconData? icon;
+  final List<PopupMenuEntry<T>> items;
+
+  @override
+  double get height => 36;
+
+  @override
+  bool represents(T? value) => false;
+
+  @override
+  State<_Submenu<T>> createState() => _SubmenuState<T>();
+}
+
+class _SubmenuState<T> extends State<_Submenu<T>> {
+  Timer? _hover;
+  bool _open = false;
+
+  @override
+  void dispose() {
+    _hover?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _show() async {
+    _hover?.cancel();
+    if (_open || !mounted) return;
+    final box = context.findRenderObject()! as RenderBox;
+    final overlay =
+        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final rect = Rect.fromPoints(
+      box.localToGlobal(Offset(box.size.width - 4, -4), ancestor: overlay),
+      box.localToGlobal(Offset(box.size.width, box.size.height), ancestor: overlay),
+    );
+    setState(() => _open = true);
+    final value = await showMenu<T>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: widget.items,
+      constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
+      menuPadding: const EdgeInsets.symmetric(vertical: 4),
+    );
+    if (!mounted) return;
+    setState(() => _open = false);
+    if (value != null) Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return MouseRegion(
+      onEnter: (_) => _hover = Timer(const Duration(milliseconds: 250), _show),
+      onExit: (_) => _hover?.cancel(),
+      child: InkWell(
+        onTap: _show,
+        child: Container(
+          height: widget.height,
+          color: _open ? colors.accent : null,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              if (widget.icon != null) ...[
+                Icon(widget.icon, size: 16, color: colors.mutedForeground),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: colors.popoverForeground),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Icon(LucideIcons.chevronRight, size: 16, color: colors.mutedForeground),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

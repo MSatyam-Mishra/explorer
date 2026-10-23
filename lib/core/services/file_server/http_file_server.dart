@@ -63,7 +63,13 @@ class HttpFileServer {
   final _received = StreamController<String>.broadcast();
 
   /// Whether browsers may upload files into the shared folder.
-  bool allowUploads = false;
+  bool get allowUploads => _allowUploads && _only == null;
+  set allowUploads(bool value) => _allowUploads = value;
+  bool _allowUploads = false;
+
+  /// When set, only these items of the folder are shared (names at its top
+  /// level), read-only.
+  Set<String>? _only;
 
   bool get isRunning => _server != null;
 
@@ -84,9 +90,11 @@ class HttpFileServer {
     String? deviceName,
     bool allowUploads = false,
     int port = 8080,
+    Iterable<String>? only,
   }) async {
     await stop();
     _root = p.normalize(p.absolute(directory));
+    _only = only == null ? null : {for (final path in only) p.basename(path)};
     try {
       _realRoot = await Directory(_root).resolveSymbolicLinks();
     } on FileSystemException {
@@ -166,6 +174,13 @@ class HttpFileServer {
     }
   }
 
+  /// Whether [path], listed under [dir], is shared (see [_only]).
+  bool _shared(String dir, String path) {
+    final only = _only;
+    if (only == null || dir != _root) return true;
+    return only.contains(p.split(p.relative(path, from: _root)).first);
+  }
+
   /// Maps URL path segments to a path inside the shared folder, or null if
   /// they'd leave it (`..`, encoded slashes, symlinks pointing outside).
   Future<String?> _resolve(List<String> segments) async {
@@ -183,6 +198,7 @@ class HttpFileServer {
     }
     final target = p.joinAll([_root, ...parts]);
     if (target != _root && !p.isWithin(_root, target)) return null;
+    if (_only != null && parts.isNotEmpty && !_only!.contains(parts.first)) return null;
     try {
       final real = await File(target).resolveSymbolicLinks();
       if (real != _realRoot && !p.isWithin(_realRoot, real)) return null;
@@ -193,9 +209,11 @@ class HttpFileServer {
   }
 
   Future<Response> _listing(Request request, String dir) async {
-    final entities = await Directory(
-      dir,
-    ).list(followLinks: false).handleError((Object _) {}).toList();
+    final entities = await Directory(dir)
+        .list(followLinks: false)
+        .handleError((Object _) {})
+        .where((e) => _shared(dir, e.path))
+        .toList();
     final countChildren = entities.length <= 400;
     final entries =
         (await Future.wait(
@@ -388,9 +406,10 @@ class HttpFileServer {
     final entries = <ZipStreamEntry>[
       ZipStreamEntry.directory(label, stat.modified),
     ];
-    final listing = Directory(
-      dir,
-    ).list(recursive: true, followLinks: false).handleError((Object _) {});
+    final listing = Directory(dir)
+        .list(recursive: true, followLinks: false)
+        .handleError((Object _) {})
+        .where((e) => _shared(dir, e.path));
     await for (final entity in listing) {
       if (entity is Link) continue;
       final name =

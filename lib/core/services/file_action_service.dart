@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:explorer/core/platform/desktop.dart';
+import 'package:explorer/core/services/bluetooth_share.dart';
 import 'package:explorer/features/clipboard/bloc/clipboard_bloc.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/widgets/entity_meta.dart';
@@ -21,6 +22,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:explorer/core/repositories/file_repository.dart';
 import 'package:explorer/core/router/file_opener.dart';
 import 'package:explorer/features/localsend/screens/localsend_screen.dart';
+import 'package:explorer/features/network/screens/file_server_screen.dart';
 import 'package:explorer/features/vault/vault_store.dart';
 import 'package:explorer/core/services/device_files.dart';
 
@@ -45,7 +47,7 @@ class FileActionsService {
     required VoidCallback onOpen,
   }) async {
     final isFile = entity is File;
-    final action = await ExplorerMenu.showAt<_EntityAction>(
+    final action = await ExplorerMenu.showAt<Object>(
       context,
       position,
       items: [
@@ -81,15 +83,8 @@ class FileActionsService {
             icon: LucideIcons.pencil,
             shortcut: 'F2'),
         ExplorerMenu.divider(),
-        if (Desktop.canShareFiles)
-          ExplorerMenu.item(context,
-              value: _EntityAction.share,
-              label: 'Share',
-              icon: LucideIcons.share2),
-        ExplorerMenu.item(context,
-            value: _EntityAction.sendNearby,
-            label: 'Send nearby',
-            icon: LucideIcons.radio),
+        shareSubmenu(context, [entity],
+            label: isFile ? 'Share file' : 'Share folder'),
         if (isFile && VaultStore.supported)
           ExplorerMenu.item(context,
               value: _EntityAction.vault,
@@ -110,7 +105,8 @@ class FileActionsService {
       ],
     );
     if (action == null || !context.mounted) return;
-    switch (action) {
+    if (action is ShareMethod) return shareVia(context, action, [entity]);
+    switch (action as _EntityAction) {
       case _EntityAction.open:
         onOpen();
       case _EntityAction.newWindow:
@@ -127,21 +123,99 @@ class FileActionsService {
         _toast(context, 'Cut. Open a folder and paste.');
       case _EntityAction.rename:
         await showRenameDialog(context, entity);
-      case _EntityAction.share:
-        share(context, entity);
-      case _EntityAction.sendNearby:
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => LocalSendScreen(initialItems: [entity]),
-          ),
-        );
       case _EntityAction.vault:
         await moveToVault(context, entity as File);
       case _EntityAction.properties:
         showInfoSheet(entity, context);
       case _EntityAction.delete:
         await showDeleteConfirmationDialog(context, entity);
+    }
+  }
+
+  /// "Share ▸" in a right-click menu: over Wi-Fi as a web link (HTTP) or
+  /// FTP, with LocalSend, over Bluetooth, or to other apps. Its items have
+  /// [ShareMethod] values; pass the one chosen to [shareVia].
+  PopupMenuEntry<Object> shareSubmenu(
+    BuildContext context,
+    List<FileSystemEntity> entities, {
+    String label = 'Share',
+  }) {
+    return ExplorerMenu.submenu<Object>(
+      context,
+      label: label,
+      icon: LucideIcons.share2,
+      items: [
+        ExplorerMenu.item(context,
+            value: ShareMethod.web,
+            label: 'Web link on Wi-Fi (HTTP)',
+            icon: LucideIcons.globe),
+        ExplorerMenu.item(context,
+            value: ShareMethod.ftp,
+            label: 'FTP server',
+            icon: LucideIcons.server),
+        ExplorerMenu.item(context,
+            value: ShareMethod.localSend,
+            label: 'LocalSend (nearby devices)',
+            icon: LucideIcons.radio),
+        if (BluetoothShare.available)
+          ExplorerMenu.item(context,
+              value: ShareMethod.bluetooth,
+              label: 'Bluetooth',
+              icon: LucideIcons.bluetooth,
+              enabled: entities.any((e) => e is File)),
+        if (Desktop.canShareFiles)
+          ExplorerMenu.item(context,
+              value: ShareMethod.apps,
+              label: Platform.isWindows ? 'Nearby sharing and apps…' : 'Other apps…',
+              icon: LucideIcons.squareArrowOutUpRight),
+      ],
+    );
+  }
+
+  /// Shares [entities] (from one folder) the way chosen in [shareSubmenu].
+  Future<void> shareVia(
+    BuildContext context,
+    ShareMethod method,
+    List<FileSystemEntity> entities,
+  ) async {
+    if (entities.isEmpty) return;
+    switch (method) {
+      case ShareMethod.web || ShareMethod.ftp:
+        // A folder is shared whole; files only themselves, not their
+        // neighbours.
+        final folder = entities.length == 1 && entities.single is Directory;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FileServerScreen(
+              initialFolder: folder ? entities.single.path : p.dirname(entities.first.path),
+              only: folder ? null : [for (final e in entities) e.path],
+              protocol: method == ShareMethod.ftp ? ShareProtocol.ftp : ShareProtocol.http,
+              startNow: true,
+            ),
+          ),
+        );
+      case ShareMethod.localSend:
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => LocalSendScreen(initialItems: entities)),
+        );
+      case ShareMethod.bluetooth:
+        final files = [for (final e in entities) if (e is File) e.path];
+        if (files.isEmpty) {
+          _toast(context, 'Bluetooth sends files, not folders.');
+          return;
+        }
+        if (files.length != entities.length) {
+          _toast(context, 'Folders were skipped: Bluetooth sends files only.');
+        }
+        try {
+          await BluetoothShare.send(files);
+        } catch (e) {
+          if (context.mounted) _toast(context, "Couldn't open Bluetooth: $e");
+        }
+      case ShareMethod.apps:
+        shareMany(context, entities);
     }
   }
 
@@ -976,6 +1050,9 @@ class _DetailsCard extends StatelessWidget {
   }
 }
 
+/// Ways to share files, see [FileActionsService.shareSubmenu].
+enum ShareMethod { web, ftp, localSend, bluetooth, apps }
+
 enum _EntityAction {
   open,
   newWindow,
@@ -983,8 +1060,6 @@ enum _EntityAction {
   copy,
   cut,
   rename,
-  share,
-  sendNearby,
   vault,
   properties,
   delete,

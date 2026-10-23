@@ -98,6 +98,44 @@ void main() {
     },
   );
 
+  test('shares only the chosen items, read-only', () async {
+    await server.start(
+      shared.path,
+      theme: WebTheme.fallback,
+      port: 0,
+      only: [p.join(shared.path, 'hello.txt'), p.join(shared.path, 'Sub folder')],
+    );
+    base = Uri.parse(server.url!).replace(host: '127.0.0.1');
+    final html = await text(await send('GET', '/', headers: {'accept': 'text/html'}));
+    expect(html, contains('data-name="hello.txt"'));
+    expect(html, contains('href="Sub%20folder/"'));
+    expect(html, isNot(contains('photo.jpg')));
+    expect(html, isNot(contains('index.html')));
+
+    final hidden = await send('GET', '/photo.jpg');
+    expect(hidden.statusCode, 404);
+    await hidden.drain<void>();
+    final inside = await send('GET', '/Sub%20folder/%C3%BCn%C3%AFcode.md');
+    expect(inside.statusCode, 200);
+    expect(await text(inside), '# hi');
+
+    final archive = ZipDecoder().decodeBytes(await bytes(await send('GET', '/?zip')));
+    expect(
+      archive.files.where((f) => f.isFile).map((f) => f.name).toSet(),
+      {'Shared/hello.txt', 'Shared/Sub folder/ünïcode.md'},
+    );
+
+    server.allowUploads = true;
+    final upload = await send(
+      'POST',
+      '/?upload',
+      headers: {'x-file-name': 'new.txt'},
+      body: utf8.encode('data'),
+    );
+    expect(upload.statusCode, 403);
+    await upload.drain<void>();
+  });
+
   test('redirects folders to their URL with a trailing slash', () async {
     final response = await send('GET', '/Sub%20folder', follow: false);
     expect(response.statusCode, 302);

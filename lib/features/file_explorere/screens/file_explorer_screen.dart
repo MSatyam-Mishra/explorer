@@ -824,7 +824,7 @@ class _FileExplorerUI extends StatelessWidget {
   ) async {
     final bloc = context.read<FileExplorerBloc>();
     final selected = state.selectedItems.toList();
-    final action = await ExplorerMenu.showAt<String>(
+    final action = await ExplorerMenu.showAt<Object>(
       context,
       position,
       items: [
@@ -840,11 +840,7 @@ class _FileExplorerUI extends StatelessWidget {
             icon: LucideIcons.scissors,
             shortcut: FileActionsService.shortcut('X')),
         ExplorerMenu.divider(),
-        if (Desktop.canShareFiles)
-          ExplorerMenu.item(context,
-              value: 'share', label: 'Share', icon: LucideIcons.share2),
-        ExplorerMenu.item(context,
-            value: 'nearby', label: 'Send nearby', icon: LucideIcons.radio),
+        fileActionsService.shareSubmenu(context, selected),
         ExplorerMenu.item(context,
             value: 'zip',
             label: 'Compress to ZIP',
@@ -867,21 +863,14 @@ class _FileExplorerUI extends StatelessWidget {
       ],
     );
     if (action == null || !context.mounted) return;
+    if (action is ShareMethod) {
+      return fileActionsService.shareVia(context, action, selected);
+    }
     switch (action) {
       case 'copy':
         context.read<ClipboardBloc>().add(CopyToClipboard(selected));
       case 'cut':
         context.read<ClipboardBloc>().add(CutToClipboard(selected));
-      case 'share':
-        fileActionsService.shareMany(context, selected);
-      case 'nearby':
-        bloc.add(ToggleSelectionMode(enable: false));
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => LocalSendScreen(initialItems: selected),
-          ),
-        );
       case 'zip':
         _handleCompress(context, state);
       case 'all':
@@ -903,7 +892,7 @@ class _FileExplorerUI extends StatelessWidget {
     final clipboard = context.read<ClipboardBloc>();
     final inFolder = !ExplorerPaths.isWindowsRoots(state.path);
     final canPaste = inFolder && clipboard.state is ClipboardReadyToPaste;
-    final action = await ExplorerMenu.showAt<String>(
+    final action = await ExplorerMenu.showAt<Object>(
       context,
       position,
       items: [
@@ -936,13 +925,14 @@ class _FileExplorerUI extends StatelessWidget {
             icon: LucideIcons.appWindow,
             shortcut: FileActionsService.shortcut('N')),
         if (inFolder)
-          ExplorerMenu.item(context,
-              value: 'wifi',
-              label: 'Share over Wi-Fi',
-              icon: LucideIcons.wifi),
+          fileActionsService.shareSubmenu(context, [Directory(state.path)],
+              label: 'Share this folder'),
       ],
     );
     if (action == null || !context.mounted) return;
+    if (action is ShareMethod) {
+      return fileActionsService.shareVia(context, action, [Directory(state.path)]);
+    }
     switch (action) {
       case 'folder':
         fileActionsService.showCreateFolderDialog(context, state.path);
@@ -954,8 +944,6 @@ class _FileExplorerUI extends StatelessWidget {
         bloc.add(LoadDirectory(state.path));
       case 'window':
         Desktop.openWindow(folder: state.path);
-      case 'wifi':
-        _handleHttpShare(context, state);
     }
   }
 

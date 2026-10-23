@@ -472,6 +472,18 @@ void main() {
     expect(_lines(await c.text('NLST Sub folder/empty')), isEmpty);
   });
 
+  test('shares only the chosen items, read-only', () async {
+    await server.start(shared.path, port: 0, only: [sharedPath('Sub folder')]);
+    server.allowChanges = true;
+    final c = await connect();
+    expect(_lines(await c.text('NLST')), ['Sub folder']);
+    expect(await c.text('LIST'), isNot(contains('hello.txt')));
+    expect((await c.download('RETR hello.txt')).$1.code, 550);
+    expect((await c.download('RETR Sub folder/ünïcode 文件.md')).$1.code, 226);
+    expect((await c.upload('STOR new.txt', [1])).code, 550);
+    expect(File(sharedPath('new.txt')).existsSync(), isFalse);
+  });
+
   test('RETR streams files, also from a REST offset', () async {
     final big = Uint8List.fromList(
       List.generate(700 * 1024 + 13, (i) => (i * 31 + i ~/ 256) & 0xff),

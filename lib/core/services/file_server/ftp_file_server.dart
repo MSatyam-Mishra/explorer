@@ -29,7 +29,13 @@ class FtpFileServer {
   /// Whether clients may upload, create folders, rename and delete.
   ///
   /// Checked on every command, so it can be changed while running.
-  bool allowChanges = false;
+  bool get allowChanges => _allowChanges && _only == null;
+  set allowChanges(bool value) => _allowChanges = value;
+  bool _allowChanges = false;
+
+  /// When set, only these items of the folder are shared (names at its top
+  /// level), read-only.
+  Set<String>? _only;
 
   /// Login required when both are set (non-empty); otherwise any user
   /// name/password (anonymous) is accepted.
@@ -82,9 +88,11 @@ class FtpFileServer {
     String? username,
     String? password,
     int port = 2121,
+    Iterable<String>? only,
   }) async {
     await stop();
     _root = p.normalize(p.absolute(directory));
+    _only = only == null ? null : {for (final path in only) p.basename(path)};
     try {
       _realRoot = await Directory(_root).resolveSymbolicLinks();
     } on FileSystemException {
@@ -167,6 +175,11 @@ class FtpFileServer {
   /// symlinks), else null.
   Future<String?> _checked(String target) async {
     if (target != _root && !p.isWithin(_root, target)) return null;
+    if (_only != null &&
+        target != _root &&
+        !_only!.contains(p.split(p.relative(target, from: _root)).first)) {
+      return null;
+    }
     try {
       final real = await File(target).resolveSymbolicLinks();
       if (real != _realRoot && !p.isWithin(_realRoot, real)) return null;
@@ -871,9 +884,12 @@ class _FtpSession {
   }
 
   Future<List<_Entry>> _entries(String dir) async {
-    final entities = await Directory(
-      dir,
-    ).list(followLinks: false).handleError((Object _) {}).toList();
+    final only = _server._only;
+    final entities = await Directory(dir)
+        .list(followLinks: false)
+        .handleError((Object _) {})
+        .where((e) => only == null || dir != _server._root || only.contains(p.basename(e.path)))
+        .toList();
     final entries = await Future.wait(
       entities.map((entity) async {
         final name = p.basename(entity.path);
