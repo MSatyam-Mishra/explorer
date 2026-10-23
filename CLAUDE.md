@@ -55,7 +55,9 @@ GitHub **pre-releases** tagged `vX.Y.Z`:
 
 ## Where things stand (2026-10-23)
 
-- **v1.0.7** is complete: 4 APKs, the Windows and Linux packages (16 files with SHA256SUMS), and final notes.
+- **v1.0.7** is complete.
+- **v1.0.8** (convert and resize, background tasks and tray, translucent window, side sheets and dialogs, menu icons) is published with its APKs. Its Windows and Linux packages come from the `release` run of desktop-release.yml started on 2026-10-23. Check that the release has 16 files; if a job failed, re-run it (Releases, step 5) or attach what was built with `tool/release/upload_desktop.py`.
+- The repo sidebar listed "claude" as a contributor long after the co-author lines were removed from history (a stale cache). Switching the default branch to a temporary branch and back made GitHub recompute it; it now shows only the owner.
 - **In progress, committed but not finished: image conversion, resize and background mode.**
   - Done and tested: the converter (all formats; HEIC validated with libheif; WebP/AVIF keep transparency), the Convert to ▸ and Resize… menus (right-click, selection, phone sheet, selection bar), background tasks in the dock, the widget test for convert and resize, and copies registered as background tasks.
   - Still to do:
