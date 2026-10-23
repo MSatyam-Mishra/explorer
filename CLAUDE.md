@@ -54,7 +54,7 @@ GitHub **pre-releases** tagged `vX.Y.Z`:
 
 ## Where things stand (2026-10-23)
 
-- **v1.0.7** is published. It has the APKs, Windows, Flatpak and Snap; the .deb/.rpm/AppImage/tar come from a re-run from `main`. Check the release page, and if they're missing, dispatch again (step 5). Once every file is attached, remove the line "The Windows and Linux files … appear here about half an hour later" from the release notes.
+- **v1.0.7** is complete: 4 APKs, the Windows and Linux packages (16 files with SHA256SUMS), and final notes.
 - **In progress, committed but not finished: image conversion, resize and background mode.**
   - Done and tested: the converter (all formats; HEIC validated with libheif; WebP/AVIF keep transparency), the Convert to ▸ and Resize… menus (right-click, selection, phone sheet, selection bar), background tasks in the dock, the widget test for convert and resize, and copies registered as background tasks.
   - Still to do:
