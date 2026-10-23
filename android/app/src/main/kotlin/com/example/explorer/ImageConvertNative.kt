@@ -94,6 +94,9 @@ class ImageConvertNative(messenger: BinaryMessenger) {
         }
         when (format) {
             "heic" -> {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                    throw IllegalStateException("HEIC needs Android 9 or newer")
+                }
                 val writer = HeifWriter.Builder(out, bitmap.width, bitmap.height, HeifWriter.INPUT_MODE_BITMAP)
                     .setQuality(quality)
                     .build()
