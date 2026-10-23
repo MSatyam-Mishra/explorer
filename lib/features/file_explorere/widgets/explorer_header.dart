@@ -598,7 +598,7 @@ class ExplorerSelectionHeader extends StatelessWidget {
                           label: 'Clear selection',
                           icon: LucideIcons.squareDashed,
                         ),
-                      if (single) ...[
+                      if (any) ...[
                         ExplorerMenu.divider(),
                         ExplorerMenu.item(
                           anchor,
@@ -612,6 +612,8 @@ class ExplorerSelectionHeader extends StatelessWidget {
                           label: 'Cut',
                           icon: LucideIcons.scissors,
                         ),
+                      ],
+                      if (single) ...[
                         ExplorerMenu.item(
                           anchor,
                           value: SelectionMenuAction.rename,

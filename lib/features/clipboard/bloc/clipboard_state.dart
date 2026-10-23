@@ -8,21 +8,26 @@ abstract class ClipboardState {}
 class ClipboardEmpty extends ClipboardState {}
 
 class ClipboardReadyToPaste extends ClipboardState {
-  final FileSystemEntity sourceEntity;
+  /// What was copied or cut, in any window (or another app).
+  final List<FileSystemEntity> entities;
   final ClipboardOperation operation;
 
-  ClipboardReadyToPaste({required this.sourceEntity, required this.operation});
+  /// Already pasted here once: still on the clipboard (Ctrl+V, Paste in
+  /// the menu), but the paste bar is put away.
+  final bool pasted;
+
+  ClipboardReadyToPaste({
+    required this.entities,
+    required this.operation,
+    this.pasted = false,
+  });
 }
-// ... existing states
 
-class ClipboardPasting extends ClipboardState {
-  final double progress; // 0.0 to 1.0
-  final String timeLeft;
-
-  ClipboardPasting({required this.progress, required this.timeLeft});
+class ClipboardPasteSuccess extends ClipboardState {
+  /// Where the pasted items ended up.
+  final List<String> targets;
+  ClipboardPasteSuccess([this.targets = const []]);
 }
-
-class ClipboardPasteSuccess extends ClipboardState {}
 
 class ClipboardPasteFailure extends ClipboardState {
   final String error;

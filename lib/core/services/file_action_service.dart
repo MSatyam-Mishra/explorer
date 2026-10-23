@@ -120,10 +120,10 @@ class FileActionsService {
       case _EntityAction.openWith:
         await FileOpener.showOpenWith(context, entity as File);
       case _EntityAction.copy:
-        context.read<ClipboardBloc>().add(CopyToClipboard(entity));
+        context.read<ClipboardBloc>().add(CopyToClipboard([entity]));
         _toast(context, 'Copied. Open a folder and paste.');
       case _EntityAction.cut:
-        context.read<ClipboardBloc>().add(CutToClipboard(entity));
+        context.read<ClipboardBloc>().add(CutToClipboard([entity]));
         _toast(context, 'Cut. Open a folder and paste.');
       case _EntityAction.rename:
         await showRenameDialog(context, entity);
@@ -202,7 +202,7 @@ class FileActionsService {
                 icon: LucideIcons.copy,
                 label: 'Copy',
                 onTap: () => run(() {
-                  context.read<ClipboardBloc>().add(CopyToClipboard(entity));
+                  context.read<ClipboardBloc>().add(CopyToClipboard([entity]));
                   _toast(context, 'Copied. Open a folder and paste.');
                 }),
               ),
@@ -210,7 +210,7 @@ class FileActionsService {
                 icon: LucideIcons.scissors,
                 label: 'Cut',
                 onTap: () => run(() {
-                  context.read<ClipboardBloc>().add(CutToClipboard(entity));
+                  context.read<ClipboardBloc>().add(CutToClipboard([entity]));
                   _toast(context, 'Cut. Open a folder and paste.');
                 }),
               ),

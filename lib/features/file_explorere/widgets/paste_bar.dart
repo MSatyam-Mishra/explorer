@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
-/// Floating bar shown while an item is on the clipboard: the item, whether
-/// it will be copied or moved, Cancel and Paste.
+/// Floating bar shown while files are on the clipboard: what they are,
+/// whether they will be copied or moved, Cancel and Paste.
 class PasteBar extends StatelessWidget {
   const PasteBar({
     super.key,
@@ -26,9 +26,11 @@ class PasteBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final text = Theme.of(context).textTheme;
-    final source = clipboard.sourceEntity;
+    final entities = clipboard.entities;
     final move = clipboard.operation == ClipboardOperation.cut;
-    final name = p.basename(source.path);
+    final name = entities.length == 1
+        ? p.basename(entities.single.path)
+        : '${entities.length} items';
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 560),
@@ -36,7 +38,13 @@ class PasteBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
         child: Row(
           children: [
-            EntityIcon(entity: source, size: 32),
+            if (entities.length == 1)
+              EntityIcon(entity: entities.single, size: 32)
+            else
+              SizedBox.square(
+                dimension: 32,
+                child: Icon(LucideIcons.files, size: 24, color: colors.primary),
+              ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

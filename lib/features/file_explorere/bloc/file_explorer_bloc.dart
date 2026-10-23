@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:bloc/bloc.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
@@ -12,8 +13,11 @@ part 'file_explorer_state.dart';
 class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
   final FileRepository repository;
 
-  FileExplorerBloc({FileRepository? repository})
+  FileExplorerBloc({FileRepository? repository, bool? watchFolders})
     : repository = repository ?? LocalFileRepository(),
+      // Off in widget tests, whose clock is fake.
+      watchFolders =
+          watchFolders ?? !Platform.environment.containsKey('FLUTTER_TEST'),
       super(FileExplorerInitial()) {
     on<LoadDirectory>(_onLoadDirectory);
 
@@ -120,6 +124,47 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
   /// one started drops its result, so the last folder opened always wins.
   int _loadGeneration = 0;
 
+  /// Whether the folder on screen is reloaded when its files change (in
+  /// another window, another app, a download…).
+  final bool watchFolders;
+  String? _watched;
+  StreamSubscription<FileSystemEvent>? _watcher;
+  Timer? _changed;
+
+  void _watch(String path) {
+    if (!watchFolders || path == _watched) return;
+    _watcher?.cancel();
+    _watcher = null;
+    _changed?.cancel();
+    _changed = null;
+    _watched = path;
+    if (ExplorerPaths.isWindowsRoots(path)) return;
+    try {
+      _watcher = Directory(path).watch().listen(
+        (_) {
+          // At most once a second while files keep changing (a copy).
+          _changed ??= Timer(const Duration(milliseconds: 700), () {
+            _changed = null;
+            final current = state;
+            if (!isClosed && current is FileExplorerLoaded && current.path == path) {
+              add(LoadDirectory(path));
+            }
+          });
+        },
+        onError: (Object _) {},
+      );
+    } catch (_) {
+      // Some folders can't be watched (network shares): F5 still works.
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    _changed?.cancel();
+    await _watcher?.cancel();
+    return super.close();
+  }
+
   Future<void> _onLoadDirectory(
     LoadDirectory event,
     Emitter<FileExplorerState> emit,
@@ -134,6 +179,7 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       final refreshing =
           current is FileExplorerLoaded && current.path == event.path;
       if (!refreshing) emit(FileExplorerLoading(path: event.path));
+      _watch(event.path);
 
       if (!await repository.exists(event.path)) {
         if (stale()) return;
@@ -169,6 +215,15 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
       );
 
       if (stale()) return;
+      // A refresh keeps what's selected, if it's still there.
+      final latest = state;
+      final kept = latest is FileExplorerLoaded && latest.path == event.path
+          ? {for (final e in latest.selectedItems) e.path}
+          : const <String>{};
+      final selected = {
+        for (final e in sortedEntities)
+          if (kept.contains(e.path)) e,
+      };
       emit(
         FileExplorerLoaded(
           entities: sortedEntities,
@@ -177,6 +232,10 @@ class FileExplorerBloc extends Bloc<FileExplorerEvent, FileExplorerState> {
           sortOption: sortOption,
           sortOrder: sortOrder,
           pathLabels: pathLabels,
+          selectedItems: selected,
+          isSelectionMode: selected.isNotEmpty &&
+              latest is FileExplorerLoaded &&
+              latest.isSelectionMode,
         ),
       );
     } catch (e) {

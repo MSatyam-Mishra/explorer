@@ -206,7 +206,8 @@ class _FileExplorerUI extends StatelessWidget {
     // Tablets, unfolded foldables and desktops keep navigation docked.
     final bool docked = AdaptiveSplitView.isSplit(context);
     final bool busy = taskState is TaskInProgress;
-    final pasteState = clipboardState is ClipboardReadyToPaste && !busy
+    final pasteState =
+        clipboardState is ClipboardReadyToPaste && !clipboardState.pasted && !busy
         ? clipboardState
         : null;
     final bool canCreate =
@@ -356,9 +357,9 @@ class _FileExplorerUI extends StatelessWidget {
     if (command && key == LogicalKeyboardKey.keyA) {
       bloc.add(SelectAll());
     } else if (command && key == LogicalKeyboardKey.keyC && selected.isNotEmpty) {
-      clipboard.add(CopyToClipboard(selected.first));
+      clipboard.add(CopyToClipboard(selected));
     } else if (command && key == LogicalKeyboardKey.keyX && selected.isNotEmpty) {
-      clipboard.add(CutToClipboard(selected.first));
+      clipboard.add(CutToClipboard(selected));
     } else if (command && key == LogicalKeyboardKey.keyV) {
       if (clipboard.state is ClipboardReadyToPaste && inFolder) {
         clipboard.add(PasteFromClipboard(state.path));
@@ -435,12 +436,10 @@ class _FileExplorerUI extends StatelessWidget {
               bloc.add(ClearSelection());
             case SelectionMenuAction.copy:
               exitSelection();
-              context.read<ClipboardBloc>().add(
-                CopyToClipboard(selected.first),
-              );
+              context.read<ClipboardBloc>().add(CopyToClipboard(selected));
             case SelectionMenuAction.cut:
               exitSelection();
-              context.read<ClipboardBloc>().add(CutToClipboard(selected.first));
+              context.read<ClipboardBloc>().add(CutToClipboard(selected));
             case SelectionMenuAction.rename:
               exitSelection();
               fileActionsService.showRenameDialog(context, selected.first);
@@ -830,6 +829,17 @@ class _FileExplorerUI extends StatelessWidget {
       position,
       items: [
         ExplorerMenu.label(context, '${selected.length} selected'),
+        ExplorerMenu.item(context,
+            value: 'copy',
+            label: 'Copy',
+            icon: LucideIcons.copy,
+            shortcut: FileActionsService.shortcut('C')),
+        ExplorerMenu.item(context,
+            value: 'cut',
+            label: 'Cut',
+            icon: LucideIcons.scissors,
+            shortcut: FileActionsService.shortcut('X')),
+        ExplorerMenu.divider(),
         if (Desktop.canShareFiles)
           ExplorerMenu.item(context,
               value: 'share', label: 'Share', icon: LucideIcons.share2),
@@ -858,6 +868,10 @@ class _FileExplorerUI extends StatelessWidget {
     );
     if (action == null || !context.mounted) return;
     switch (action) {
+      case 'copy':
+        context.read<ClipboardBloc>().add(CopyToClipboard(selected));
+      case 'cut':
+        context.read<ClipboardBloc>().add(CutToClipboard(selected));
       case 'share':
         fileActionsService.shareMany(context, selected);
       case 'nearby':

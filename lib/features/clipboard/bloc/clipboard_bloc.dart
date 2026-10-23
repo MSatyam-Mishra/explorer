@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+
 import 'package:bloc/bloc.dart';
+import 'package:explorer/core/services/file_clipboard.dart';
+import 'package:explorer/features/clipboard/paste_task.dart';
 import 'package:explorer/features/tasks/bloc/task_progress_bloc.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -8,166 +12,163 @@ import 'package:path/path.dart' as p;
 part 'clipboard_event.dart';
 part 'clipboard_state.dart';
 
-// 1. These are now PUBLIC and TOP-LEVEL, so the Isolate can find them.
-class CopyTaskParams {
-  final SendPort sendPort;
-  final String sourcePath;
-  final String destinationPath;
-
-  CopyTaskParams({
-    required this.sendPort,
-    required this.sourcePath,
-    required this.destinationPath,
-  });
-}
-
-void copyTask(CopyTaskParams params) async {
-  try {
-    final sourceEntity = Directory(params.sourcePath).existsSync()
-        ? Directory(params.sourcePath)
-        : File(params.sourcePath);
-    
-    // First, calculate the total size for accurate progress
-    int totalBytes = 0;
-    if (sourceEntity is Directory) {
-      await for (final file in sourceEntity.list(recursive: true)) {
-        if (file is File) {
-          totalBytes += await file.length();
-        }
-      }
-    } else if (sourceEntity is File) {
-      totalBytes = await sourceEntity.length();
-    }
-
-    int copiedBytes = 0;
-    final startTime = DateTime.now();
-
-    // Now, perform the copy and report progress
-    if (sourceEntity is Directory) {
-      final newDir = Directory(params.destinationPath);
-      await newDir.create(recursive: true);
-
-      await for (final entity in sourceEntity.list(recursive: true, followLinks: false)) {
-        final newPath = p.join(params.destinationPath, p.relative(entity.path, from: sourceEntity.path));
-        if (entity is Directory) {
-          await Directory(newPath).create(recursive: true);
-        } else if (entity is File) {
-          final fileBytes = await entity.readAsBytes();
-          await File(newPath).writeAsBytes(fileBytes);
-          copiedBytes += fileBytes.length;
-
-          // Send progress back to the main app
-          final progress = totalBytes > 0 ? copiedBytes / totalBytes : 1.0;
-          final elapsedTime = DateTime.now().difference(startTime);
-          final speed = copiedBytes / (elapsedTime.inSeconds + 1);
-          final remainingBytes = totalBytes - copiedBytes;
-          final timeLeftInSeconds = (remainingBytes / (speed > 0 ? speed : 1)).round();
-          final timeLeft = Duration(seconds: timeLeftInSeconds).toString().split('.').first.substring(2);
-          
-          params.sendPort.send({'progress': progress, 'timeLeft': timeLeft, 'message': 'Copying "${p.basename(entity.path)}"'});
-        }
-      }
-    } else if (sourceEntity is File) {
-      // Single file copy logic
-      final destinationFile = File(params.destinationPath);
-      final sink = destinationFile.openWrite();
-      await for (final chunk in sourceEntity.openRead()) {
-        sink.add(chunk);
-        copiedBytes += chunk.length;
-        final progress = copiedBytes / totalBytes;
-        final elapsedTime = DateTime.now().difference(startTime);
-        final speed = copiedBytes / (elapsedTime.inSeconds + 1);
-        final remainingBytes = totalBytes - copiedBytes;
-        final timeLeftInSeconds = (remainingBytes / (speed > 0 ? speed : 1)).round();
-        final timeLeft = Duration(seconds: timeLeftInSeconds).toString().split('.').first.substring(2);
-        params.sendPort.send({'progress': progress, 'timeLeft': timeLeft, 'message': 'Copying "${p.basename(sourceEntity.path)}"'});
-      }
-      await sink.close();
-    }
-
-    params.sendPort.send('done');
-  } catch (e) {
-    params.sendPort.send({'error': e.toString()});
-  }
-}
-
-
+/// Copy, cut and paste of files. The clipboard is shared with the other
+/// Explorer windows (and on Windows with File Explorer), see
+/// [FileClipboard].
 class ClipboardBloc extends Bloc<ClipboardEvent, ClipboardState> {
-  final TaskProgressBloc taskProgressBloc;
-
-  ClipboardBloc({required this.taskProgressBloc}) : super(ClipboardEmpty()) {
-    on<CopyToClipboard>((event, emit) {
-      emit(ClipboardReadyToPaste(
-        sourceEntity: event.entity,
-        operation: ClipboardOperation.copy,
-      ));
-    });
-
-    on<CutToClipboard>((event, emit) {
-      emit(ClipboardReadyToPaste(
-        sourceEntity: event.entity,
-        operation: ClipboardOperation.cut,
-      ));
-    });
-
-    on<ClearClipboard>((event, emit) {
+  ClipboardBloc({required this.taskProgressBloc, FileClipboard? store})
+      : clipboard = store ?? FileClipboard.instance,
+        super(ClipboardEmpty()) {
+    on<CopyToClipboard>((event, emit) => _put(event.entities, ClipboardOperation.copy, emit));
+    on<CutToClipboard>((event, emit) => _put(event.entities, ClipboardOperation.cut, emit));
+    on<ClearClipboard>((event, emit) async {
       emit(ClipboardEmpty());
+      await _quietly(clipboard.clear);
     });
+    on<_ClipboardChanged>(_onChanged);
+    on<PasteFromClipboard>(_onPaste);
+    _changes = clipboard.changes.listen((_) => add(_ClipboardChanged()));
+    // What another window copied before this one opened.
+    add(_ClipboardChanged());
+  }
 
-    on<PasteFromClipboard>((event, emit) async {
-      final currentState = state;
-      if (currentState is! ClipboardReadyToPaste) return;
+  final TaskProgressBloc taskProgressBloc;
+  final FileClipboard clipboard;
+  late final StreamSubscription<void> _changes;
+  bool _pasting = false;
 
-      final source = currentState.sourceEntity;
-      final operationName = currentState.operation == ClipboardOperation.copy ? 'Copying' : 'Moving';
-      taskProgressBloc.add(TaskStarted(title: 'File Operation', initialMessage: '$operationName "${p.basename(source.path)}"'));
+  Future<void> _put(
+    List<FileSystemEntity> entities,
+    ClipboardOperation operation,
+    Emitter<ClipboardState> emit,
+  ) async {
+    if (entities.isEmpty) return;
+    emit(ClipboardReadyToPaste(entities: entities, operation: operation));
+    await _quietly(() => clipboard.write(ClipboardFiles(
+          [for (final e in entities) e.path],
+          cut: operation == ClipboardOperation.cut,
+        )));
+  }
 
-      try {
-        final destination = p.join(event.destinationPath, p.basename(source.path));
-        if (source.path == event.destinationPath) throw Exception("Cannot paste a folder into itself.");
+  Future<void> _onChanged(_ClipboardChanged event, Emitter<ClipboardState> emit) async {
+    if (_pasting) return;
+    ClipboardFiles? files;
+    try {
+      files = await clipboard.read();
+    } catch (_) {
+      return;
+    }
+    final entities = [
+      for (final path in files?.paths ?? const <String>[])
+        if (FileSystemEntity.isDirectorySync(path))
+          Directory(path)
+        else if (FileSystemEntity.isFileSync(path))
+          File(path),
+    ];
+    final current = state;
+    if (entities.isEmpty) {
+      if (current is ClipboardReadyToPaste) emit(ClipboardEmpty());
+      return;
+    }
+    final operation = files!.cut ? ClipboardOperation.cut : ClipboardOperation.copy;
+    if (current is ClipboardReadyToPaste &&
+        current.operation == operation &&
+        listEquals([for (final e in current.entities) e.path], [for (final e in entities) e.path])) {
+      return; // Ours, or unchanged.
+    }
+    emit(ClipboardReadyToPaste(entities: entities, operation: operation));
+  }
 
-        if (currentState.operation == ClipboardOperation.cut) {
-          // Move is fast, no Isolate needed
-          await source.rename(destination);
-          taskProgressBloc.add(TaskEnded());
-          emit(ClipboardPasteSuccess());
-          emit(ClipboardEmpty());
-        } else { // Handle Copy with Isolate
-          final receivePort = ReceivePort();
-          final params = CopyTaskParams(
-            sendPort: receivePort.sendPort,
-            sourcePath: source.path,
-            destinationPath: destination,
-          );
+  Future<void> _onPaste(PasteFromClipboard event, Emitter<ClipboardState> emit) async {
+    final current = state;
+    if (current is! ClipboardReadyToPaste || _pasting) return;
+    final move = current.operation == ClipboardOperation.cut;
+    final sources = [for (final e in current.entities) e.path];
+    final verb = move ? 'Moving' : 'Copying';
+    taskProgressBloc.add(TaskStarted(
+      title: sources.length == 1
+          ? '$verb "${p.basename(sources.single)}"'
+          : '$verb ${sources.length} items',
+      initialMessage: 'Getting ready…',
+    ));
+    _pasting = true;
+    try {
+      final targets = await _pasteInIsolate(sources, event.destinationPath, move);
+      taskProgressBloc.add(TaskEnded());
+      emit(ClipboardPasteSuccess(targets));
+      if (move) {
+        // Moved: nothing left to paste, in any window.
+        emit(ClipboardEmpty());
+        await _quietly(clipboard.clear);
+      } else {
+        emit(ClipboardReadyToPaste(entities: current.entities, operation: current.operation, pasted: true));
+      }
+    } catch (e) {
+      taskProgressBloc.add(TaskEnded());
+      emit(ClipboardPasteFailure(
+        error: e is FileSystemException ? _describe(e) : '$e',
+        previousState: current,
+      ));
+      emit(current);
+    } finally {
+      _pasting = false;
+    }
+  }
 
-          await Isolate.spawn(copyTask, params);
-
-          await for (final message in receivePort) {
-            if (message is Map) {
-              if (message.containsKey('error')) {
-                throw Exception(message['error']);
-              }
-              taskProgressBloc.add(TaskProgressUpdated(
-                progress: message['progress'],
-                message: message['message'],
-              ));
-            } else if (message == 'done') {
-              taskProgressBloc.add(TaskEnded());
-              emit(ClipboardPasteSuccess());
-              emit(ClipboardEmpty());
-              receivePort.close();
-              break;
-            }
-          }
-        }
-      } catch (e) {
-        taskProgressBloc.add(TaskEnded());
-        // Handle error state by emitting a failure
-        emit(ClipboardPasteFailure(
-          error: e.toString(),
-          previousState: currentState,
-        ));
+  Future<List<String>> _pasteInIsolate(List<String> sources, String destination, bool move) async {
+    final port = ReceivePort();
+    final errors = ReceivePort();
+    await Isolate.spawn(_paste, (port.sendPort, sources, destination, move), onError: errors.sendPort);
+    final result = Completer<List<String>>();
+    errors.listen((message) {
+      if (!result.isCompleted) result.completeError(FileSystemException('${(message as List).first}'));
+    });
+    port.listen((message) {
+      switch (message) {
+        case PasteProgress(:final done, :final total, :final name):
+          taskProgressBloc.add(TaskProgressUpdated(
+            progress: total > 0 ? done / total : 1,
+            message: name.isEmpty ? 'Finishing…' : name,
+          ));
+        case List<String> targets:
+          result.complete(targets);
+        case (String message, String? path):
+          result.completeError(FileSystemException(message, path));
       }
     });
+    try {
+      return await result.future;
+    } finally {
+      port.close();
+      errors.close();
+    }
+  }
+
+  static Future<void> _paste((SendPort, List<String>, String, bool) args) async {
+    final (port, sources, destination, move) = args;
+    try {
+      port.send(await pasteEntities(sources, destination, move: move, onProgress: port.send));
+    } on FileSystemException catch (e) {
+      port.send((e.osError?.message.trim().isNotEmpty ?? false) ? ('${e.message}: ${e.osError!.message.trim()}', e.path) : (e.message, e.path));
+    } catch (e) {
+      port.send(('$e', null));
+    }
+  }
+
+  static String _describe(FileSystemException e) =>
+      e.path == null ? e.message : '${e.message} (${p.basename(e.path!)})';
+
+  static Future<void> _quietly(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (_) {
+      // The clipboard is busy or unavailable: this window still works.
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    await _changes.cancel();
+    return super.close();
   }
 }

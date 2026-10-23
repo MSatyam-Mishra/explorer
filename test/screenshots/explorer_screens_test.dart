@@ -158,7 +158,7 @@ void main() {
 
         // Something on the clipboard, then a running copy.
         final clipboard = BlocProvider.of<ClipboardBloc>(context);
-        clipboard.add(CopyToClipboard(pdf));
+        clipboard.add(CopyToClipboard([pdf]));
         await settle(tester);
         await saveScreenshot(tester, 'explorer_paste_$tag');
         final tasks = BlocProvider.of<TaskProgressBloc>(context);
