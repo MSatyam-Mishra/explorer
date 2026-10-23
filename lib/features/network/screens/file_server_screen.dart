@@ -17,7 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
-import 'package:qr_flutter/qr_flutter.dart';
+import 'package:explorer/shared/widgets/round_qr_code.dart';
 import 'package:shadcn_ui/shadcn_ui.dart' show LucideIcons;
 
 enum ShareProtocol { http, ftp }
@@ -579,25 +579,16 @@ class _StatusPanel extends StatelessWidget {
           const SizedBox(height: 16),
           Center(
             child: Container(
-              padding: const EdgeInsets.all(12),
+              // A quiet margin around the code helps scanners.
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: colors.border),
               ),
-              child: QrImageView(
+              child: RoundQrCode(
                 data: url,
                 size: 168,
-                padding: EdgeInsets.zero,
-                backgroundColor: Colors.white,
-                eyeStyle: const QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: Color(0xFF09090B),
-                ),
-                dataModuleStyle: const QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: Color(0xFF09090B),
-                ),
                 semanticsLabel: 'QR code for $url',
               ),
             ),
