@@ -69,6 +69,7 @@ class ExplorerHeader extends StatelessWidget {
     this.onSortChanged,
     this.onOptionsPressed,
     this.onNewFolder,
+    this.onNewWindow,
   });
 
   final List<PathCrumb> crumbs;
@@ -87,6 +88,9 @@ class ExplorerHeader extends StatelessWidget {
   final void Function(SortOption option, SortOrder order)? onSortChanged;
   final VoidCallback? onOptionsPressed;
   final VoidCallback? onNewFolder;
+
+  /// Opens this folder in another window (desktop).
+  final VoidCallback? onNewWindow;
 
   @override
   Widget build(BuildContext context) {
@@ -132,6 +136,12 @@ class ExplorerHeader extends StatelessWidget {
                 option: sortOption!,
                 order: sortOrder!,
                 onChanged: onSortChanged!,
+              ),
+            if (onNewWindow != null)
+              AppIconButton(
+                icon: const Icon(LucideIcons.appWindow),
+                tooltip: Platform.isMacOS ? 'New window (⌘N)' : 'New window (Ctrl+N)',
+                onPressed: onNewWindow,
               ),
             if (onOptionsPressed != null)
               AppIconButton(

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/features/file_explorere/bloc/file_explorer_bloc.dart';
 import 'package:explorer/features/file_explorere/screens/file_explorer_screen.dart';
@@ -140,5 +141,43 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Refresh'), findsOneWidget);
     expect(find.text('Open in new window'), findsOneWidget);
+  });
+
+  testWidgets('new windows: header button, Ctrl+N, folders and files', (tester) async {
+    final launched = <List<String>>[];
+    final original = Desktop.launcher;
+    Desktop.launcher = (executable, args) async => launched.add(args);
+    addTearDown(() => Desktop.launcher = original);
+    await open(tester);
+
+    await tester.tap(find.byTooltip('New window (Ctrl+N)'));
+    await tester.pump();
+    expect(launched.last, ['--folder=${root.path}']);
+
+    await click(tester, 'alpha.txt');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(launched, hasLength(2));
+    expect(launched.last, ['--folder=${root.path}']);
+
+    Future<void> openInNewWindow(String name) async {
+      await tester.pump(const Duration(milliseconds: 400));
+      await click(tester, name, buttons: kSecondaryButton);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Open in new window'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    // A folder opens in it; a file is viewed in it.
+    await openInNewWindow('Docs');
+    expect(launched.last, ['--folder=${p.join(root.path, 'Docs')}']);
+    await openInNewWindow('beta.txt');
+    expect(launched.last, [p.join(root.path, 'beta.txt')]);
+    expect(Desktop.parseArgs(launched.last),
+        (folder: root.path, file: p.join(root.path, 'beta.txt')));
   });
 }

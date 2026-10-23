@@ -479,6 +479,9 @@ class _FileExplorerUI extends StatelessWidget {
           ? () =>
                 fileActionsService.showCreateFolderDialog(context, loaded.path)
           : null,
+      onNewWindow: Desktop.isDesktop && loaded != null
+          ? () => Desktop.openWindow(folder: loaded.path)
+          : null,
       onOptionsPressed: loaded == null
           ? null
           : () {

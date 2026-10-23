@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
@@ -45,15 +46,22 @@ abstract final class Desktop {
 
   static const _folderFlag = '--folder=';
 
-  /// Opens another Explorer window showing [folder]. Each window is its own
-  /// process, so it keeps working if another one closes.
-  static Future<void> openWindow({String? folder}) async {
-    await Process.start(
-      Platform.resolvedExecutable,
-      [if (folder != null) '$_folderFlag$folder'],
-      mode: ProcessStartMode.detached,
-    );
-  }
+  /// Opens another Explorer window showing [folder], or viewing [file]
+  /// (over its folder). Each window is its own process, so it keeps working
+  /// if another one closes.
+  static Future<void> openWindow({String? folder, String? file}) =>
+      launcher(Platform.resolvedExecutable, [
+        if (file != null)
+          file
+        else if (folder != null)
+          '$_folderFlag$folder',
+      ]);
+
+  /// Starts a window; tests replace it.
+  @visibleForTesting
+  static Future<void> Function(String executable, List<String> args) launcher =
+      (executable, args) =>
+          Process.start(executable, args, mode: ProcessStartMode.detached);
 
   /// What the command line asks to open: a folder (from [openWindow], or a
   /// folder passed by the system) or a file to view.

@@ -54,7 +54,7 @@ class FileActionsService {
             label: 'Open',
             icon: isFile ? LucideIcons.fileInput : LucideIcons.folderOpen,
             shortcut: 'Enter'),
-        if (!isFile && Desktop.isDesktop)
+        if (Desktop.isDesktop)
           ExplorerMenu.item(context,
               value: _EntityAction.newWindow,
               label: 'Open in new window',
@@ -114,7 +114,9 @@ class FileActionsService {
       case _EntityAction.open:
         onOpen();
       case _EntityAction.newWindow:
-        await Desktop.openWindow(folder: entity.path);
+        await (isFile
+            ? Desktop.openWindow(file: entity.path)
+            : Desktop.openWindow(folder: entity.path));
       case _EntityAction.openWith:
         await FileOpener.showOpenWith(context, entity as File);
       case _EntityAction.copy:
