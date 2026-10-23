@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:explorer/core/platform/window_effects.dart';
 import 'package:explorer/core/services/folder_prefs_service.dart';
 import 'package:explorer/core/theme/app_color_theme.dart';
 import 'package:explorer/core/theme/theme_cubit.dart';
@@ -148,6 +151,18 @@ class ExplorerOptionsSheet extends StatelessWidget {
           selected: {settings.themeMode},
           onSelectionChanged: (s) => cubit.setThemeMode(s.first),
         ),
+        if (WindowEffects.supported)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: settings.windowEffect,
+            onChanged: cubit.setWindowEffect,
+            title: const Text('Translucent window'),
+            subtitle: Text(Platform.isWindows
+                ? 'Acrylic: the desktop shows through, blurred'
+                : Platform.isMacOS
+                    ? 'Vibrancy: the desktop shows through, blurred'
+                    : 'The desktop shows through (blurred where your desktop supports it)'),
+          ),
         const _Heading('Color'),
         Wrap(
           spacing: 10,

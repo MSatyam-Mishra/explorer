@@ -1,3 +1,4 @@
+import 'package:explorer/core/platform/window_effects.dart';
 import 'package:explorer/core/theme/app_theme_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -14,16 +15,27 @@ abstract final class AppTheme {
   /// Corner radius of surfaces (cards, dialogs, sheets): shadcn `rounded-xl`.
   static const double surfaceRadius = 12;
 
-  static ShadThemeData shad(AppThemeSettings settings, Brightness brightness) =>
-      ShadThemeData(
-        brightness: brightness,
-        colorScheme: settings.colorTheme.schemeFor(brightness),
-        radius: BorderRadius.circular(controlRadius),
+  static ShadThemeData shad(AppThemeSettings settings, Brightness brightness) {
+    var scheme = settings.colorTheme.schemeFor(brightness);
+    // A translucent window: the main background lets it show through.
+    if (settings.windowEffect && WindowEffects.supported) {
+      scheme = scheme.copyWith(
+        background: scheme.background.withValues(alpha: WindowEffects.backgroundAlpha(brightness)),
       );
+    }
+    return ShadThemeData(
+      brightness: brightness,
+      colorScheme: scheme,
+      radius: BorderRadius.circular(controlRadius),
+    );
+  }
 
   /// Completes the Material theme [ShadApp] derived from [shad].
   static ThemeData material(ThemeData base, ShadThemeData shad) {
     final c = shad.colorScheme;
+    // Dialogs, sheets, the drawer and menus stay solid over a translucent
+    // window.
+    final solid = c.background.withValues(alpha: 1);
     final dark = shad.brightness == Brightness.dark;
     final control = BorderRadius.circular(controlRadius);
     final surface = BorderRadius.circular(surfaceRadius);
@@ -173,7 +185,7 @@ abstract final class AppTheme {
     return base.copyWith(
       colorScheme: scheme,
       scaffoldBackgroundColor: c.background,
-      canvasColor: c.background,
+      canvasColor: solid,
       cardColor: c.card,
       dividerColor: c.border,
       hoverColor: hover.withValues(alpha: 0.6),
@@ -207,7 +219,7 @@ abstract final class AppTheme {
         ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: c.background,
+        backgroundColor: solid,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
         shadowColor: Colors.black.withValues(alpha: dark ? 0.5 : 0.15),
@@ -220,8 +232,8 @@ abstract final class AppTheme {
         barrierColor: Colors.black.withValues(alpha: 0.6),
       ),
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: c.background,
-        modalBackgroundColor: c.background,
+        backgroundColor: solid,
+        modalBackgroundColor: solid,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         modalElevation: 0,
@@ -236,7 +248,7 @@ abstract final class AppTheme {
         ),
       ),
       drawerTheme: DrawerThemeData(
-        backgroundColor: c.background,
+        backgroundColor: solid,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         width: 300,

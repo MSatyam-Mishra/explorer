@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:explorer/core/app/app_bloc_observer.dart';
 import 'package:explorer/core/app_licenses.dart';
 import 'package:explorer/core/platform/background_mode.dart';
+import 'package:explorer/core/platform/window_effects.dart';
+import 'package:explorer/core/theme/theme_preferences.dart';
 import 'package:explorer/core/platform/desktop.dart';
 import 'package:explorer/core/platform/explorer_paths.dart';
 import 'package:explorer/shared/widgets/tasks_view.dart';
@@ -34,6 +36,8 @@ void main(List<String> args) async {
   Desktop.initMedia();
   // Closing the window while work goes on leaves a Tasks view (desktop).
   await BackgroundMode.instance.init();
+  // The translucent window (Acrylic, vibrancy), as last chosen.
+  await WindowEffects.init(enabled: (await ThemePreferences.load()).windowEffect);
 
   // Desktop: a new window (or the system) can pass a folder to show or a
   // file to open.
@@ -95,6 +99,13 @@ class App extends StatelessWidget {
       create: (_) => ThemeCubit(),
       child: BlocBuilder<ThemeCubit, AppThemeSettings>(
         builder: (context, settings) {
+          // The window effect follows the setting and light/dark.
+          final dark = settings.themeMode == ThemeMode.dark ||
+              (settings.themeMode == ThemeMode.system &&
+                  MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => WindowEffects.apply(enabled: settings.windowEffect, dark: dark),
+          );
           // shadcn/ui theme; ShadApp derives the Material theme from it,
           // which AppTheme.material completes.
           return ShadApp.custom(

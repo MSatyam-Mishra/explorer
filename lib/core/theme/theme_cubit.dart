@@ -32,6 +32,12 @@ class ThemeCubit extends Cubit<AppThemeSettings> {
     await ThemePreferences.save(next);
   }
 
+  Future<void> setWindowEffect(bool enabled) async {
+    final next = state.copyWith(windowEffect: enabled);
+    emit(next);
+    await ThemePreferences.save(next);
+  }
+
   Future<void> setColorTheme(String colorThemeId) async {
     final next = state.copyWith(colorThemeId: colorThemeId);
     emit(next);

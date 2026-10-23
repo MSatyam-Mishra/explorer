@@ -8,6 +8,7 @@ abstract final class ThemePreferences {
   static const _keyThemeMode = 'theme_mode';
   static const _keyColorThemeId = 'color_theme_id';
   static const _keyFileIconStyle = 'file_icon_style';
+  static const _keyWindowEffect = 'window_effect';
 
   static Future<AppThemeSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -15,6 +16,7 @@ abstract final class ThemePreferences {
       themeMode: _parseThemeMode(prefs.getString(_keyThemeMode)),
       colorThemeId: AppColorThemes.migrate(prefs.getString(_keyColorThemeId)),
       fileIconStyle: FileIconStyle.parse(prefs.getString(_keyFileIconStyle)),
+      windowEffect: prefs.getBool(_keyWindowEffect) ?? true,
     );
   }
 
@@ -23,6 +25,7 @@ abstract final class ThemePreferences {
     await prefs.setString(_keyThemeMode, settings.themeMode.name);
     await prefs.setString(_keyColorThemeId, settings.colorThemeId);
     await prefs.setString(_keyFileIconStyle, settings.fileIconStyle.name);
+    await prefs.setBool(_keyWindowEffect, settings.windowEffect);
   }
 
   static ThemeMode _parseThemeMode(String? value) => switch (value) {

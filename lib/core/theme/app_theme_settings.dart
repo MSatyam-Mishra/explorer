@@ -8,11 +8,15 @@ class AppThemeSettings {
     required this.themeMode,
     required this.colorThemeId,
     this.fileIconStyle = FileIconStyle.solid,
+    this.windowEffect = true,
   });
 
   final ThemeMode themeMode;
   final String colorThemeId;
   final FileIconStyle fileIconStyle;
+
+  /// Translucent window on computers (Acrylic, vibrancy); see WindowEffects.
+  final bool windowEffect;
 
   AppColorThemeSpec get colorTheme => AppColorThemes.byId(colorThemeId);
 
@@ -20,11 +24,13 @@ class AppThemeSettings {
     ThemeMode? themeMode,
     String? colorThemeId,
     FileIconStyle? fileIconStyle,
+    bool? windowEffect,
   }) {
     return AppThemeSettings(
       themeMode: themeMode ?? this.themeMode,
       colorThemeId: colorThemeId ?? this.colorThemeId,
       fileIconStyle: fileIconStyle ?? this.fileIconStyle,
+      windowEffect: windowEffect ?? this.windowEffect,
     );
   }
 

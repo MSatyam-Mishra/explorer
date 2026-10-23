@@ -956,7 +956,7 @@ class _FileExplorerUI extends StatelessWidget {
     if (action is ShareMethod) {
       return fileActionsService.shareVia(context, action, selected);
     }
-    if (await ImageActions.handle(context, action, images)) return;
+    if (await ImageActions.handle(context, action, images) || !context.mounted) return;
     switch (action) {
       case 'copy':
         context.read<ClipboardBloc>().add(CopyToClipboard(selected));

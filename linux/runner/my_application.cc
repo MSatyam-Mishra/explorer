@@ -14,6 +14,20 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// Asks KDE's compositor (on X11) to blur what's behind the window, for the
+// translucent window option; other desktops ignore it. An empty region
+// means the whole window.
+static void request_blur(GtkWidget* widget, gpointer) {
+#ifdef GDK_WINDOWING_X11
+  GdkWindow* gdk_window = gtk_widget_get_window(widget);
+  if (gdk_window != nullptr && GDK_IS_X11_WINDOW(gdk_window)) {
+    gdk_property_change(
+        gdk_window, gdk_atom_intern_static_string("_KDE_NET_WM_BLUR_BEHIND_REGION"),
+        gdk_atom_intern_static_string("CARDINAL"), 32, GDK_PROP_MODE_REPLACE, nullptr, 0);
+  }
+#endif
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -48,13 +62,14 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 1280, 720);
-  gtk_widget_show(GTK_WIDGET(window));
+  g_signal_connect(window, "realize", G_CALLBACK(request_blur), nullptr);
+  // flutter_acrylic shows the window once it can be see-through
+  // (Window.initialize() in main.dart), so it isn't shown here.
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
-  gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));

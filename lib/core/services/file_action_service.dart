@@ -114,7 +114,7 @@ class FileActionsService {
     );
     if (action == null || !context.mounted) return;
     if (action is ShareMethod) return shareVia(context, action, [entity]);
-    if (await ImageActions.handle(context, action, images)) return;
+    if (await ImageActions.handle(context, action, images) || !context.mounted) return;
     switch (action as _EntityAction) {
       case _EntityAction.open:
         onOpen();
