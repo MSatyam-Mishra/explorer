@@ -40,6 +40,7 @@ jobs:
     # App releases only, not the video engine's.
     if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,6 +110,7 @@ jobs:
     # rive_native's prebuilt library needs glibc 2.38 and libstdc++ 13,
     # so the app needs Ubuntu 24.04 or a distro as recent anyway.
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -244,6 +246,7 @@ jobs:
   flatpak:
     needs: linux-build
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -284,6 +287,7 @@ jobs:
   snap:
     needs: linux-build
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
